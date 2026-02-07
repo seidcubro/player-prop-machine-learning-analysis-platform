@@ -1,0 +1,50 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Docker
+*.log
+**/node_modules/
+**/dist/
+**/.vite/
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+**/.env
+**/.env.*
+!.env.example
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+.DS_Store
+Thumbs.db
