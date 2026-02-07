@@ -1,0 +1,18 @@
+{
+  "model_name": "ridge_v1",
+  "market_code": "rec_yds",
+  "market_name": "Receiving Yards",
+  "lookback": 5,
+  "feature_cols": [
+    "mean",
+    "stddev",
+    "weighted_mean",
+    "trend"
+  ],
+  "train_rows": 18,
+  "test_rows": 7,
+  "mae": 14.796804974119471,
+  "rmse": 19.80584192177362,
+  "r2": 0.7846353239520002,
+  "artifact_path": "/artifacts/ridge_v1_rec_yds_lb5.joblib"
+}

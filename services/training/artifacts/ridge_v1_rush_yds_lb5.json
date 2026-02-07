@@ -1,0 +1,18 @@
+{
+  "model_name": "ridge_v1",
+  "market_code": "rush_yds",
+  "market_name": "Rushing Yards",
+  "lookback": 5,
+  "feature_cols": [
+    "mean",
+    "stddev",
+    "weighted_mean",
+    "trend"
+  ],
+  "train_rows": 12,
+  "test_rows": 4,
+  "mae": 9.504231860742781,
+  "rmse": 16.090060386936685,
+  "r2": -0.19441773128151807,
+  "artifact_path": "/artifacts/ridge_v1_rush_yds_lb5.joblib"
+}

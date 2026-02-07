@@ -1,0 +1,65 @@
+name: player-prop-platform
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - 6379:6379
+
+  api:
+    build:
+      context: ./services/api
+    environment:
+      DATABASE_URL: postgresql://app:app@postgres:5432/app
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - 8000:8000
+    volumes:
+      - ./services/training/artifacts:/artifacts:ro
+    depends_on:
+      - postgres
+      - redis
+
+  inference:
+    build:
+      context: ./services/inference
+    environment:
+      DATABASE_URL: postgresql://app:app@postgres:5432/app
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - 8001:8001
+    depends_on:
+      - postgres
+      - redis
+
+  training:
+    build:
+      context: ./services/training
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      MARKET_CODE: rec_yds
+      LOOKBACK: 5
+      MODEL_NAME: ridge_v1
+      ARTIFACT_DIR: /artifacts
+    volumes:
+      - ./services/training/artifacts:/artifacts
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
