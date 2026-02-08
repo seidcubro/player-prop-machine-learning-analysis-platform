@@ -66,7 +66,7 @@ def build_features(
     # (safe dynamic column name due to allowlist)
     sql = f"""
         SELECT player_id, game_date, opponent, pgs.{stat_field}::float8 AS y
-        FROM player_game_stats_app pgs
+        FROM player_game_stats pgs
         ORDER BY player_id, game_date
     """
     rows = db.execute(text(sql)).mappings().all()
@@ -141,7 +141,7 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
     sql = f"""
         UPDATE player_market_features pmf
         SET label_actual = pgs.{stat_field}
-        FROM player_game_stats_app pgs
+        FROM player_game_stats pgs
         WHERE pmf.player_id = pgs.player_id
           AND pmf.as_of_game_date = pgs.game_date
           AND pmf.opponent = pgs.opponent
@@ -152,4 +152,3 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"ok": True, "market_code": market_code, "market_id": m["id"], "updated": res.rowcount}
-

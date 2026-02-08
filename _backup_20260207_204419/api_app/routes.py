@@ -15,8 +15,9 @@ def list_players(
 ):
     rows = db.execute(
         text("""
-            SELECT id, (first_name || ' ' || last_name) AS name, position, team FROM players
-            ORDER BY last_name, first_name
+            SELECT id, name, position, team
+            FROM players
+            ORDER BY name
             LIMIT :limit OFFSET :offset
         """),
         {"limit": limit, "offset": offset},
@@ -29,7 +30,8 @@ def list_players(
 def get_player(player_id: int, db: Session = Depends(get_db)):
     row = db.execute(
         text("""
-            SELECT id, (first_name || ' ' || last_name) AS name, position, team FROM players
+            SELECT id, name, position, team
+            FROM players
             WHERE id = :player_id
         """),
         {"player_id": player_id},
@@ -71,7 +73,7 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
     sql = f"""
         UPDATE player_market_features pmf
         SET label_actual = pgs.{stat_field}
-        FROM player_game_stats_app pgs
+        FROM player_game_stats pgs
         WHERE pmf.player_id = pgs.player_id
           AND pmf.as_of_game_date = pgs.game_date
           AND pmf.opponent = pgs.opponent
@@ -82,6 +84,3 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"ok": True, "market_code": market_code, "market_id": m["id"], "updated": res.rowcount}
-
-
-

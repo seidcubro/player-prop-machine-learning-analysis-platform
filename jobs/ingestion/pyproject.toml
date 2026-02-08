@@ -1,0 +1,8 @@
+
+[project.dependencies]
+nflreadpy = "*"
+pandas = "*"
+pyarrow = "*"
+requests = "*"
+SQLAlchemy = "*"
+psycopg2-binary = "*"
