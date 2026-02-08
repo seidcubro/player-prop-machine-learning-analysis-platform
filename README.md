@@ -59,7 +59,7 @@ historical tracking, backtesting, and future model comparisons.
 
 ## System Architecture
 
-![System Architecture](docs/architecture/Prop-Analysis-System-Architecture-Diagram.png)
+![System Architecture](docs/diagrams/Prop-Analysis-System-Architecture-Diagram.png)
 
 High-level flow:
 
@@ -215,6 +215,7 @@ It is not intended for real-money betting or wagering decisions.
 
 Built as a full-stack systems and machine learning project to explore
 sports analytics, data engineering, and production-grade ML workflows.
+
 
 
 
