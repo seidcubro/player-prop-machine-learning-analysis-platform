@@ -1,0 +1,9 @@
+
+[project]
+name = "ppml-job-etl"
+version = "0.1.0"
+description = "Batch ETL job for the Player Prop ML Analysis Platform"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]

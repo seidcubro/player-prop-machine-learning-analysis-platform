@@ -1,0 +1,10 @@
+
+[project]
+name = "ppml-api"
+version = "0.1.0"
+description = "FastAPI service for the Player Prop ML Analysis Platform"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]
+# Uses repo-level configuration in /pyproject.toml

@@ -1,0 +1,9 @@
+
+[project]
+name = "ppml-inference"
+version = "0.1.0"
+description = "Inference microservice for the Player Prop ML Analysis Platform"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]

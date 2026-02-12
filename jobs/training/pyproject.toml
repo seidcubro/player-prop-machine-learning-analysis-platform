@@ -1,0 +1,9 @@
+
+[project]
+name = "ppml-job-training"
+version = "0.1.0"
+description = "Batch training job for the Player Prop ML Analysis Platform"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]

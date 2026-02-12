@@ -1,4 +1,15 @@
-﻿from typing import Iterable
+"""NFL data ingestion from nflverse-style sources.
+
+This module pulls raw data from upstream sources (e.g., nflverse datasets),
+normalizes it into the platform's schema, and loads it into the database.
+
+Key steps:
+- fetch upstream datasets
+- transform into canonical tables (players, games, stats, markets, etc.)
+- upsert/load into Postgres
+"""
+
+from typing import Iterable
 import os
 
 import pandas as pd
@@ -8,6 +19,17 @@ import nflreadpy
 
 
 def _db_url() -> str:
+    """Return the database URL used by the ingestion job.
+
+    The job expects a SQLAlchemy-compatible connection string in the environment
+    variable `DATABASE_URL` (e.g., `postgresql+psycopg2://user:pass@host:5432/db`).
+
+    Returns:
+        str: The value of `DATABASE_URL`.
+
+    Raises:
+        RuntimeError: If `DATABASE_URL` is not set.
+    """
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL not set")
@@ -15,24 +37,75 @@ def _db_url() -> str:
 
 
 def _engine():
+    """Create a SQLAlchemy engine for the ingestion job.
+
+    The engine uses `pool_pre_ping=True` to reduce failures from stale pooled
+    connections in long-running containers.
+
+    Returns:
+        sqlalchemy.engine.Engine: Engine configured with `DATABASE_URL`.
+    """
     return create_engine(_db_url(), pool_pre_ping=True)
 
 
 def _as_pandas(df):
+    """Convert an upstream dataframe-like object into a pandas DataFrame.
+
+    Some nflverse loaders may return Polars/Arrow frames that provide `to_pandas`.
+    This helper normalizes the result so the rest of the pipeline can be written
+    against pandas.
+
+    Args:
+        df: Dataframe-like object (pandas, polars, etc.).
+
+    Returns:
+        pandas.DataFrame: Pandas view of the input.
+    """
     if hasattr(df, "to_pandas"):
         return df.to_pandas()
     return df
 
 
 def _col(df: pd.DataFrame, name: str):
+    """Safely access a column from a DataFrame.
+
+    Args:
+        df: Input DataFrame.
+        name: Column name.
+
+    Returns:
+        pandas.Series: Column if present, otherwise a Series of `None` values with matching length.
+    """
     return df[name] if name in df.columns else pd.Series([None] * len(df))
 
 
 def _season_range(start: int, end: int) -> list[int]:
+    """Return an inclusive list of seasons.
+
+    Args:
+        start: First season year (inclusive).
+        end: Last season year (inclusive).
+
+    Returns:
+        list[int]: `[start, start+1, ..., end]`.
+
+    """
     return list(range(start, end + 1))
 
 
 def ensure_tables():
+    """Create minimal raw ingestion tables if they do not exist.
+
+    These tables are a staging layer populated directly from nflverse datasets:
+        - nfl_players: player identifiers + metadata
+        - nfl_games: schedule/game metadata
+        - player_game_stats: per-player weekly stat lines
+
+    Notes:
+        This job intentionally uses a TRUNCATE+reload pattern for simplicity in
+        local development. In a production ingest you would upsert incrementally
+        to preserve history and reduce load.
+    """
     ddl = """
     CREATE TABLE IF NOT EXISTS nfl_players (
       player_id TEXT PRIMARY KEY,
@@ -78,6 +151,16 @@ def ensure_tables():
 
 
 def ingest_players():
+    """Load the nflverse player directory into the `nfl_players` staging table.
+
+    Steps:
+        - fetch players via `nflreadpy.load_players()`
+        - normalize identifier/name columns across dataset versions
+        - truncate and reload `nfl_players`
+
+    Raises:
+        Exception: Any DB or upstream loader exception will propagate and fail the job.
+    """
     df = _as_pandas(nflreadpy.load_players())
     out = pd.DataFrame({
         "player_id": df["player_id"] if "player_id" in df.columns else df["gsis_id"],
@@ -92,6 +175,14 @@ def ingest_players():
 
 
 def ingest_schedules(seasons: Iterable[int]):
+    """Load schedules for the provided seasons into the `nfl_games` staging table.
+
+    Args:
+        seasons: Iterable of season years to fetch (e.g., [2022, 2023, 2024]).
+
+    Notes:
+        The schedule table is truncated and reloaded each run.
+    """
     df = _as_pandas(nflreadpy.load_schedules(list(seasons)))
 
     out = pd.DataFrame({
@@ -110,6 +201,17 @@ def ingest_schedules(seasons: Iterable[int]):
 
 
 def ingest_player_game_stats(seasons: Iterable[int]):
+    """Load weekly per-player stat lines into the `player_game_stats` staging table.
+
+    This uses `nflreadpy.load_player_stats(..., summary_level="week")` and then
+    joins against `nfl_games` to derive `game_id`, `game_date`, and opponent.
+
+    Args:
+        seasons: Iterable of season years.
+
+    Raises:
+        RuntimeError: If the upstream stats loader returns 0 rows.
+    """
     stats = _as_pandas(nflreadpy.load_player_stats(list(seasons), summary_level="week"))
     if len(stats) == 0:
         raise RuntimeError("load_player_stats returned 0 rows")
@@ -155,6 +257,18 @@ def ingest_player_game_stats(seasons: Iterable[int]):
 
 
 def run():
+    """Run the full nflverse ingestion pipeline.
+
+    The season range is controlled by environment variables:
+        SEASON_START (default 2022)
+        SEASON_END   (default 2025)
+
+    Execution order:
+        1) ensure_tables()
+        2) ingest_players()
+        3) ingest_schedules(seasons)
+        4) ingest_player_game_stats(seasons)
+    """
     season_start = int(os.getenv("SEASON_START", "2022"))
     season_end = int(os.getenv("SEASON_END", "2025"))
     seasons = _season_range(season_start, season_end)

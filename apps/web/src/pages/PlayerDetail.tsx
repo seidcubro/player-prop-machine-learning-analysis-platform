@@ -1,4 +1,18 @@
-﻿import { useEffect, useMemo, useState } from "react";
+/**
+ * Player detail page.
+ *
+ * Displays:
+ * - player identity metadata (team/position)
+ * - latest baseline projection (if present in `projections`)
+ * - latest ML projection (generated on demand via `/projection_ml`)
+ * - recent ML projection history (rows stored in `ml_projections`)
+ *
+ * This page is intentionally tolerant of missing data:
+ * - If baseline projections are not generated yet, it shows a friendly message.
+ * - If ML artifacts/features are not available yet, it explains the required pipeline steps.
+ */
+
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   fetchPlayer,
@@ -11,6 +25,13 @@ import {
   type MLProjectionRow,
 } from "../api";
 
+/**
+ * Default market selection heuristic used by the UI.
+ *
+ * The backend supports multiple markets, but the UI starts with a sensible default
+ * based on position so the page is immediately useful without requiring extra UI
+ * controls.
+ */
 const DEFAULT_MARKET_BY_POS: Record<string, string> = {
   WR: "rec_yds",
   TE: "rec_yds",
@@ -18,6 +39,18 @@ const DEFAULT_MARKET_BY_POS: Record<string, string> = {
   QB: "pass_yds",
 };
 
+/**
+ * Render the player detail experience.
+ *
+ * Data flow:
+ * - Load player metadata (`/players/{id}`)
+ * - Attempt baseline projection (`/projection_baseline`)
+ * - Attempt ML projection + history (`/projection_ml`, `/ml_projections`)
+ *
+ * Failure modes:
+ * - If the player id is invalid, an inline error is shown.
+ * - If optional endpoints fail, the page renders without that section.
+ */
 export default function PlayerDetail() {
   const { id } = useParams();
   const playerId = Number(id);
@@ -48,27 +81,29 @@ export default function PlayerDetail() {
         if (cancelled) return;
         setPlayer(p);
 
-        // Baseline projection (model baseline_v1)
+        const market = DEFAULT_MARKET_BY_POS[(p.position ?? "").toUpperCase()] ?? "rec_yds";
+
+        // Baseline projection (stored row; may not exist yet)
         try {
           const b = await fetchProjectionBaseline({
             playerId,
-            market_code: DEFAULT_MARKET_BY_POS[(p.position ?? "").toUpperCase()] ?? "rec_yds",
+            market_code: market,
             model_name: "baseline_v1",
           });
           if (!cancelled) setBaseline(b);
-        } catch (e: any) {
+        } catch {
           if (!cancelled) setBaseline(null);
         }
 
-        // ML projection (ridge_v1)
+        // ML projection (runs inference, stores row; may fail if artifacts/features missing)
         try {
           const m = await fetchProjectionML({
             playerId,
-            market_code: DEFAULT_MARKET_BY_POS[(p.position ?? "").toUpperCase()] ?? "rec_yds",
+            market_code: market,
             lookback: 5,
           });
           if (!cancelled) setMl(m);
-        } catch (e: any) {
+        } catch {
           if (!cancelled) setMl(null);
         }
 
@@ -76,7 +111,7 @@ export default function PlayerDetail() {
         try {
           const rows = await fetchMLProjectionHistory({
             playerId,
-            market_code: DEFAULT_MARKET_BY_POS[(p.position ?? "").toUpperCase()] ?? "rec_yds",
+            market_code: market,
             model_name: "ridge_v1",
             lookback: 5,
             limit: 20,
@@ -168,7 +203,10 @@ export default function PlayerDetail() {
               <h3 style={{ marginTop: 0 }}>ML Projection (Ridge)</h3>
               {!ml && (
                 <div style={{ opacity: 0.8 }}>
-                  No ML projection found yet. (Did you run build_features + attach_labels + training for this market?)
+                  No ML projection found yet. To enable this market, run:
+                  <div style={{ marginTop: 8 }}>
+                    <code>POST /jobs/build_features</code> → <code>POST /jobs/attach_labels</code> → training
+                  </div>
                 </div>
               )}
               {ml && (
@@ -223,4 +261,3 @@ export default function PlayerDetail() {
     </div>
   );
 }
-

@@ -1,3 +1,7 @@
+/**
+ * Vite build configuration for the web app.
+ */
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 

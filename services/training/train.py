@@ -1,3 +1,12 @@
+"""Training script for market-specific projection models.
+
+This module trains models for a specific prop market (e.g., receiving yards),
+writes trained artifacts (model + metadata) to the artifacts directory, and can
+optionally evaluate performance.
+
+Artifacts are later consumed by the API and/or inference service.
+"""
+
 import os
 import json
 import joblib
@@ -25,6 +34,17 @@ FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend"]
 LABEL_COL = "label_actual"
 
 def connect():
+    """Open a psycopg2 connection to the platform Postgres database.
+
+    Connection parameters are read from environment variables:
+        POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+
+    Returns:
+        psycopg2.extensions.connection: Open database connection.
+
+    Raises:
+        psycopg2.OperationalError: If the database is unreachable or credentials are invalid.
+    """
     return psycopg2.connect(
         host=DB_HOST,
         port=DB_PORT,
@@ -34,6 +54,29 @@ def connect():
     )
 
 def main():
+    """Train and register a market-specific regression model.
+
+    This script trains a scikit-learn pipeline (StandardScaler + Ridge) on rows
+    from `player_market_features` that have `label_actual` populated. It writes:
+        - a `.joblib` artifact containing the fitted pipeline
+        - a `.json` metadata file with feature columns and evaluation metrics
+
+    Optionally, it updates model registry tables if they exist:
+        - `trained_models` (metrics + artifact path)
+        - `active_models` (current artifact used by the API per market)
+
+    Environment variables:
+        MARKET_CODE: Which market to train (prop_markets.code)
+        LOOKBACK: Lookback window (must match feature rows)
+        MODEL_NAME: Artifact/model identifier (e.g., "ridge_v1")
+        ARTIFACT_DIR: Output directory for model files
+
+    Returns:
+        None
+
+    Raises:
+        SystemExit: If the market does not exist or there is not enough labeled data to train.
+    """
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
 
     with connect() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:

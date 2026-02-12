@@ -1,0 +1,9 @@
+
+[project]
+name = "ppml-common"
+version = "0.1.0"
+description = "Shared Python utilities for the Player Prop ML Analysis Platform"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]

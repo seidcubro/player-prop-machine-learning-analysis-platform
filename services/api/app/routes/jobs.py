@@ -1,4 +1,14 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, Query
+"""Job-related API routes.
+
+These endpoints expose lightweight job triggering and status inspection to
+support local development and operational workflows.
+
+Note:
+- In a production deployment, long-running jobs should be executed via a queue
+  (e.g., SQS/RQ/Celery) rather than directly in the API process.
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 import math
@@ -18,20 +28,72 @@ _ALLOWED_STAT_FIELDS = {
 }
 
 def _mean(vals):
+    """Compute the arithmetic mean of a non-empty sequence.
+
+    Args:
+        vals (list[float] | tuple[float,...]): Numeric values.
+
+    Returns:
+        float: Arithmetic mean.
+
+    Raises:
+        ZeroDivisionError: If `vals` is empty.
+    """
     return sum(vals) / len(vals)
 
 def _stddev_pop(vals):
+    """Population standard deviation for a non-empty sequence.
+
+    Uses population (N) denominator, not sample (N-1).
+
+    Args:
+        vals (list[float] | tuple[float,...]): Numeric values.
+
+    Returns:
+        float: Population standard deviation.
+
+    Raises:
+        ZeroDivisionError: If `vals` is empty.
+    """
     m = _mean(vals)
     return math.sqrt(sum((x - m) ** 2 for x in vals) / len(vals))
 
 def _weighted_mean_recent(vals):
     # weights 1..N (more weight to most recent)
+    """Compute a linearly-weighted mean that emphasizes recent games.
+
+    Weights are 1..N over the lookback window, where the most recent value gets
+    weight N.
+
+    Args:
+        vals (list[float] | tuple[float,...]): Ordered values from oldest -> newest.
+
+    Returns:
+        float: Weighted mean.
+
+    Raises:
+        ZeroDivisionError: If `vals` is empty.
+    """
     n = len(vals)
     weights = list(range(1, n + 1))
     return sum(v * w for v, w in zip(vals, weights)) / sum(weights)
 
 def _trend_slope(vals):
     # simple linear regression slope for x = 1..N
+    """Estimate a simple trend over a window using a 1-D linear regression slope.
+
+    Treats the window index as x = 1..N and values as y. A positive slope means
+    the feature has been increasing over the lookback window.
+
+    Args:
+        vals (list[float] | tuple[float,...]): Ordered values from oldest -> newest.
+
+    Returns:
+        float: Estimated slope (units of y per game).
+
+    Notes:
+        Returns 0.0 if the denominator becomes 0 (should only occur when N=1).
+    """
     n = len(vals)
     xs = list(range(1, n + 1))
     xbar = sum(xs) / n
@@ -47,6 +109,34 @@ def build_features(
     lookback: int = Query(5, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
+    """Compute and upsert engineered features for a given market and lookback window.
+
+    This endpoint materializes the rolling-window features used by both baseline
+    and ML projection endpoints.
+
+    Implementation details:
+        - Resolves `market_code` -> (market_id, stat_field) from `prop_markets`.
+        - Pulls per-game player stats from `player_game_stats_app`.
+        - For each (player, as_of_game_date) where at least `lookback` prior games exist,
+          computes features over the previous N games:
+            * mean
+            * population stddev
+            * linearly weighted mean favoring recent games
+            * linear trend slope
+        - Upserts into `player_market_features` using a deterministic natural key
+          (player_id, market_id, as_of_game_date, opponent, lookback).
+
+    Args:
+        market_code: Market code (e.g., "rec_yds", "rush_yds") as stored in `prop_markets.code`.
+        lookback: Number of *prior* games to use for the rolling window.
+        db: SQLAlchemy session (injected).
+
+    Returns:
+        dict: Summary payload including market identifiers and number of upserted rows.
+
+    Raises:
+        HTTPException: 404 if market is unknown; 400 if the market maps to an unsupported stat field.
+    """
     m = db.execute(
         text("SELECT id, code, stat_field FROM prop_markets WHERE code = :code"),
         {"code": market_code},
@@ -123,6 +213,24 @@ def build_features(
 
 @router.post("/jobs/attach_labels")
 def attach_labels(market_code: str, db: Session = Depends(get_db)):
+    """Attach the realized stat outcome (`label_actual`) to previously built feature rows.
+
+    After `build_features` has populated `player_market_features`, this step joins
+    those rows back to the per-game stats table (`player_game_stats_app`) and writes
+    the actual outcome for the market’s underlying stat field.
+
+    This produces the supervised-learning dataset used by the training job.
+
+    Args:
+        market_code: Market code (e.g., "rec_yds") as stored in `prop_markets.code`.
+        db: SQLAlchemy session (injected).
+
+    Returns:
+        dict: Summary including updated row count.
+
+    Raises:
+        HTTPException: 404 if market is unknown; 400 if the market’s stat field is not supported.
+    """
     m = db.execute(
         text("SELECT id, code, stat_field FROM prop_markets WHERE code = :code"),
         {"code": market_code},

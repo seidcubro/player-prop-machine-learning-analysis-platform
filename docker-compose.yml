@@ -1,3 +1,10 @@
+# Local development stack for the Player Prop ML Analysis Platform
+# - postgres: primary datastore
+# - redis: optional cache/coordination layer (future use)
+# - api: FastAPI backend consumed by the web app
+# - inference: placeholder inference microservice (future scaling)
+# - training: training container that writes artifacts to the shared artifacts volume
+
 name: player-prop-platform
 
 services:

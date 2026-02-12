@@ -1,7 +1,23 @@
-﻿/* apps/web/src/api.ts
-   Single source of truth for frontend -> API calls.
-*/
+/**
+ * Frontend API client for the Player Prop ML platform.
+ *
+ * This file is the single source of truth for browser -> API calls.
+ * Keeping requests here (instead of scattered across components) makes it easy to:
+ * - change base URLs (local vs. deployed),
+ * - centralize error handling,
+ * - keep response typing consistent as the backend evolves.
+ */
 
+/**
+ * Base URL for the FastAPI service.
+ *
+ * The web app reads `VITE_API_BASE` at build/runtime (Vite env) and falls back to
+ * the local dev API.
+ *
+ * Examples:
+ * - Local:  http://localhost:8000/api/v1
+ * - Deployed: https://your-domain.example/api/v1
+ */
 export const API_BASE =
   (import.meta as any).env?.VITE_API_BASE ?? "http://localhost:8000/api/v1";
 
@@ -37,8 +53,8 @@ export type Projection = {
   player_id: number;
   market_code: string;
   market_name?: string;
-  model_name?: string;     // baseline
-  model?: string;          // some endpoints return "model"
+  model_name?: string; // baseline
+  model?: string; // some endpoints return "model"
   game_date: string;
   opponent: string;
   lookback?: number;
@@ -82,6 +98,12 @@ export type MLProjectionRow = {
    Helpers
    ========================= */
 
+/**
+ * Perform a JSON HTTP request and throw an Error on non-2xx responses.
+ *
+ * The backend returns JSON on success. On error, we try to include the response
+ * body text (useful when FastAPI returns detail messages).
+ */
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
   if (!r.ok) {
@@ -91,6 +113,9 @@ async function http<T>(url: string, init?: RequestInit): Promise<T> {
   return r.json();
 }
 
+/**
+ * Build a query string from an object, skipping null/undefined values.
+ */
 function qs(params: Record<string, any>) {
   const sp = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
@@ -104,34 +129,56 @@ function qs(params: Record<string, any>) {
    API
    ========================= */
 
-export async function fetchPlayers(limit = 50, offset = 0) {
+/**
+ * Fetch a paginated list of players.
+ *
+ * Backend: GET /players?limit=...&offset=...
+ */
+export async function fetchPlayers(limit = 50, offset = 0): Promise<Player[]> {
   const url = `${API_BASE}/players?${qs({ limit, offset })}`;
   const data = await http<{ ok: boolean; players: Player[] }>(url);
   return data.players;
 }
 
-export async function fetchPlayer(playerId: number) {
+/**
+ * Fetch a single player by internal id.
+ *
+ * Backend: GET /players/{player_id}
+ */
+export async function fetchPlayer(playerId: number): Promise<Player> {
   const url = `${API_BASE}/players/${playerId}`;
   const data = await http<{ ok: boolean; player: Player }>(url);
   return data.player;
 }
 
-/* If you already have a real endpoint for games, keep it.
-   If not, don’t call it from the UI or it’ll throw.
-   (Leaving as-is, but this will 500/404 if you don’t have it.) */
-export async function fetchPlayerGames(playerId: number, limit = 5) {
+/**
+ * Fetch recent games for a player.
+ *
+ * Backend: GET /players/{player_id}/games?limit=...
+ *
+ * Notes:
+ * - This endpoint must exist server-side; otherwise this call will throw.
+ * - If you haven't implemented it yet, remove calls to this from the UI.
+ */
+export async function fetchPlayerGames(
+  playerId: number,
+  limit = 5,
+): Promise<PlayerGame[]> {
   const url = `${API_BASE}/players/${playerId}/games?${qs({ limit })}`;
   const data = await http<{ ok: boolean; games: PlayerGame[] }>(url);
   return data.games;
 }
 
-/* Baseline projection (existing endpoint you tested):
-   GET /players/{player_id}/projection_baseline?market_code=pass_yds&model_name=baseline_v1 */
+/**
+ * Fetch the latest stored baseline projection for a player and market.
+ *
+ * Backend: GET /players/{player_id}/projection_baseline?market_code=...&model_name=...
+ */
 export async function fetchProjectionBaseline(args: {
   playerId: number;
   market_code: string;
   model_name?: string;
-}) {
+}): Promise<Projection> {
   const model_name = args.model_name ?? "baseline_v1";
   const url = `${API_BASE}/players/${args.playerId}/projection_baseline?${qs({
     market_code: args.market_code,
@@ -140,13 +187,16 @@ export async function fetchProjectionBaseline(args: {
   return http<Projection>(url);
 }
 
-/* ML projection:
-   GET /players/{player_id}/projection_ml?market_code=pass_yds&lookback=5 */
+/**
+ * Generate and persist an ML projection using the active model for the market.
+ *
+ * Backend: GET /players/{player_id}/projection_ml?market_code=...&lookback=...
+ */
 export async function fetchProjectionML(args: {
   playerId: number;
   market_code: string;
   lookback?: number;
-}) {
+}): Promise<MLProjection> {
   const lookback = args.lookback ?? 5;
   const url = `${API_BASE}/players/${args.playerId}/projection_ml?${qs({
     market_code: args.market_code,
@@ -155,15 +205,18 @@ export async function fetchProjectionML(args: {
   return http<MLProjection>(url);
 }
 
-/* ML projection history:
-   GET /players/{player_id}/ml_projections?market_code=pass_yds&model_name=ridge_v1&lookback=5&limit=20 */
+/**
+ * Fetch previously generated ML projections for a player (history).
+ *
+ * Backend: GET /players/{player_id}/ml_projections?market_code=...&model_name=...&lookback=...&limit=...
+ */
 export async function fetchMLProjectionHistory(args: {
   playerId: number;
   market_code: string;
   model_name?: string;
   lookback?: number;
   limit?: number;
-}) {
+}): Promise<MLProjectionRow[]> {
   const url = `${API_BASE}/players/${args.playerId}/ml_projections?${qs({
     market_code: args.market_code,
     model_name: args.model_name ?? "ridge_v1",
