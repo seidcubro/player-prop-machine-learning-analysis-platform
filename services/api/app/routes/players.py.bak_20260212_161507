@@ -1,4 +1,4 @@
-﻿"""Player and projection API routes.
+"""Player and projection API routes.
 
 Responsibilities:
 - player directory endpoints (`/players`, `/players/{id}`)
@@ -27,61 +27,24 @@ FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend"]
 @router.get("/players")
 def list_players(
     db: Session = Depends(get_db),
-    search: str | None = Query(
-        default=None,
-        description="Case-insensitive search across name, team, position, and external_id.",
-    ),
-    include_total: bool = Query(
-        default=False,
-        description="If true, also return `total` rows matching the filter (ignores pagination).",
-    ),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """List players in alphabetical order with optional search and pagination.
+    """List players in alphabetical order.
 
-    Filtering behavior:
-      - If `search` is provided, the query performs a case-insensitive match (ILIKE)
-        against:
-          - full name (first_name + last_name)
-          - first_name
-          - last_name
-          - team
-          - position
-          - external_id
-
-    Pagination behavior:
-      - `limit` caps returned rows.
-      - `offset` skips rows for paging.
+    This powers the frontend player directory/search experiences.
 
     Args:
         db: SQLAlchemy session (injected).
-        search: Optional case-insensitive filter across identifying fields.
-        include_total: If true, include the total number of matching rows in the response.
         limit: Maximum number of players to return.
         offset: Row offset for pagination.
 
     Returns:
-        dict: `{ "ok": true, "players": [...], "total": <int> }`
-        - `total` is only included when `include_total=true`.
+        dict: `{ "ok": true, "players": [...] }` where each player includes
+        basic identifying fields (id, external_id, name, position, team).
     """
-    where_sql = ""
-    params = {"limit": limit, "offset": offset}
-
-    if search and search.strip():
-        where_sql = """
-            WHERE
-              (first_name || ' ' || last_name) ILIKE :q
-              OR first_name ILIKE :q
-              OR last_name ILIKE :q
-              OR COALESCE(team,'') ILIKE :q
-              OR COALESCE(position,'') ILIKE :q
-              OR COALESCE(external_id,'') ILIKE :q
-        """
-        params["q"] = f"%{search.strip()}%"
-
     rows = db.execute(
-        text(f"""
+        text("""
             SELECT
               id,
               external_id,
@@ -91,23 +54,15 @@ def list_players(
               position,
               team
             FROM players
-            {where_sql}
             ORDER BY last_name, first_name
             LIMIT :limit OFFSET :offset
         """),
-        params,
+        {"limit": limit, "offset": offset},
     ).mappings().all()
 
-    resp = {"ok": True, "players": list(rows)}
+    return {"ok": True, "players": list(rows)}
 
-    if include_total:
-        total_row = db.execute(
-            text(f"SELECT COUNT(*) AS total FROM players {where_sql}"),
-            ({"q": params["q"]} if params.get("q") else {}),
-        ).mappings().first()
-        resp["total"] = int(total_row["total"]) if total_row else 0
 
-    return resp
 @router.get("/players/{player_id}")
 def get_player(player_id: int, db: Session = Depends(get_db)):
     """Fetch a single player record.
@@ -404,5 +359,3 @@ def projection_baseline(
         "p_over": float(row["p_over"]),
         "created_at": str(row["created_at"]),
     }
-
-

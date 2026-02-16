@@ -1,4 +1,4 @@
-"""Compatibility router module.
+﻿"""Compatibility router module.
 
 Historically, some code imported `router` from `services.api.app.routes`.
 This file keeps that import stable by re-exporting the main `APIRouter`.
@@ -18,33 +18,79 @@ def list_players(
     db: Session = Depends(get_db),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    search: str | None = Query(
+        None,
+        description="Case-insensitive search across name, team, position, external_id.",
+    ),
+    include_total: bool = Query(
+        False,
+        description="If true, include `total` matching rows for pagination.",
+    ),
 ):
-    """List players (legacy route module).
+    """List players with server-side pagination and optional search.
 
-    This module predates the split route modules under `services/api/app/routes/`.
-    It remains to support older imports and local scripts.
+    This endpoint is used by the React frontend and any internal tooling that
+    needs league-scale player lookup.
 
     Args:
         db: SQLAlchemy session (injected).
-        limit: Maximum number of rows.
-        offset: Pagination offset.
+        limit: Maximum number of rows returned (page size).
+        offset: Pagination offset (0+).
+        search: Optional free-text search applied across:
+            - full name (first + last)
+            - first_name / last_name
+            - team / position
+            - external_id
+        include_total: If true, also return `total` rows matching the filter to
+            support UI pagination.
 
     Returns:
-        dict: `{ "ok": true, "players": [...] }`.
+        dict: `{ "ok": true, "players": [...], "total": <int optional> }`
     """
+    params = {"limit": limit, "offset": offset}
+    where_sql = ""
+
+    q = (search or "").strip()
+    if q:
+        params["q"] = f"%{q}%"
+        where_sql = """
+        WHERE
+          (p.first_name || ' ' || p.last_name) ILIKE :q
+          OR p.first_name ILIKE :q
+          OR p.last_name ILIKE :q
+          OR COALESCE(p.team, '') ILIKE :q
+          OR COALESCE(p.position, '') ILIKE :q
+          OR COALESCE(p.external_id, '') ILIKE :q
+        """
+
     rows = db.execute(
-        text("""
-            SELECT id, (first_name || ' ' || last_name) AS name, position, team FROM players
-            ORDER BY last_name, first_name
+        text(f"""
+            SELECT
+              p.id,
+              p.external_id,
+              p.first_name,
+              p.last_name,
+              (p.first_name || ' ' || p.last_name) AS name,
+              p.position,
+              p.team
+            FROM players p
+            {where_sql}
+            ORDER BY p.last_name NULLS LAST, p.first_name NULLS LAST, p.id
             LIMIT :limit OFFSET :offset
         """),
-        {"limit": limit, "offset": offset},
+        params,
     ).mappings().all()
 
-    return {"ok": True, "players": list(rows)}
+    payload = {"ok": True, "players": list(rows)}
 
+    if include_total:
+        total = db.execute(
+            text(f"SELECT COUNT(*) AS total FROM players p {where_sql}"),
+            params,
+        ).scalar_one()
+        payload["total"] = int(total)
 
-@router.get("/players/{player_id}")
+    return payload@router.get("/players/{player_id}")
 def get_player(player_id: int, db: Session = Depends(get_db)):
     """Fetch a single player record (legacy route module).
 
@@ -124,6 +170,7 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"ok": True, "market_code": market_code, "market_id": m["id"], "updated": res.rowcount}
+
 
 
 

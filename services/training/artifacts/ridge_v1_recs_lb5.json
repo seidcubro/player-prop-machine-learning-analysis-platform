@@ -1,0 +1,18 @@
+{
+  "model_name": "ridge_v1",
+  "market_code": "recs",
+  "market_name": "Receptions",
+  "lookback": 5,
+  "feature_cols": [
+    "mean",
+    "stddev",
+    "weighted_mean",
+    "trend"
+  ],
+  "train_rows": 46042,
+  "test_rows": 15348,
+  "mae": 0.42263647215246564,
+  "rmse": 0.9940589303775029,
+  "r2": 0.630734464468453,
+  "artifact_path": "/artifacts/ridge_v1_recs_lb5.joblib"
+}

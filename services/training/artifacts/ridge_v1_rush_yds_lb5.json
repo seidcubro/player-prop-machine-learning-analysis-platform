@@ -9,10 +9,10 @@
     "weighted_mean",
     "trend"
   ],
-  "train_rows": 12,
-  "test_rows": 4,
-  "mae": 9.504231860742781,
-  "rmse": 16.090060386936685,
-  "r2": -0.19441773128151807,
+  "train_rows": 46054,
+  "test_rows": 15352,
+  "mae": 2.6479097461234367,
+  "rmse": 9.186001093957044,
+  "r2": 0.6334610728396188,
   "artifact_path": "/artifacts/ridge_v1_rush_yds_lb5.joblib"
 }

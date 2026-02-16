@@ -9,10 +9,10 @@
     "weighted_mean",
     "trend"
   ],
-  "train_rows": 12,
-  "test_rows": 4,
-  "mae": 9.180367900214002,
-  "rmse": 13.989902627654892,
-  "r2": 0.9864936338332201,
+  "train_rows": 46054,
+  "test_rows": 15352,
+  "mae": 2.7259130270837626,
+  "rmse": 16.78010387807602,
+  "r2": 0.8412083322548521,
   "artifact_path": "/artifacts/ridge_v1_pass_yds_lb5.joblib"
 }

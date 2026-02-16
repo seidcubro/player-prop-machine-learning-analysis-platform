@@ -1,25 +1,62 @@
-/**
+﻿/**
  * Frontend API client for the Player Prop ML platform.
  *
  * This file is the single source of truth for browser -> API calls.
- * Keeping requests here (instead of scattered across components) makes it easy to:
- * - change base URLs (local vs. deployed),
- * - centralize error handling,
- * - keep response typing consistent as the backend evolves.
+ *
+ * Goals:
+ * - Centralize URL construction (base URL, query strings, routes).
+ * - Centralize error handling (non-2xx -> throw with body text).
+ * - Provide stable TypeScript types for UI code.
+ *
+ * IMPORTANT:
+ * - Do NOT build URLs in React components.
+ * - Components should call functions from this module only.
  */
+
+/* =========================
+   Base URL
+   ========================= */
 
 /**
  * Base URL for the FastAPI service.
  *
- * The web app reads `VITE_API_BASE` at build/runtime (Vite env) and falls back to
- * the local dev API.
+ * The web app reads `VITE_API_BASE` (Vite env) and falls back to local dev.
  *
  * Examples:
- * - Local:  http://localhost:8000/api/v1
- * - Deployed: https://your-domain.example/api/v1
+ * - Local:   http://localhost:8000/api/v1
+ * - Remote:  https://your-domain.example/api/v1
+ */
+const DEFAULT_API_BASE = "http://localhost:8000/api/v1";
+
+/**
+ * Resolved API base URL (env override + local fallback).
  */
 export const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE ?? "http://localhost:8000/api/v1";
+  (import.meta as any).env?.VITE_API_BASE ?? DEFAULT_API_BASE;
+
+/**
+ * Get the API base URL or throw a clear error.
+ *
+ * Why:
+ * - Prevents confusing runtime failures when code references an undefined base.
+ * - Keeps URL construction consistent and debuggable.
+ */
+export function getApiBase(): string {
+  if (!API_BASE || typeof API_BASE !== "string") {
+    throw new Error(
+      "API base URL is missing/invalid. Check VITE_API_BASE or apps/web/src/api.ts API_BASE definition."
+    );
+  }
+  return API_BASE;
+}
+
+/**
+ * DEV DIAGNOSTIC
+ *
+ * Confirms the browser is actually executing THIS module.
+ * You should see this in the browser console on page load.
+ */
+console.log("[api.ts] API CLIENT MODULE LOADED", { API_BASE });
 
 /* =========================
    Types
@@ -101,8 +138,8 @@ export type MLProjectionRow = {
 /**
  * Perform a JSON HTTP request and throw an Error on non-2xx responses.
  *
- * The backend returns JSON on success. On error, we try to include the response
- * body text (useful when FastAPI returns detail messages).
+ * The backend returns JSON on success.
+ * On error, we try to include response body text (useful for FastAPI `detail` messages).
  */
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
@@ -130,14 +167,43 @@ function qs(params: Record<string, any>) {
    ========================= */
 
 /**
- * Fetch a paginated list of players.
+ * Fetch a paginated list of players with optional server-side search.
  *
- * Backend: GET /players?limit=...&offset=...
+ * Backend: GET /players?search=...&limit=...&offset=...&include_total=true
+ *
+ * Returns:
+ * - { players: Player[], total?: number }
  */
-export async function fetchPlayers(limit = 50, offset = 0): Promise<Player[]> {
-  const url = `${API_BASE}/players?${qs({ limit, offset })}`;
-  const data = await http<{ ok: boolean; players: Player[] }>(url);
-  return data.players;
+export async function fetchPlayersPaged(args?: {
+  search?: string | null;
+  limit?: number;
+  offset?: number;
+  include_total?: boolean;
+}): Promise<{ players: Player[]; total?: number }> {
+  const url = `${getApiBase()}/players?${qs({
+    search: args?.search ?? undefined,
+    limit: args?.limit ?? 50,
+    offset: args?.offset ?? 0,
+    include_total: args?.include_total ?? false,
+  })}`;
+
+  const data = await http<{ ok: boolean; players: Player[]; total?: number }>(url);
+  return { players: data.players, total: data.total };
+}
+
+/**
+ * Back-compat wrapper.
+ *
+ * Some UI code historically imported `fetchPlayers`. Keep it as an alias
+ * so old code doesn't break, but route everything through fetchPlayersPaged().
+ */
+export async function fetchPlayers(args?: {
+  limit?: number;
+  offset?: number;
+  search?: string | null;
+  include_total?: boolean;
+}): Promise<{ players: Player[]; total?: number }> {
+  return fetchPlayersPaged(args);
 }
 
 /**
@@ -146,7 +212,7 @@ export async function fetchPlayers(limit = 50, offset = 0): Promise<Player[]> {
  * Backend: GET /players/{player_id}
  */
 export async function fetchPlayer(playerId: number): Promise<Player> {
-  const url = `${API_BASE}/players/${playerId}`;
+  const url = `${getApiBase()}/players/${playerId}`;
   const data = await http<{ ok: boolean; player: Player }>(url);
   return data.player;
 }
@@ -155,16 +221,12 @@ export async function fetchPlayer(playerId: number): Promise<Player> {
  * Fetch recent games for a player.
  *
  * Backend: GET /players/{player_id}/games?limit=...
- *
- * Notes:
- * - This endpoint must exist server-side; otherwise this call will throw.
- * - If you haven't implemented it yet, remove calls to this from the UI.
  */
 export async function fetchPlayerGames(
   playerId: number,
   limit = 5,
 ): Promise<PlayerGame[]> {
-  const url = `${API_BASE}/players/${playerId}/games?${qs({ limit })}`;
+  const url = `${getApiBase()}/players/${playerId}/games?${qs({ limit })}`;
   const data = await http<{ ok: boolean; games: PlayerGame[] }>(url);
   return data.games;
 }
@@ -180,7 +242,7 @@ export async function fetchProjectionBaseline(args: {
   model_name?: string;
 }): Promise<Projection> {
   const model_name = args.model_name ?? "baseline_v1";
-  const url = `${API_BASE}/players/${args.playerId}/projection_baseline?${qs({
+  const url = `${getApiBase()}/players/${args.playerId}/projection_baseline?${qs({
     market_code: args.market_code,
     model_name,
   })}`;
@@ -198,7 +260,7 @@ export async function fetchProjectionML(args: {
   lookback?: number;
 }): Promise<MLProjection> {
   const lookback = args.lookback ?? 5;
-  const url = `${API_BASE}/players/${args.playerId}/projection_ml?${qs({
+  const url = `${getApiBase()}/players/${args.playerId}/projection_ml?${qs({
     market_code: args.market_code,
     lookback,
   })}`;
@@ -217,7 +279,7 @@ export async function fetchMLProjectionHistory(args: {
   lookback?: number;
   limit?: number;
 }): Promise<MLProjectionRow[]> {
-  const url = `${API_BASE}/players/${args.playerId}/ml_projections?${qs({
+  const url = `${getApiBase()}/players/${args.playerId}/ml_projections?${qs({
     market_code: args.market_code,
     model_name: args.model_name ?? "ridge_v1",
     lookback: args.lookback ?? 5,
