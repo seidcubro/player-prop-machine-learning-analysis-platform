@@ -1,4 +1,4 @@
-﻿"""Player and projection API routes.
+"""Player and projection API routes.
 
 Responsibilities:
 - player directory endpoints (`/players`, `/players/{id}`)

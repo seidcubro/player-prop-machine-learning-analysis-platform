@@ -1,4 +1,4 @@
-﻿"""Compatibility router module.
+"""Compatibility router module.
 
 Historically, some code imported `router` from `services.api.app.routes`.
 This file keeps that import stable by re-exporting the main `APIRouter`.
