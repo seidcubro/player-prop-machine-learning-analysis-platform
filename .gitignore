@@ -54,3 +54,8 @@ _backup_*/
 _backup*/
 *.bak_*
 
+
+# backup folders (do not commit)
+_backup_*/
+_backup*/
+
