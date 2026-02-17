@@ -48,3 +48,9 @@ crash.log
 **/*.sqlite3
 .DS_Store
 Thumbs.db
+
+# backups
+_backup_*/
+_backup*/
+*.bak_*
+
