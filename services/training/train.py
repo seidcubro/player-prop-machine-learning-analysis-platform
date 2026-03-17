@@ -1,10 +1,9 @@
-"""Training script for market-specific projection models.
+﻿"""Training script for market-specific projection models.
 
-This module trains models for a specific prop market (e.g., receiving yards),
-writes trained artifacts (model + metadata) to the artifacts directory, and can
-optionally evaluate performance.
-
-Artifacts are later consumed by the API and/or inference service.
+Trains a model for a specific prop market (e.g., receiving yards), writes artifacts
+(model + metadata) to ARTIFACT_DIR, and updates model registry tables:
+- trained_models
+- active_models
 """
 
 import os
@@ -13,11 +12,13 @@ import joblib
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
 
 DB_HOST = os.getenv("POSTGRES_HOST", "postgres")
 DB_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
@@ -30,21 +31,13 @@ LOOKBACK = int(os.getenv("LOOKBACK", "5"))
 MODEL_NAME = os.getenv("MODEL_NAME", "ridge_v1")
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 
-FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend"]
 LABEL_COL = "label_actual"
 
+# Default features (works for rec_yds; harmless for others if columns are present)
+FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend", "recs_mean", "recs_trend"]
+
+
 def connect():
-    """Open a psycopg2 connection to the platform Postgres database.
-
-    Connection parameters are read from environment variables:
-        POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
-
-    Returns:
-        psycopg2.extensions.connection: Open database connection.
-
-    Raises:
-        psycopg2.OperationalError: If the database is unreachable or credentials are invalid.
-    """
     return psycopg2.connect(
         host=DB_HOST,
         port=DB_PORT,
@@ -53,43 +46,24 @@ def connect():
         password=DB_PASS,
     )
 
+
 def main():
-    """Train and register a market-specific regression model.
-
-    This script trains a scikit-learn pipeline (StandardScaler + Ridge) on rows
-    from `player_market_features` that have `label_actual` populated. It writes:
-        - a `.joblib` artifact containing the fitted pipeline
-        - a `.json` metadata file with feature columns and evaluation metrics
-
-    Optionally, it updates model registry tables if they exist:
-        - `trained_models` (metrics + artifact path)
-        - `active_models` (current artifact used by the API per market)
-
-    Environment variables:
-        MARKET_CODE: Which market to train (prop_markets.code)
-        LOOKBACK: Lookback window (must match feature rows)
-        MODEL_NAME: Artifact/model identifier (e.g., "ridge_v1")
-        ARTIFACT_DIR: Output directory for model files
-
-    Returns:
-        None
-
-    Raises:
-        SystemExit: If the market does not exist or there is not enough labeled data to train.
-    """
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
 
     with connect() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        # market lookup
         cur.execute("SELECT id, name FROM prop_markets WHERE code = %s", (MARKET_CODE,))
         m = cur.fetchone()
         if not m:
             raise SystemExit(f"Market not found: {MARKET_CODE}")
+
         market_id = int(m["id"])
         market_name = m["name"]
 
+        # training data
         cur.execute(
             """
-            SELECT mean, stddev, weighted_mean, trend, label_actual
+            SELECT mean, stddev, weighted_mean, trend, recs_mean, recs_trend, label_actual
             FROM player_market_features
             WHERE market_id = %s
               AND lookback = %s
@@ -98,11 +72,17 @@ def main():
             (market_id, LOOKBACK),
         )
         rows = cur.fetchall()
-
         if len(rows) < 10:
             raise SystemExit(f"Not enough labeled rows to train (need >= 10). Found: {len(rows)}")
 
         df = pd.DataFrame(rows)
+
+        # Ensure all feature columns exist + numeric (safe defaults)
+        for c in FEATURE_COLS:
+            if c not in df.columns:
+                df[c] = 0.0
+        df[["recs_mean", "recs_trend"]] = df[["recs_mean", "recs_trend"]].fillna(0.0)
+
         X = df[FEATURE_COLS].astype(float)
         y = df[LABEL_COL].astype(float)
 
@@ -119,12 +99,13 @@ def main():
         pipe.fit(X_train, y_train)
 
         preds = pipe.predict(X_test)
-
         mae = float(mean_absolute_error(y_test, preds))
         rmse = float(mean_squared_error(y_test, preds, squared=False))
         r2 = float(r2_score(y_test, preds))
 
-        artifact_path = os.path.join(ARTIFACT_DIR, f"{MODEL_NAME}_{MARKET_CODE}_lb{LOOKBACK}.joblib")
+        artifact_path = os.path.join(
+            ARTIFACT_DIR, f"{MODEL_NAME}_{MARKET_CODE}_lb{LOOKBACK}.joblib"
+        )
         joblib.dump(pipe, artifact_path)
 
         meta = {
@@ -140,10 +121,14 @@ def main():
             "r2": r2,
             "artifact_path": artifact_path,
         }
-        with open(os.path.join(ARTIFACT_DIR, f"{MODEL_NAME}_{MARKET_CODE}_lb{LOOKBACK}.json"), "w") as f:
+
+        meta_path = os.path.join(
+            ARTIFACT_DIR, f"{MODEL_NAME}_{MARKET_CODE}_lb{LOOKBACK}.json"
+        )
+        with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
 
-        # store metrics if tables exist (optional)
+        # registry updates (should work now that tables exist)
         try:
             cur.execute(
                 """
@@ -163,6 +148,7 @@ def main():
                 """,
                 (MODEL_NAME, market_id, LOOKBACK, artifact_path, len(X_train), len(X_test), mae, rmse, r2),
             )
+
             cur.execute(
                 """
                 INSERT INTO active_models (market_id, lookback, model_name, artifact_path)
@@ -176,6 +162,7 @@ def main():
                 """,
                 (market_id, LOOKBACK, MODEL_NAME, artifact_path),
             )
+
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -183,6 +170,7 @@ def main():
 
         print("TRAINING COMPLETE")
         print(json.dumps(meta, indent=2))
+
 
 if __name__ == "__main__":
     main()

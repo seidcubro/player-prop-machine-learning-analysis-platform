@@ -1,0 +1,122 @@
+{
+  "report_version": 2,
+  "generated_at": "2026-02-19",
+  "model_name": "ridge_v1",
+  "market_code": "rec_yds",
+  "lookback": 5,
+  "artifact_path": "/artifacts/ridge_v1_rec_yds_lb5.joblib",
+  "feature_cols": [
+    "mean",
+    "stddev",
+    "weighted_mean",
+    "trend"
+  ],
+  "rows_total": 18284,
+  "rows_train_time_split": 14627,
+  "rows_test_time_split": 3657,
+  "metrics_test_overall": {
+    "mae": 16.03925116641112,
+    "rmse": 23.659996574451668,
+    "r2": 0.3544996227929643,
+    "bias": -1.1096767848391906
+  },
+  "metrics_test_overall_baseline_weighted_mean": {
+    "mae": 16.49253486464315,
+    "rmse": 24.313437825504266,
+    "r2": 0.31835243597327034,
+    "bias": 0.5143013398960897
+  },
+  "lift_vs_baseline_pct": {
+    "mae_improvement_pct": 2.748417401886383,
+    "rmse_improvement_pct": 2.6875724269940657
+  },
+  "metrics_test_by_position": [
+    {
+      "position": "RB",
+      "rows": 1050,
+      "mae": 10.03820409499509,
+      "rmse": 14.900226405379632,
+      "r2": 0.17861750274435884,
+      "bias": 0.221400189114425
+    },
+    {
+      "position": "TE",
+      "rows": 874,
+      "mae": 15.251567206845081,
+      "rmse": 21.994972859826497,
+      "r2": 0.2865364174987496,
+      "bias": -1.4392989472054512
+    },
+    {
+      "position": "WR",
+      "rows": 1687,
+      "mae": 20.48102088622003,
+      "rmse": 28.681901053405173,
+      "r2": 0.3143672501886273,
+      "bias": -1.8061476742759255
+    }
+  ],
+  "metrics_test_by_label_bucket": [
+    {
+      "bucket": "0",
+      "rows": 1066,
+      "mae": 9.360695442702887,
+      "rmse": 14.120381717784502,
+      "r2": 0.0,
+      "bias": 9.360695442702887
+    },
+    {
+      "bucket": "1-10",
+      "rows": 612,
+      "mae": 11.672223173795134,
+      "rmse": 16.76345103449875,
+      "r2": -39.309696336097225,
+      "bias": 10.214606953189728
+    },
+    {
+      "bucket": "11-25",
+      "rows": 739,
+      "mae": 11.897197154160489,
+      "rmse": 15.805271844548953,
+      "r2": -12.686032121908669,
+      "bias": 3.511510305146158
+    },
+    {
+      "bucket": "26-50",
+      "rows": 652,
+      "mae": 16.416894463574632,
+      "rmse": 20.13226757193502,
+      "r2": -7.878149711103704,
+      "bias": -5.713070987797263
+    },
+    {
+      "bucket": "51-75",
+      "rows": 297,
+      "mae": 26.661883482579018,
+      "rmse": 30.70642439886742,
+      "r2": -16.895728396761168,
+      "bias": -22.615758206162432
+    },
+    {
+      "bucket": "76-100",
+      "rows": 148,
+      "mae": 42.37282899429898,
+      "rmse": 47.66849384726736,
+      "r2": -48.04373971311011,
+      "bias": -41.00817622294331
+    },
+    {
+      "bucket": "101-150",
+      "rows": 89,
+      "mae": 66.17213037195559,
+      "rmse": 70.9428086455832,
+      "r2": -25.93222676073006,
+      "bias": -65.99532330788509
+    }
+  ],
+  "notes": [
+    "Evaluation uses time-ordered split (no shuffle).",
+    "Baseline = rolling weighted mean.",
+    "Positive lift means model beats baseline."
+  ]
+}

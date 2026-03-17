@@ -1,4 +1,4 @@
-"""Job-related API routes.
+﻿"""Job-related API routes.
 
 These endpoints expose lightweight job triggering and status inspection to
 support local development and operational workflows.
@@ -155,7 +155,7 @@ def build_features(
     # pull all game stats ordered by player/date
     # (safe dynamic column name due to allowlist)
     sql = f"""
-        SELECT player_id, game_date, opponent, pgs.{stat_field}::float8 AS y
+        SELECT player_id, game_date, opponent, pgs.{stat_field}::float8 AS y, COALESCE(pgs.receptions,0)::float8 AS receptions
         FROM player_game_stats_app pgs
         ORDER BY player_id, game_date
     """
@@ -167,16 +167,16 @@ def build_features(
         by_player.setdefault(r["player_id"], []).append(r)
 
     upsert_sql = text("""
-        INSERT INTO player_market_features
-          (player_id, market_id, as_of_game_date, opponent, lookback, mean, stddev, weighted_mean, trend)
-        VALUES
-          (:player_id, :market_id, :as_of_game_date, :opponent, :lookback, :mean, :stddev, :weighted_mean, :trend)
+        INSERT INTO player_market_features (player_id, market_id, as_of_game_date, opponent, lookback, mean, stddev, weighted_mean, trend, recs_mean, recs_trend)
+        VALUES (:player_id, :market_id, :as_of_game_date, :opponent, :lookback, :mean, :stddev, :weighted_mean, :trend, :recs_mean, :recs_trend)
         ON CONFLICT (player_id, market_id, as_of_game_date, opponent, lookback)
         DO UPDATE SET
           mean = EXCLUDED.mean,
           stddev = EXCLUDED.stddev,
           weighted_mean = EXCLUDED.weighted_mean,
-          trend = EXCLUDED.trend
+          trend = EXCLUDED.trend,
+          recs_mean = EXCLUDED.recs_mean,
+          recs_trend = EXCLUDED.recs_trend
     """)
 
     upserts = 0
@@ -189,7 +189,17 @@ def build_features(
             mu = _mean(window)
             sd = _stddev_pop(window)
             wmu = _weighted_mean_recent(window)
-            tr = _trend_slope(window)
+            tr = _trend_slope(window)            # Extra usage proxy features for receiving yards (rec_yds only)
+            recs_mu = None
+            recs_tr = None
+            if market_code == "rec_yds":
+                rec_window = []
+                for g in games[i - lookback:i]:
+                    rv = g["receptions"]
+                    rec_window.append(float(rv) if rv is not None else 0.0)
+                if len(rec_window) == lookback:
+                    recs_mu = _mean(rec_window)
+                    recs_tr = _trend_slope(rec_window)
 
             db.execute(
                 upsert_sql,
@@ -203,6 +213,8 @@ def build_features(
                     "stddev": sd,
                     "weighted_mean": wmu,
                     "trend": tr,
+                    "recs_mean": recs_mu,
+                    "recs_trend": recs_tr,
                 },
             )
             upserts += 1
@@ -217,7 +229,7 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
 
     After `build_features` has populated `player_market_features`, this step joins
     those rows back to the per-game stats table (`player_game_stats_app`) and writes
-    the actual outcome for the market’s underlying stat field.
+    the actual outcome for the marketâ€™s underlying stat field.
 
     This produces the supervised-learning dataset used by the training job.
 
@@ -229,7 +241,7 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
         dict: Summary including updated row count.
 
     Raises:
-        HTTPException: 404 if market is unknown; 400 if the market’s stat field is not supported.
+        HTTPException: 404 if market is unknown; 400 if the marketâ€™s stat field is not supported.
     """
     m = db.execute(
         text("SELECT id, code, stat_field FROM prop_markets WHERE code = :code"),
@@ -260,4 +272,13 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"ok": True, "market_code": market_code, "market_id": m["id"], "updated": res.rowcount}
+
+
+
+
+
+
+
+
+
 

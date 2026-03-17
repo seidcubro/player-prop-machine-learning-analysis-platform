@@ -7,12 +7,14 @@
     "mean",
     "stddev",
     "weighted_mean",
-    "trend"
+    "trend",
+    "recs_mean",
+    "recs_trend"
   ],
   "train_rows": 46061,
   "test_rows": 15354,
-  "mae": 5.6123471597819,
-  "rmse": 13.805001127485761,
-  "r2": 0.5444975176266966,
+  "mae": 5.337469737722856,
+  "rmse": 13.63424190463706,
+  "r2": 0.5521722755571281,
   "artifact_path": "/artifacts/ridge_v1_rec_yds_lb5.joblib"
 }
