@@ -14,7 +14,8 @@
     "recs_mean",
     "recs_trend",
     "carries_mean",
-    "carries_trend"
+    "carries_trend",
+    "opp_allowed_mean"
   ],
   "base_feature_cols": [
     "mean",
@@ -26,7 +27,8 @@
   ],
   "extra_feature_cols": [
     "carries_mean",
-    "carries_trend"
+    "carries_trend",
+    "opp_allowed_mean"
   ],
   "train_rows": 10829,
   "test_rows": 3610,
@@ -34,8 +36,8 @@
   "train_date_max": "2025-10-26",
   "test_date_min": "2025-10-26",
   "test_date_max": "2026-02-08",
-  "mae": 7.04442426937518,
-  "rmse": 15.55544893891427,
-  "r2": 0.6000669890896325,
+  "mae": 7.058314633499584,
+  "rmse": 15.552815986787774,
+  "r2": 0.6002023648487831,
   "artifact_path": "/artifacts/ridge_v1_rush_yds_lb5.joblib"
 }

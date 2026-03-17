@@ -13,6 +13,7 @@
     "trend",
     "recs_mean",
     "recs_trend",
+    "opp_allowed_mean",
     "pass_attempts_mean",
     "pass_attempts_trend",
     "pass_completions_mean",
@@ -27,6 +28,7 @@
     "recs_trend"
   ],
   "extra_feature_cols": [
+    "opp_allowed_mean",
     "pass_attempts_mean",
     "pass_attempts_trend",
     "pass_completions_mean",
@@ -38,8 +40,8 @@
   "train_date_max": "2025-10-26",
   "test_date_min": "2025-10-26",
   "test_date_max": "2026-02-08",
-  "mae": 70.85606267763312,
-  "rmse": 87.69469373682784,
-  "r2": 0.258020862616992,
+  "mae": 69.62809231942248,
+  "rmse": 86.98906657708837,
+  "r2": 0.269913355041014,
   "artifact_path": "/artifacts/ridge_v1_pass_yds_lb5.joblib"
 }

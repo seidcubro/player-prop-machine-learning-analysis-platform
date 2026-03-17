@@ -13,6 +13,11 @@
     "trend",
     "recs_mean",
     "recs_trend",
+    "opp_allowed_mean",
+    "opp_rec_yds_allowed",
+    "opp_rec_yds_allowed_rolling",
+    "opp_targets_allowed",
+    "opp_targets_allowed_rolling",
     "targets_mean",
     "targets_trend"
   ],
@@ -25,6 +30,11 @@
     "recs_trend"
   ],
   "extra_feature_cols": [
+    "opp_allowed_mean",
+    "opp_rec_yds_allowed",
+    "opp_rec_yds_allowed_rolling",
+    "opp_targets_allowed",
+    "opp_targets_allowed_rolling",
     "targets_mean",
     "targets_trend"
   ],
@@ -34,8 +44,8 @@
   "train_date_max": "2025-10-26",
   "test_date_min": "2025-10-26",
   "test_date_max": "2026-02-08",
-  "mae": 16.191587837691877,
-  "rmse": 23.233333447192578,
-  "r2": 0.37516641506526094,
+  "mae": 16.15759089370091,
+  "rmse": 23.19072927486185,
+  "r2": 0.3774558936781208,
   "artifact_path": "/artifacts/ridge_v1_rec_yds_lb5.joblib"
 }
