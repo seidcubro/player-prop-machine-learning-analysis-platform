@@ -11,10 +11,10 @@
     "recs_mean",
     "recs_trend"
   ],
-  "train_rows": 46042,
-  "test_rows": 15348,
-  "mae": 0.43118231735698537,
-  "rmse": 0.99578653505807,
-  "r2": 0.6468210062641647,
+  "train_rows": 32354,
+  "test_rows": 10785,
+  "mae": 0.4268294831974169,
+  "rmse": 0.9965250737289014,
+  "r2": 0.6442773973888436,
   "artifact_path": "/artifacts/ridge_v1_recs_lb5.joblib"
 }

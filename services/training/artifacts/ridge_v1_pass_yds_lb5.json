@@ -11,10 +11,10 @@
     "recs_mean",
     "recs_trend"
   ],
-  "train_rows": 46054,
-  "test_rows": 15352,
-  "mae": 2.52521495942026,
-  "rmse": 16.258705826818392,
-  "r2": 0.8532406160892569,
+  "train_rows": 32354,
+  "test_rows": 10785,
+  "mae": 2.539988448275807,
+  "rmse": 16.196324367756027,
+  "r2": 0.8501155771072223,
   "artifact_path": "/artifacts/ridge_v1_pass_yds_lb5.joblib"
 }
