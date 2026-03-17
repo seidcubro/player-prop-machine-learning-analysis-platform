@@ -1,99 +1,45 @@
-﻿"""Job-related API routes.
+"""Job-related API routes.
 
-These endpoints expose lightweight job triggering and status inspection to
-support local development and operational workflows.
+Market-driven feature building and label attachment.
+Uses the market registry to determine:
+- target stat_field
+- eligible positions
+- feature family
+- safe upstream features
 
-Note:
-- In a production deployment, long-running jobs should be executed via a queue
-  (e.g., SQS/RQ/Celery) rather than directly in the API process.
+This version stores cross-market upstream features in player_market_features.extra_features JSONB.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 import math
+import re
+import json
 
 from ..db import get_db
 
 router = APIRouter()
 
-_ALLOWED_STAT_FIELDS = {
-    "receiving_yards",
-    "receptions",
-    "rushing_yards",
-    "rush_attempts",
-    "passing_yards",
-    "passing_tds",
-    "touchdowns",
-}
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def _mean(vals):
-    """Compute the arithmetic mean of a non-empty sequence.
-
-    Args:
-        vals (list[float] | tuple[float,...]): Numeric values.
-
-    Returns:
-        float: Arithmetic mean.
-
-    Raises:
-        ZeroDivisionError: If `vals` is empty.
-    """
     return sum(vals) / len(vals)
 
+
 def _stddev_pop(vals):
-    """Population standard deviation for a non-empty sequence.
-
-    Uses population (N) denominator, not sample (N-1).
-
-    Args:
-        vals (list[float] | tuple[float,...]): Numeric values.
-
-    Returns:
-        float: Population standard deviation.
-
-    Raises:
-        ZeroDivisionError: If `vals` is empty.
-    """
     m = _mean(vals)
     return math.sqrt(sum((x - m) ** 2 for x in vals) / len(vals))
 
+
 def _weighted_mean_recent(vals):
-    # weights 1..N (more weight to most recent)
-    """Compute a linearly-weighted mean that emphasizes recent games.
-
-    Weights are 1..N over the lookback window, where the most recent value gets
-    weight N.
-
-    Args:
-        vals (list[float] | tuple[float,...]): Ordered values from oldest -> newest.
-
-    Returns:
-        float: Weighted mean.
-
-    Raises:
-        ZeroDivisionError: If `vals` is empty.
-    """
     n = len(vals)
     weights = list(range(1, n + 1))
     return sum(v * w for v, w in zip(vals, weights)) / sum(weights)
 
+
 def _trend_slope(vals):
-    # simple linear regression slope for x = 1..N
-    """Estimate a simple trend over a window using a 1-D linear regression slope.
-
-    Treats the window index as x = 1..N and values as y. A positive slope means
-    the feature has been increasing over the lookback window.
-
-    Args:
-        vals (list[float] | tuple[float,...]): Ordered values from oldest -> newest.
-
-    Returns:
-        float: Estimated slope (units of y per game).
-
-    Notes:
-        Returns 0.0 if the denominator becomes 0 (should only occur when N=1).
-    """
     n = len(vals)
     xs = list(range(1, n + 1))
     xbar = sum(xs) / n
@@ -103,72 +49,231 @@ def _trend_slope(vals):
     return 0.0 if den == 0 else (num / den)
 
 
-@router.post("/jobs/build_features")
-def build_features(
-    market_code: str,
-    lookback: int = Query(5, ge=1, le=50),
-    db: Session = Depends(get_db),
-):
-    """Compute and upsert engineered features for a given market and lookback window.
+def _safe_identifier(name: str) -> str:
+    if not name or not _IDENTIFIER_RE.match(name):
+        raise HTTPException(status_code=400, detail=f"Unsafe SQL identifier: {name}")
+    return name
 
-    This endpoint materializes the rolling-window features used by both baseline
-    and ML projection endpoints.
 
-    Implementation details:
-        - Resolves `market_code` -> (market_id, stat_field) from `prop_markets`.
-        - Pulls per-game player stats from `player_game_stats_app`.
-        - For each (player, as_of_game_date) where at least `lookback` prior games exist,
-          computes features over the previous N games:
-            * mean
-            * population stddev
-            * linearly weighted mean favoring recent games
-            * linear trend slope
-        - Upserts into `player_market_features` using a deterministic natural key
-          (player_id, market_id, as_of_game_date, opponent, lookback).
+def _as_text_array(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value if v is not None]
+    if isinstance(value, str):
+        s = value.strip()
+        if s.startswith("{") and s.endswith("}"):
+            inner = s[1:-1].strip()
+            if not inner:
+                return []
+            return [part.strip().strip('"') for part in inner.split(",")]
+        return [s]
+    return [str(value)]
 
-    Args:
-        market_code: Market code (e.g., "rec_yds", "rush_yds") as stored in `prop_markets.code`.
-        lookback: Number of *prior* games to use for the rolling window.
-        db: SQLAlchemy session (injected).
 
-    Returns:
-        dict: Summary payload including market identifiers and number of upserted rows.
+def _column_exists(db: Session, table_name: str, column_name: str) -> bool:
+    row = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = :table_name
+              AND column_name = :column_name
+            LIMIT 1
+            """
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    ).first()
+    return row is not None
 
-    Raises:
-        HTTPException: 404 if market is unknown; 400 if the market maps to an unsupported stat field.
-    """
+
+def _get_market(db: Session, market_code: str):
     m = db.execute(
-        text("SELECT id, code, stat_field FROM prop_markets WHERE code = :code"),
+        text(
+            """
+            SELECT
+              id,
+              code,
+              name,
+              stat_field,
+              scope,
+              target_kind,
+              entity_key,
+              eligible_positions,
+              is_active,
+              train_enabled,
+              predict_enabled,
+              feature_family,
+              can_be_upstream_feature,
+              is_synthetic_target
+            FROM prop_markets
+            WHERE code = :code
+            """
+        ),
         {"code": market_code},
     ).mappings().first()
 
     if not m:
         raise HTTPException(status_code=404, detail=f"Unknown market_code: {market_code}")
 
-    stat_field = m["stat_field"]
-    if stat_field not in _ALLOWED_STAT_FIELDS:
+    return m
+
+
+def _get_safe_upstream_markets(db: Session, market_code: str):
+    """
+    Controlled upstream feature graph.
+    Keep this conservative to avoid leakage and circular logic.
+    """
+    allowed_by_market = {
+        # receiving
+        "rec_yds": ["targets", "recs"],
+        "recs": ["targets"],
+        "rec_tds": ["targets", "recs"],
+
+        # passing
+        "pass_yds": ["pass_attempts", "pass_completions"],
+        "pass_tds": ["pass_attempts", "pass_completions"],
+        "pass_ints": ["pass_attempts", "pass_completions"],
+        "pass_completions": ["pass_attempts"],
+
+        # rushing
+        "rush_yds": ["carries"],
+        "rush_tds": ["carries"],
+
+        # others isolated for now
+        "carries": [],
+        "targets": [],
+        "tackles_solo": [],
+        "tackles_combined": [],
+        "sacks": [],
+        "def_ints": [],
+        "pass_defended": [],
+        "qb_hits": [],
+        "tfl": [],
+        "forced_fumbles": [],
+        "fg_made": [],
+        "fg_att": [],
+        "fg_long": [],
+        "xp_made": [],
+        "punts": [],
+        "punt_yds": [],
+    }
+
+    allowed_codes = allowed_by_market.get(market_code, [])
+    if not allowed_codes:
+        return []
+
+    rows = db.execute(
+        text(
+            """
+            SELECT code, stat_field
+            FROM prop_markets
+            WHERE code = ANY(:codes)
+              AND can_be_upstream_feature = TRUE
+              AND is_active = TRUE
+            ORDER BY code
+            """
+        ),
+        {"codes": allowed_codes},
+    ).mappings().all()
+
+    safe = []
+    for r in rows:
+        col = _safe_identifier(str(r["stat_field"]))
+        if _column_exists(db, "player_game_stats_app", col):
+            safe.append((str(r["code"]), col))
+
+    return safe
+
+
+@router.post("/jobs/build_features")
+def build_features(
+    market_code: str,
+    lookback: int = Query(5, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    m = _get_market(db, market_code)
+
+    if not m["is_active"]:
+        raise HTTPException(status_code=400, detail=f"Market is inactive: {market_code}")
+    if not m["train_enabled"]:
+        raise HTTPException(status_code=400, detail=f"Training disabled for market: {market_code}")
+    if m["scope"] != "player":
+        raise HTTPException(status_code=400, detail=f"Only player-scoped markets are supported here. Got: {m['scope']}")
+    if m["target_kind"] != "regression":
+        raise HTTPException(status_code=400, detail=f"Only regression markets are supported here. Got: {m['target_kind']}")
+
+    stat_field = _safe_identifier(str(m["stat_field"]))
+    if not _column_exists(db, "player_game_stats_app", stat_field):
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported stat_field for market {market_code}: {stat_field}",
+            detail=f"stat_field '{stat_field}' does not exist in player_game_stats_app",
         )
 
-    # pull all game stats ordered by player/date
-    # (safe dynamic column name due to allowlist)
+    eligible_positions = set(_as_text_array(m["eligible_positions"]))
+    feature_family = str(m["feature_family"] or "").strip().lower()
+    upstream_cols = _get_safe_upstream_markets(db, market_code)
+
+    select_upstream_sql = ""
+    for code, col in upstream_cols:
+        alias = _safe_identifier(code)
+        select_upstream_sql += f", COALESCE(pgs.{col}, 0)::float8 AS {alias}"
+
     sql = f"""
-        SELECT player_id, game_date, opponent, pgs.{stat_field}::float8 AS y, COALESCE(pgs.receptions,0)::float8 AS receptions
+        SELECT
+          pgs.player_id,
+          pgs.position,
+          pgs.game_date,
+          pgs.opponent,
+          COALESCE(pgs.{stat_field}, 0)::float8 AS y
+          {select_upstream_sql}
         FROM player_game_stats_app pgs
-        ORDER BY player_id, game_date
+        WHERE pgs.game_date IS NOT NULL
+          AND pgs.opponent IS NOT NULL
+        ORDER BY pgs.player_id, pgs.game_date
     """
     rows = db.execute(text(sql)).mappings().all()
 
-    # group by player
     by_player = {}
     for r in rows:
+        pos = r["position"]
+        if eligible_positions and pos not in eligible_positions:
+            continue
         by_player.setdefault(r["player_id"], []).append(r)
 
-    upsert_sql = text("""
-        INSERT INTO player_market_features (player_id, market_id, as_of_game_date, opponent, lookback, mean, stddev, weighted_mean, trend, recs_mean, recs_trend)
-        VALUES (:player_id, :market_id, :as_of_game_date, :opponent, :lookback, :mean, :stddev, :weighted_mean, :trend, :recs_mean, :recs_trend)
+    upsert_sql = text(
+        """
+        INSERT INTO player_market_features
+          (
+            player_id,
+            market_id,
+            as_of_game_date,
+            opponent,
+            lookback,
+            mean,
+            stddev,
+            weighted_mean,
+            trend,
+            recs_mean,
+            recs_trend,
+            extra_features
+          )
+        VALUES
+          (
+            :player_id,
+            :market_id,
+            :as_of_game_date,
+            :opponent,
+            :lookback,
+            :mean,
+            :stddev,
+            :weighted_mean,
+            :trend,
+            :recs_mean,
+            :recs_trend,
+            CAST(:extra_features AS jsonb)
+          )
         ON CONFLICT (player_id, market_id, as_of_game_date, opponent, lookback)
         DO UPDATE SET
           mean = EXCLUDED.mean,
@@ -176,30 +281,65 @@ def build_features(
           weighted_mean = EXCLUDED.weighted_mean,
           trend = EXCLUDED.trend,
           recs_mean = EXCLUDED.recs_mean,
-          recs_trend = EXCLUDED.recs_trend
-    """)
+          recs_trend = EXCLUDED.recs_trend,
+          extra_features = EXCLUDED.extra_features
+        """
+    )
 
     upserts = 0
+
     for player_id, games in by_player.items():
-        ys = [g["y"] for g in games]
+        ys = [float(g["y"] or 0.0) for g in games]
+
         for i in range(len(games)):
             if i < lookback:
-                continue  # need prior N games
-            window = ys[i - lookback:i]  # prior N games only
+                continue
+
+            window_games = games[i - lookback:i]
+            window = ys[i - lookback:i]
+
             mu = _mean(window)
             sd = _stddev_pop(window)
             wmu = _weighted_mean_recent(window)
-            tr = _trend_slope(window)            # Extra usage proxy features for receiving yards (rec_yds only)
-            recs_mu = None
-            recs_tr = None
-            if market_code == "rec_yds":
-                rec_window = []
-                for g in games[i - lookback:i]:
-                    rv = g["receptions"]
-                    rec_window.append(float(rv) if rv is not None else 0.0)
-                if len(rec_window) == lookback:
-                    recs_mu = _mean(rec_window)
-                    recs_tr = _trend_slope(rec_window)
+            tr = _trend_slope(window)
+
+            # keep the old columns for compatibility with current train.py
+            aux_mean = None
+            aux_trend = None
+
+            if feature_family == "receiving":
+                aux_window = [
+                    float(g.get("recs", g.get("receptions", 0.0)) or 0.0)
+                    for g in window_games
+                ]
+                if aux_window:
+                    aux_mean = _mean(aux_window)
+                    aux_trend = _trend_slope(aux_window)
+
+            elif feature_family == "rushing":
+                aux_window = [
+                    float(g.get("carries", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                if aux_window:
+                    aux_mean = _mean(aux_window)
+                    aux_trend = _trend_slope(aux_window)
+
+            elif feature_family == "passing":
+                aux_window = [
+                    float(g.get("pass_attempts", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                if aux_window:
+                    aux_mean = _mean(aux_window)
+                    aux_trend = _trend_slope(aux_window)
+
+            upstream_features = {}
+            for code, _col in upstream_cols:
+                vals = [float(g.get(code, 0.0) or 0.0) for g in window_games]
+                if vals:
+                    upstream_features[f"{code}_mean"] = _mean(vals)
+                    upstream_features[f"{code}_trend"] = _trend_slope(vals)
 
             db.execute(
                 upsert_sql,
@@ -213,54 +353,54 @@ def build_features(
                     "stddev": sd,
                     "weighted_mean": wmu,
                     "trend": tr,
-                    "recs_mean": recs_mu,
-                    "recs_trend": recs_tr,
+                    "recs_mean": aux_mean,
+                    "recs_trend": aux_trend,
+                    "extra_features": json.dumps(upstream_features),
                 },
             )
             upserts += 1
 
     db.commit()
-    return {"ok": True, "market_code": market_code, "market_id": m["id"], "lookback": lookback, "upserts": upserts}
+
+    return {
+        "ok": True,
+        "market_code": market_code,
+        "market_id": m["id"],
+        "stat_field": stat_field,
+        "feature_family": feature_family,
+        "lookback": lookback,
+        "eligible_positions": sorted(list(eligible_positions)),
+        "upstream_features_used": [code for code, _ in upstream_cols],
+        "upserts": upserts,
+    }
 
 
 @router.post("/jobs/attach_labels")
-def attach_labels(market_code: str, db: Session = Depends(get_db)):
-    """Attach the realized stat outcome (`label_actual`) to previously built feature rows.
+def attach_labels(
+    market_code: str,
+    db: Session = Depends(get_db),
+):
+    m = _get_market(db, market_code)
 
-    After `build_features` has populated `player_market_features`, this step joins
-    those rows back to the per-game stats table (`player_game_stats_app`) and writes
-    the actual outcome for the marketâ€™s underlying stat field.
+    if not m["is_active"]:
+        raise HTTPException(status_code=400, detail=f"Market is inactive: {market_code}")
+    if not m["train_enabled"]:
+        raise HTTPException(status_code=400, detail=f"Training disabled for market: {market_code}")
+    if m["scope"] != "player":
+        raise HTTPException(status_code=400, detail=f"Only player-scoped markets are supported here. Got: {m['scope']}")
+    if m["target_kind"] != "regression":
+        raise HTTPException(status_code=400, detail=f"Only regression markets are supported here. Got: {m['target_kind']}")
 
-    This produces the supervised-learning dataset used by the training job.
-
-    Args:
-        market_code: Market code (e.g., "rec_yds") as stored in `prop_markets.code`.
-        db: SQLAlchemy session (injected).
-
-    Returns:
-        dict: Summary including updated row count.
-
-    Raises:
-        HTTPException: 404 if market is unknown; 400 if the marketâ€™s stat field is not supported.
-    """
-    m = db.execute(
-        text("SELECT id, code, stat_field FROM prop_markets WHERE code = :code"),
-        {"code": market_code},
-    ).mappings().first()
-
-    if not m:
-        raise HTTPException(status_code=404, detail=f"Unknown market_code: {market_code}")
-
-    stat_field = m["stat_field"]
-    if stat_field not in _ALLOWED_STAT_FIELDS:
+    stat_field = _safe_identifier(str(m["stat_field"]))
+    if not _column_exists(db, "player_game_stats_app", stat_field):
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported stat_field for market {market_code}: {stat_field}",
+            detail=f"stat_field '{stat_field}' does not exist in player_game_stats_app",
         )
 
     sql = f"""
         UPDATE player_market_features pmf
-        SET label_actual = pgs.{stat_field}
+        SET label_actual = pgs.{stat_field}::float8
         FROM player_game_stats_app pgs
         WHERE pmf.player_id = pgs.player_id
           AND pmf.as_of_game_date = pgs.game_date
@@ -271,14 +411,10 @@ def attach_labels(market_code: str, db: Session = Depends(get_db)):
     res = db.execute(text(sql), {"market_id": m["id"]})
     db.commit()
 
-    return {"ok": True, "market_code": market_code, "market_id": m["id"], "updated": res.rowcount}
-
-
-
-
-
-
-
-
-
-
+    return {
+        "ok": True,
+        "market_code": market_code,
+        "market_id": m["id"],
+        "stat_field": stat_field,
+        "updated": res.rowcount,
+    }

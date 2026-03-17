@@ -2,6 +2,9 @@
   "model_name": "ridge_v1",
   "market_code": "rush_yds",
   "market_name": "Rushing Yards",
+  "market_id": 98,
+  "feature_family": "rushing",
+  "stat_field": "rushing_yards",
   "lookback": 5,
   "feature_cols": [
     "mean",
@@ -9,12 +12,30 @@
     "weighted_mean",
     "trend",
     "recs_mean",
+    "recs_trend",
+    "carries_mean",
+    "carries_trend"
+  ],
+  "base_feature_cols": [
+    "mean",
+    "stddev",
+    "weighted_mean",
+    "trend",
+    "recs_mean",
     "recs_trend"
   ],
-  "train_rows": 32354,
-  "test_rows": 10785,
-  "mae": 2.684712560383412,
-  "rmse": 9.496210644795498,
-  "r2": 0.6216344024026996,
+  "extra_feature_cols": [
+    "carries_mean",
+    "carries_trend"
+  ],
+  "train_rows": 10829,
+  "test_rows": 3610,
+  "train_date_min": "2022-10-13",
+  "train_date_max": "2025-10-26",
+  "test_date_min": "2025-10-26",
+  "test_date_max": "2026-02-08",
+  "mae": 7.04442426937518,
+  "rmse": 15.55544893891427,
+  "r2": 0.6000669890896325,
   "artifact_path": "/artifacts/ridge_v1_rush_yds_lb5.joblib"
 }

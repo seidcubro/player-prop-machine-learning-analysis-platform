@@ -2,6 +2,9 @@
   "model_name": "ridge_v1",
   "market_code": "rec_yds",
   "market_name": "Receiving Yards",
+  "market_id": 101,
+  "feature_family": "receiving",
+  "stat_field": "receiving_yards",
   "lookback": 5,
   "feature_cols": [
     "mean",
@@ -9,12 +12,30 @@
     "weighted_mean",
     "trend",
     "recs_mean",
+    "recs_trend",
+    "targets_mean",
+    "targets_trend"
+  ],
+  "base_feature_cols": [
+    "mean",
+    "stddev",
+    "weighted_mean",
+    "trend",
+    "recs_mean",
     "recs_trend"
   ],
-  "train_rows": 32354,
-  "test_rows": 10785,
-  "mae": 5.378629417207335,
-  "rmse": 13.755660720464041,
-  "r2": 0.5609854323840362,
+  "extra_feature_cols": [
+    "targets_mean",
+    "targets_trend"
+  ],
+  "train_rows": 9705,
+  "test_rows": 3235,
+  "train_date_min": "2022-10-13",
+  "train_date_max": "2025-10-26",
+  "test_date_min": "2025-10-26",
+  "test_date_max": "2026-02-08",
+  "mae": 16.191587837691877,
+  "rmse": 23.233333447192578,
+  "r2": 0.37516641506526094,
   "artifact_path": "/artifacts/ridge_v1_rec_yds_lb5.joblib"
 }
