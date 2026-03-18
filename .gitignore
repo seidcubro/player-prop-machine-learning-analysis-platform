@@ -59,3 +59,23 @@ _backup*/
 _backup_*/
 _backup*/
 
+
+# ================================
+# Player Prop ML artifact hygiene
+# ================================
+services/training/artifacts/*.joblib
+services/training/artifacts/**/*.joblib
+services/training/artifacts/*.pkl
+services/training/artifacts/**/*.pkl
+
+# keep metadata/evals/readmes
+!services/training/artifacts/*.json
+!services/training/artifacts/**/*.json
+!services/training/artifacts/README.md
+!services/training/artifacts/**/README.md
+
+# model artifacts
+services/training/artifacts/*.joblib
+services/training/artifacts/**/*.joblib
+services/training/artifacts/*.pkl
+services/training/artifacts/**/*.pkl
