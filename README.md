@@ -242,3 +242,4 @@ Email: seidcubro754@gmail.com
 - The backend pipeline is the current source of truth.
 - Ingestion is built and run separately from Docker Compose.
 - The frontend may lag behind the current backend/data model.
+
