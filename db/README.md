@@ -1,15 +1,22 @@
 # Database SQL Layout
 
 ## db/migrations
-Schema-changing SQL that should represent durable structural changes.
+Durable schema changes that should represent long-term structure.
 
 ## db/backfills
-One-off repair, sync, patch, and backfill scripts used to align data with current app behavior.
+One-off repair, patch, or data-alignment scripts.
 
 ## db/inspection
-Read-only inspection and debugging queries.
+Read-only debugging and inspection queries.
 
-Notes:
-- Do not add new ad hoc SQL files to the repo root.
-- Prefer clear names over vague names like fix_final.sql.
-- If a backfill becomes a permanent requirement, convert it into a real migration or app logic.
+## db/bootstrap
+Setup, reseed, rebuild, sync, or compatibility scripts used during local recovery
+and environment alignment.
+
+## db/ddl
+Low-level create/drop table lifecycle scripts kept for manual recovery and debugging.
+
+Rules:
+- Keep ad hoc SQL out of the repo root.
+- Prefer descriptive names over vague names.
+- If a script becomes permanently required, move that logic into a migration or app code.
