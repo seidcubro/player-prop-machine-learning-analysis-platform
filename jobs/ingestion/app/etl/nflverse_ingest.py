@@ -786,6 +786,36 @@ def ingest_player_game_stats(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE player_game_stats"))
+        # Keep ONLY the columns the platform actually uses.
+        # Intentionally exclude fantasy_points / fantasy_points_ppr and other noisy extras.
+        keep_cols = [
+            "player_id","game_id","season","week","season_type","game_date",
+            "opponent","team","position","position_group",
+
+            # PASSING
+            "passing_yards","passing_tds","passing_interceptions",
+            "attempts","completions","passing_air_yards",
+            "passing_yards_after_catch","passing_first_downs",
+
+            # RUSHING
+            "rushing_yards","rushing_tds","carries","rushing_first_downs",
+
+            # RECEIVING
+            "receiving_yards","receiving_tds","receptions","targets",
+            "receiving_air_yards","receiving_yards_after_catch",
+
+            # DEFENSE
+            "def_tackles_solo","def_sacks","def_interceptions",
+
+            # KICKING
+            "fg_made","fg_att","fg_long",
+
+            # SPECIAL TEAMS
+            "punt_return_yards","kickoff_return_yards"
+        ]
+
+        existing_keep_cols = [c for c in keep_cols if c in out.columns]
+        out = out[existing_keep_cols].copy()
         out.to_sql("player_game_stats", conn, if_exists="append", index=False)
     print(f"  ingest_player_game_stats: {len(out)} rows")
 
@@ -1369,6 +1399,9 @@ def ingest_depth_charts(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE depth_charts"))
+        out = out.drop_duplicates(
+            subset=["player_id", "season", "week", "depth_position"]
+        )
         out.to_sql("depth_charts", conn, if_exists="append", index=False)
     print(f"  ingest_depth_charts: {len(out)} rows")
 
@@ -1421,6 +1454,9 @@ def ingest_injuries(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE injuries"))
+        out = out.drop_duplicates(
+            subset=["player_id", "season", "week"]
+        )
         out.to_sql("injuries", conn, if_exists="append", index=False)
     print(f"  ingest_injuries: {len(out)} rows")
 

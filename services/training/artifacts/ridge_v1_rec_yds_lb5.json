@@ -2,24 +2,18 @@
   "model_name": "ridge_v1",
   "market_code": "rec_yds",
   "market_name": "Receiving Yards",
-  "market_id": 101,
-  "feature_family": "receiving",
+  "market_id": 1,
+  "feature_family": null,
   "stat_field": "receiving_yards",
   "lookback": 5,
+  "model_type": "RandomForestRegressor",
   "feature_cols": [
     "mean",
     "stddev",
     "weighted_mean",
     "trend",
     "recs_mean",
-    "recs_trend",
-    "opp_allowed_mean",
-    "opp_rec_yds_allowed",
-    "opp_rec_yds_allowed_rolling",
-    "opp_targets_allowed",
-    "opp_targets_allowed_rolling",
-    "targets_mean",
-    "targets_trend"
+    "recs_trend"
   ],
   "base_feature_cols": [
     "mean",
@@ -29,23 +23,23 @@
     "recs_mean",
     "recs_trend"
   ],
-  "extra_feature_cols": [
-    "opp_allowed_mean",
-    "opp_rec_yds_allowed",
-    "opp_rec_yds_allowed_rolling",
-    "opp_targets_allowed",
-    "opp_targets_allowed_rolling",
-    "targets_mean",
-    "targets_trend"
-  ],
-  "train_rows": 9705,
-  "test_rows": 3235,
+  "extra_feature_cols": [],
+  "train_rows": 32354,
+  "test_rows": 10785,
   "train_date_min": "2022-10-13",
   "train_date_max": "2025-10-26",
   "test_date_min": "2025-10-26",
   "test_date_max": "2026-02-08",
-  "mae": 16.15759089370091,
-  "rmse": 23.19072927486185,
-  "r2": 0.3774558936781208,
-  "artifact_path": "/artifacts/ridge_v1_rec_yds_lb5.joblib"
+  "mae": 5.13123960308578,
+  "rmse": 13.29388836291143,
+  "r2": 0.5277339629658205,
+  "artifact_path": "/artifacts/ridge_v1_rec_yds_lb5.joblib",
+  "feature_importances": {
+    "mean": 0.6077175192190957,
+    "weighted_mean": 0.2683117850344025,
+    "stddev": 0.0713116453029754,
+    "trend": 0.05265905044352649,
+    "recs_mean": 0.0,
+    "recs_trend": 0.0
+  }
 }
