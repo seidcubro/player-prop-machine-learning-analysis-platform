@@ -18,7 +18,7 @@
 param(
   [string]$MarketCode = "rec_yds",
   [int]$Lookback = 5,
-  [string]$ModelName = "ridge_v1",
+  [string]$ModelName = "rf_v6",
   [string]$PlayerSearch = "metcalf",
   [int]$PlayersLimit = 15,
   [int]$ApiWaitSeconds = 90,
@@ -156,9 +156,16 @@ Write-Step "Projection response"
 $projectionResult.projection | ConvertTo-Json -Depth 50 | Out-Host
 
 Write-Step "Projection history (last 5)"
-$histUrl = "$ApiBase/players/$chosenId/ml_projections?market_code=$MarketCode&model_name=$ModelName&lookback=$Lookback&limit=5"
+$histUrl = "$ApiBase/players/$playerIdCandidate/projection_history"
+$histUrl += "?market_code=$($MarketCode)"
+$histUrl += "&model_name=$($ModelName)"
+$histUrl += "&lookback=$($Lookback)"
+$histUrl += "&limit=5"
+
+Write-Host "`n[DEBUG] History URL: $histUrl`n"
+
 $hist = Invoke-RestMethod $histUrl
-$hist | ConvertTo-Json -Depth 50 | Out-Host
+$hist | ConvertTo-Json -Depth 10
 
 Write-Step "DONE"
 Write-Host ("Pipeline complete for market=" + $MarketCode + " lookback=" + $Lookback + " model=" + $ModelName + " player_id=" + $chosenId)
