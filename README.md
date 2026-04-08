@@ -236,3 +236,9 @@ Personal Website: https://seidcubro.vercel.app
 Email: seidcubro754@gmail.com
 
 ---
+
+## Repo Cleanup Notes
+- SQL files belong under db/migrations, db/backfills, or db/inspection.
+- The backend pipeline is the current source of truth.
+- Ingestion is built and run separately from Docker Compose.
+- The frontend may lag behind the current backend/data model.

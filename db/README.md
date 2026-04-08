@@ -1,33 +1,15 @@
-﻿# Database SQL Organization
+# Database SQL Layout
 
-This folder holds database-related SQL organized by purpose.
+## db/migrations
+Schema-changing SQL that should represent durable structural changes.
 
-## Folder guide
+## db/backfills
+One-off repair, sync, patch, and backfill scripts used to align data with current app behavior.
 
-- migrations/
-  - Schema changes
-  - Registry changes
-  - New columns / structural updates
-  - Market table changes
+## db/inspection
+Read-only inspection and debugging queries.
 
-- iews/
-  - SQL views used for feature engineering
-  - Reusable upstream data-shaping logic
-
-- ackfills/
-  - Data repair scripts
-  - One-time injections
-  - Rebuild/repopulation jobs
-
-- inspection/
-  - Debug and validation SQL
-  - Row checks
-  - Table inspection
-  - Verification scripts
-
-- patches/
-  - Temporary/manual fixes that do not cleanly fit elsewhere
-
-## Notes
-
-Keep root clean. New SQL should not be dropped at repo root.
+Notes:
+- Do not add new ad hoc SQL files to the repo root.
+- Prefer clear names over vague names like fix_final.sql.
+- If a backfill becomes a permanent requirement, convert it into a real migration or app logic.
