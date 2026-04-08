@@ -11,7 +11,30 @@ from ..db import get_db
 
 router = APIRouter()
 
-FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend", "recs_mean", "recs_trend"]
+FEATURE_COLS = ["mean", "stddev", "weighted_mean",
+                "trend", "recs_mean", "recs_trend"]
+
+
+def _get_player_row(db: Session, player_id: int):
+    row = db.execute(
+        text(
+            """
+            SELECT
+              id,
+              external_id,
+              first_name,
+              last_name,
+              COALESCE(NULLIF(TRIM(first_name || ' ' || last_name), ''), name, external_id) AS display_name,
+              name,
+              position,
+              team
+            FROM players
+            WHERE id = :player_id
+            """
+        ),
+        {"player_id": player_id},
+    ).mappings().first()
+    return row
 
 
 @router.get("/players")
@@ -28,25 +51,33 @@ def list_players(
     if search and search.strip():
         where_sql = """
             WHERE
-              (first_name || ' ' || last_name) ILIKE :q
-              OR first_name ILIKE :q
-              OR last_name ILIKE :q
-              OR COALESCE(team,'') ILIKE :q
-              OR COALESCE(position,'') ILIKE :q
-              OR COALESCE(external_id,'') ILIKE :q
+              COALESCE(first_name || ' ' || last_name, '') ILIKE :q
+              OR COALESCE(first_name, '') ILIKE :q
+              OR COALESCE(last_name, '') ILIKE :q
+              OR COALESCE(name, '') ILIKE :q
+              OR COALESCE(team, '') ILIKE :q
+              OR COALESCE(position, '') ILIKE :q
+              OR COALESCE(external_id, '') ILIKE :q
         """
         params["q"] = f"%{search.strip()}%"
 
     rows = db.execute(
-        text(f"""
-            SELECT id, external_id, first_name, last_name,
-                   (first_name || ' ' || last_name) AS name,
-                   position, team
+        text(
+            f"""
+            SELECT
+              id,
+              external_id,
+              first_name,
+              last_name,
+              COALESCE(NULLIF(TRIM(first_name || ' ' || last_name), ''), name, external_id) AS name,
+              position,
+              team
             FROM players
             {where_sql}
-            ORDER BY last_name, first_name
+            ORDER BY last_name NULLS LAST, first_name NULLS LAST, name NULLS LAST
             LIMIT :limit OFFSET :offset
-        """),
+            """
+        ),
         params,
     ).mappings().all()
 
@@ -64,20 +95,22 @@ def list_players(
 
 @router.get("/players/{player_id}")
 def get_player(player_id: int, db: Session = Depends(get_db)):
-    row = db.execute(
-        text("""
-            SELECT id, external_id, first_name, last_name,
-                   (first_name || ' ' || last_name) AS name,
-                   position, team
-            FROM players WHERE id = :player_id
-        """),
-        {"player_id": player_id},
-    ).mappings().first()
-
+    row = _get_player_row(db, player_id)
     if not row:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    return {"ok": True, "player": dict(row)}
+    return {
+        "ok": True,
+        "player": {
+            "id": row["id"],
+            "external_id": row["external_id"],
+            "first_name": row["first_name"],
+            "last_name": row["last_name"],
+            "name": row["display_name"],
+            "position": row["position"],
+            "team": row["team"],
+        },
+    }
 
 
 @router.get("/players/{player_id}/projection_ml")
@@ -87,34 +120,37 @@ def projection_ml(
     lookback: int = Query(5, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
-    # validate player
-    exists = db.execute(
-        text("SELECT 1 FROM players WHERE id = :player_id"),
-        {"player_id": player_id},
-    ).first()
-    if not exists:
+    player = _get_player_row(db, player_id)
+    if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    # resolve market
+    external_id = player["external_id"]
+    if not external_id:
+        raise HTTPException(
+            status_code=400, detail="Player missing external_id")
+
     m = db.execute(
         text("SELECT id, code FROM prop_markets WHERE code = :code"),
         {"code": market_code},
     ).mappings().first()
     if not m:
-        raise HTTPException(status_code=404, detail=f"Unknown market_code: {market_code}")
+        raise HTTPException(
+            status_code=404, detail=f"Unknown market_code: {market_code}")
     market_id = int(m["id"])
 
-    # active model for market
     am = db.execute(
-        text("""
+        text(
+            """
             SELECT model_name, lookback, artifact_path
             FROM active_models
             WHERE market_id = :market_id
-        """),
+            """
+        ),
         {"market_id": market_id},
     ).mappings().first()
     if not am:
-        raise HTTPException(status_code=404, detail=f"No active model for market_code: {market_code}")
+        raise HTTPException(
+            status_code=404, detail=f"No active model for market_code: {market_code}")
 
     model_name = am["model_name"]
     artifact_path = am["artifact_path"]
@@ -126,37 +162,47 @@ def projection_ml(
         )
 
     if not artifact_path or not os.path.exists(artifact_path):
-        raise HTTPException(status_code=500, detail=f"Model artifact not found at: {artifact_path}")
+        raise HTTPException(
+            status_code=500, detail=f"Model artifact not found at: {artifact_path}")
 
-    # latest features for this player/market/lookback
     feat = db.execute(
-        text("""
-            SELECT as_of_game_date, opponent, mean, stddev, weighted_mean, trend,
-                   COALESCE(recs_mean, 0.0) AS recs_mean,
-                   COALESCE(recs_trend, 0.0) AS recs_trend
+        text(
+            """
+            SELECT
+              as_of_game_date,
+              opponent,
+              mean,
+              stddev,
+              weighted_mean,
+              trend,
+              COALESCE(recs_mean, 0.0) AS recs_mean,
+              COALESCE(recs_trend, 0.0) AS recs_trend
             FROM player_market_features
-            WHERE player_id = :player_id
+            WHERE player_id = :external_id
               AND market_id = :market_id
               AND lookback = :lookback
             ORDER BY as_of_game_date DESC
             LIMIT 1
-        """),
-        {"player_id": player_id, "market_id": market_id, "lookback": lookback},
+            """
+        ),
+        {"external_id": external_id, "market_id": market_id, "lookback": lookback},
     ).mappings().first()
 
     if not feat:
-        raise HTTPException(status_code=404, detail="No features found for player/market/lookback")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No features found for player external_id={external_id}, market={market_code}, lookback={lookback}",
+        )
 
     features_obj = {c: float(feat[c]) for c in FEATURE_COLS}
 
-    # run inference
     X = [[features_obj[c] for c in FEATURE_COLS]]
     pipe = joblib.load(artifact_path)
     pred = float(pipe.predict(X)[0])
 
-    # upsert into ml_projections
     db.execute(
-        text("""
+        text(
+            """
             INSERT INTO ml_projections
               (player_id, market_code, model_name, lookback, as_of_game_date, opponent, prediction, features, artifact_path)
             VALUES
@@ -167,7 +213,8 @@ def projection_ml(
               features = EXCLUDED.features,
               artifact_path = EXCLUDED.artifact_path,
               created_at = NOW()
-        """),
+            """
+        ),
         {
             "player_id": player_id,
             "market_code": market_code,
@@ -185,6 +232,8 @@ def projection_ml(
     return {
         "ok": True,
         "player_id": player_id,
+        "external_id": external_id,
+        "player_name": player["display_name"],
         "market_code": market_code,
         "model_name": model_name,
         "lookback": lookback,
@@ -213,9 +262,19 @@ def projection_history(
         raise HTTPException(status_code=404, detail="Player not found")
 
     rows = db.execute(
-        text("""
-            SELECT player_id, market_code, model_name, lookback,
-                   as_of_game_date, opponent, prediction, features, artifact_path, created_at
+        text(
+            """
+            SELECT
+              player_id,
+              market_code,
+              model_name,
+              lookback,
+              as_of_game_date,
+              opponent,
+              prediction,
+              features,
+              artifact_path,
+              created_at
             FROM ml_projections
             WHERE player_id = :player_id
               AND market_code = :market_code
@@ -223,7 +282,8 @@ def projection_history(
               AND lookback = :lookback
             ORDER BY as_of_game_date DESC, created_at DESC
             LIMIT :limit
-        """),
+            """
+        ),
         {
             "player_id": player_id,
             "market_code": market_code,
@@ -255,10 +315,12 @@ def get_projection_baseline(
         {"code": market_code},
     ).mappings().first()
     if not m:
-        raise HTTPException(status_code=404, detail=f"Unknown market_code: {market_code}")
+        raise HTTPException(
+            status_code=404, detail=f"Unknown market_code: {market_code}")
 
     row = db.execute(
-        text("""
+        text(
+            """
             SELECT game_date, opponent, model_name, mean, stddev, p_over, created_at
             FROM projections
             WHERE player_id = :player_id
@@ -266,12 +328,15 @@ def get_projection_baseline(
               AND model_name = :model_name
             ORDER BY game_date DESC
             LIMIT 1
-        """),
-        {"player_id": player_id, "market_id": int(m["id"]), "model_name": model_name},
+            """
+        ),
+        {"player_id": player_id, "market_id": int(
+            m["id"]), "model_name": model_name},
     ).mappings().first()
 
     if not row:
-        raise HTTPException(status_code=404, detail="No baseline projection found")
+        raise HTTPException(
+            status_code=404, detail="No baseline projection found")
 
     return {
         "ok": True,
