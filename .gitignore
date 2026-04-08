@@ -1,81 +1,59 @@
-# OS / Editor
+# OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-
-# Node
-node_modules/
-dist/
-.vite/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-.venv/
-venv/
-.env
-.env.*
+.python-version
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Docker
+*.pid
+
+# Data / artifacts
+artifacts/
+tmp/
+temp/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
 
 # Terraform
 .terraform/
 *.tfstate
 *.tfstate.*
 crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
-# Docker
-*.log
-**/node_modules/
-**/dist/
-**/.vite/
-**/__pycache__/
-**/*.pyc
-**/.venv/
-**/venv/
-**/.env
-**/.env.*
-!.env.example
-**/*.db
-**/*.sqlite
-**/*.sqlite3
-.DS_Store
-Thumbs.db
-
-# backups
-_backup_*/
-_backup*/
-*.bak_*
-
-
-# backup folders (do not commit)
-_backup_*/
-_backup*/
-
-
-# ================================
-# Player Prop ML artifact hygiene
-# ================================
-services/training/artifacts/*.joblib
-services/training/artifacts/**/*.joblib
-services/training/artifacts/*.pkl
-services/training/artifacts/**/*.pkl
-
-# keep metadata/evals/readmes
-!services/training/artifacts/*.json
-!services/training/artifacts/**/*.json
-!services/training/artifacts/README.md
-!services/training/artifacts/**/README.md
-
-# model artifacts
-services/training/artifacts/*.joblib
-services/training/artifacts/**/*.joblib
-services/training/artifacts/*.pkl
-services/training/artifacts/**/*.pkl
+# Misc
+*.bak
+*.tmp
