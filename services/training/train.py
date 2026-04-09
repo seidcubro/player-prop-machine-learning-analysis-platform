@@ -56,7 +56,14 @@ MODEL_NAME = os.getenv("MODEL_NAME", "rf_v1")
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 
 LABEL_COL = "label_actual"
-BASE_FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend", "recs_mean", "recs_trend"]
+BASE_FEATURE_COLS = [
+    "mean",
+    "stddev",
+    "weighted_mean",
+    "trend",
+    "aux_mean",
+    "aux_trend",
+]
 
 
 def connect():
@@ -226,8 +233,8 @@ def main():
               stddev,
               weighted_mean,
               trend,
-              recs_mean,
-              recs_trend,
+              aux_mean,
+              aux_trend,
               extra_features,
               label_actual
             FROM player_market_features
