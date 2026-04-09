@@ -134,14 +134,14 @@ def _get_safe_upstream_markets(db: Session, market_code: str):
         "rec_tds": ["targets", "recs"],
 
         # passing
-        "pass_yds": ["pass_attempts", "pass_completions"],
-        "pass_tds": ["pass_attempts", "pass_completions"],
-        "pass_ints": ["pass_attempts", "pass_completions"],
-        "pass_completions": ["pass_attempts"],
+        "pass_yds": ["pass_att"],
+        "pass_tds": ["pass_att", "pass_completions"],
+        "pass_ints": ["pass_att", "pass_completions"],
+        "pass_completions": ["pass_att"],
 
         # rushing
-        "rush_yds": ["carries"],
-        "rush_tds": ["carries"],
+        "rush_yds": ["rush_att"],
+        "rush_tds": ["rush_att"],
 
         # others isolated for now
         "carries": [],
@@ -226,32 +226,102 @@ def build_features(
         alias = _safe_identifier(code)
         select_upstream_sql += f", COALESCE(pgs.{col}, 0)::float8 AS {alias}"
 
+
     sql = f"""
+        WITH team_rush_offense AS (
+            SELECT
+                team,
+                game_date,
+                SUM(COALESCE(carries, 0))::float8 AS team_rush_attempts
+            FROM player_game_stats_app
+            WHERE game_date IS NOT NULL
+              AND team IS NOT NULL
+            GROUP BY team, game_date
+        ),
+        team_rush_defense AS (
+            SELECT
+                opponent AS defense_team,
+                game_date,
+                SUM(COALESCE(carries, 0))::float8 AS opp_carries_allowed,
+                SUM(COALESCE(rushing_yards, 0))::float8 AS opp_rush_yards_allowed
+            FROM player_game_stats_app
+            WHERE game_date IS NOT NULL
+              AND opponent IS NOT NULL
+            GROUP BY opponent, game_date
+        ),
+        team_pass_offense AS (
+            SELECT
+                team,
+                game_date,
+                SUM(COALESCE(attempts, 0))::float8 AS team_pass_attempts_calc
+            FROM player_game_stats_app
+            WHERE game_date IS NOT NULL
+              AND team IS NOT NULL
+            GROUP BY team, game_date
+        ),
+        team_pass_defense AS (
+            SELECT
+                opponent AS defense_team,
+                game_date,
+                SUM(COALESCE(attempts, 0))::float8 AS opp_pass_attempts_allowed,
+                SUM(COALESCE(passing_yards, 0))::float8 AS opp_pass_yards_allowed
+            FROM player_game_stats_app
+            WHERE game_date IS NOT NULL
+              AND opponent IS NOT NULL
+            GROUP BY opponent, game_date
+        )
         SELECT
             pgs.player_id,
             pgs.team,
             pgs.position,
             pgs.game_date,
             pgs.opponent,
+
             COALESCE(pgs.{stat_field}, 0)::float8 AS y,
             COALESCE(pgs.targets, 0)::float8 AS targets,
             COALESCE(pgs.receptions, 0)::float8 AS receptions,
             COALESCE(pgs.receiving_yards, 0)::float8 AS receiving_yards,
+            COALESCE(pgs.carries, 0)::float8 AS carries,
+            COALESCE(pgs.rushing_yards, 0)::float8 AS rushing_yards,
+            COALESCE(pgs.attempts, 0)::float8 AS pass_attempts,
+            COALESCE(pgs.completions, 0)::float8 AS completions,
+            COALESCE(pgs.passing_yards, 0)::float8 AS passing_yards,
+            COALESCE(tpo.team_pass_attempts_calc, 0)::float8 AS team_pass_attempts_calc,
+            COALESCE(tpd.opp_pass_attempts_allowed, 0)::float8 AS opp_pass_attempts_allowed,
+            COALESCE(tpd.opp_pass_yards_allowed, 0)::float8 AS opp_pass_yards_allowed,
             COALESCE(top.team_pass_attempts, 0)::float8 AS team_pass_attempts,
             COALESCE(tdr.opp_rec_yds_allowed, 0)::float8 AS opp_rec_yds_allowed,
             COALESCE(tdr.opp_targets_allowed, 0)::float8 AS opp_targets_allowed,
             COALESCE(tdrr.opp_rec_yds_allowed_rolling, 0)::float8 AS opp_rec_yds_allowed_rolling,
-            COALESCE(tdrr.opp_targets_allowed_rolling, 0)::float8 AS opp_targets_allowed_rolling
+            COALESCE(tdrr.opp_targets_allowed_rolling, 0)::float8 AS opp_targets_allowed_rolling,
+
+            COALESCE(tro.team_rush_attempts, 0)::float8 AS team_rush_attempts,
+            COALESCE(trd.opp_rush_yards_allowed, 0)::float8 AS opp_rush_yards_allowed,
+            COALESCE(trd.opp_carries_allowed, 0)::float8 AS opp_carries_allowed
+
             {select_upstream_sql}
         FROM player_game_stats_app pgs
+        LEFT JOIN team_pass_offense tpo
+            ON tpo.team = pgs.team
+           AND tpo.game_date = pgs.game_date
+
+        LEFT JOIN team_pass_defense tpd
+            ON tpd.defense_team = pgs.opponent
+           AND tpd.game_date = pgs.game_date
         LEFT JOIN team_offense_pass top
             ON top.team = pgs.team
-          AND top.game_date = pgs.game_date
+           AND top.game_date = pgs.game_date
         LEFT JOIN team_defense_rec tdr
             ON tdr.team = pgs.opponent
         LEFT JOIN team_defense_rec_rolling tdrr
             ON tdrr.defense_team = pgs.opponent
-          AND tdrr.game_date = pgs.game_date
+           AND tdrr.game_date = pgs.game_date
+        LEFT JOIN team_rush_offense tro
+            ON tro.team = pgs.team
+           AND tro.game_date = pgs.game_date
+        LEFT JOIN team_rush_defense trd
+            ON trd.defense_team = pgs.opponent
+           AND trd.game_date = pgs.game_date
         WHERE pgs.game_date IS NOT NULL
           AND pgs.opponent IS NOT NULL
         ORDER BY pgs.player_id, pgs.game_date
@@ -278,8 +348,8 @@ def build_features(
             stddev,
             weighted_mean,
             trend,
-            recs_mean,
-            recs_trend,
+            aux_mean,
+            aux_trend,
             extra_features
           )
         VALUES
@@ -293,8 +363,8 @@ def build_features(
             :stddev,
             :weighted_mean,
             :trend,
-            :recs_mean,
-            :recs_trend,
+            :aux_mean,
+            :aux_trend,
             CAST(:extra_features AS jsonb)
           )
         ON CONFLICT (player_id, market_id, as_of_game_date, opponent, lookback)
@@ -303,8 +373,8 @@ def build_features(
           stddev = EXCLUDED.stddev,
           weighted_mean = EXCLUDED.weighted_mean,
           trend = EXCLUDED.trend,
-          recs_mean = EXCLUDED.recs_mean,
-          recs_trend = EXCLUDED.recs_trend,
+          aux_mean = EXCLUDED.aux_mean,
+          aux_trend = EXCLUDED.aux_trend,
           extra_features = EXCLUDED.extra_features
         """
     )
@@ -357,11 +427,250 @@ def build_features(
                     aux_trend = _trend_slope(aux_window)
 
             extra_features = {}
+
             for code, _col in upstream_cols:
                 vals = [float(g.get(code, 0.0) or 0.0) for g in window_games]
                 if vals:
                     extra_features[f"{code}_mean"] = _mean(vals)
                     extra_features[f"{code}_trend"] = _trend_slope(vals)
+
+            if feature_family == "rushing":
+                carries_window = [float(g.get("carries", 0.0) or 0.0)
+                                        for g in window_games]
+                rush_yards_window = [
+                    float(g.get("rushing_yards", 0.0) or 0.0) for g in window_games]
+
+                if carries_window:
+                    extra_features["carries_weighted_mean"] = _weighted_mean_recent(
+                        carries_window)
+
+                team_rush_window = [
+                    float(g.get("team_rush_attempts", 0.0) or 0.0) for g in window_games]
+                team_rush_window_nonzero = [
+                    v for v in team_rush_window if v > 0]
+
+                if team_rush_window_nonzero:
+                    extra_features["team_rush_attempts"] = _mean(
+                        team_rush_window_nonzero)
+                    extra_features["team_rush_attempts_trend"] = _trend_slope(
+                        team_rush_window_nonzero)
+
+                if carries_window and team_rush_window:
+                    cs_vals = []
+                    for c, tr_team in zip(carries_window, team_rush_window):
+                        if tr_team > 0:
+                            cs_vals.append(c / tr_team)
+
+                    if cs_vals:
+                        extra_features["carry_share_mean"] = _mean(cs_vals)
+                        extra_features["carry_share_trend"] = _trend_slope(
+                            cs_vals)
+
+                if market_code == "rush_yds" and carries_window and rush_yards_window:
+                    ypc_vals = []
+                    for y, c in zip(rush_yards_window, carries_window):
+                        if c > 0:
+                            ypc_vals.append(y / c)
+
+                    if ypc_vals:
+                        extra_features["yards_per_carry_mean"] = _mean(ypc_vals)
+                        extra_features["yards_per_carry_trend"] = _trend_slope(ypc_vals)
+
+                opp_rush_vals = [
+                    float(g.get("opp_rush_yards_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                opp_carry_vals = [
+                    float(g.get("opp_carries_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+
+                opp_rush_vals_nonzero = [v for v in opp_rush_vals if v > 0]
+                opp_carry_vals_nonzero = [v for v in opp_carry_vals if v > 0]
+
+                if opp_rush_vals_nonzero:
+                    extra_features["opp_rush_yards_allowed"] = _mean(
+                        opp_rush_vals_nonzero)
+
+                if opp_carry_vals_nonzero:
+                    extra_features["opp_carries_allowed"] = _mean(
+                        opp_carry_vals_nonzero)
+
+                if opp_rush_vals and opp_carry_vals:
+                    opp_ypc_vals = []
+                    for oy, oc in zip(opp_rush_vals, opp_carry_vals):
+                        if oc > 0:
+                            opp_ypc_vals.append(oy / oc)
+
+                    if opp_ypc_vals:
+                        extra_features["opp_yards_per_carry_allowed"] = _mean(
+                            opp_ypc_vals)
+                        extra_features["opp_yards_per_carry_trend"] = _trend_slope(
+                            opp_ypc_vals)
+                        
+            if feature_family == "passing":
+                pass_window = [float(g.get("pass_attempts", 0.0) or 0.0) for g in window_games]
+                completions_window = [float(g.get("completions", 0.0) or 0.0) for g in window_games]
+                pass_yds_window = [float(g.get("passing_yards", 0.0) or 0.0) for g in window_games]
+
+                if pass_window:
+                    extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
+
+                team_pass_window = [float(g.get("team_pass_attempts_calc", 0.0) or 0.0) for g in window_games]
+                team_pass_nonzero = [v for v in team_pass_window if v > 0]
+
+                if team_pass_nonzero:
+                    extra_features["team_pass_attempts"] = _mean(team_pass_nonzero)
+                    extra_features["team_pass_attempts_trend"] = _trend_slope(team_pass_nonzero)
+
+                if pass_window and team_pass_window:
+                    share_vals = []
+                    for pa, tp in zip(pass_window, team_pass_window):
+                        if tp > 0:
+                            share_vals.append(pa / tp)
+
+                    if share_vals:
+                        extra_features["pass_share_mean"] = _mean(share_vals)
+                        extra_features["pass_share_trend"] = _trend_slope(share_vals)
+
+                if market_code == "pass_completions" and pass_window and completions_window:
+                    comp_rate_vals = []
+                    for comp, att in zip(completions_window, pass_window):
+                        if att > 0:
+                            comp_rate_vals.append(comp / att)
+
+                    if comp_rate_vals:
+                        extra_features["completion_rate_mean"] = _mean(comp_rate_vals)
+                        extra_features["completion_rate_trend"] = _trend_slope(comp_rate_vals)
+
+                if market_code == "pass_yds" and pass_window and pass_yds_window:
+                    ypa_vals = []
+                    for py, pa in zip(pass_yds_window, pass_window):
+                        if pa > 0:
+                            ypa_vals.append(py / pa)
+
+                    if ypa_vals:
+                        extra_features["yards_per_attempt_mean"] = _mean(ypa_vals)
+                        extra_features["yards_per_attempt_trend"] = _trend_slope(ypa_vals)
+
+                opp_pass_vals = [
+                    float(g.get("opp_pass_attempts_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                opp_pass_nonzero = [v for v in opp_pass_vals if v > 0]
+
+                if opp_pass_nonzero:
+                    extra_features["opp_pass_attempts_allowed"] = _mean(opp_pass_nonzero)
+                    extra_features["opp_pass_attempts_trend"] = _trend_slope(opp_pass_nonzero)
+
+                opp_pass_yds_vals = [
+                    float(g.get("opp_pass_yards_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                opp_pass_yds_nonzero = [v for v in opp_pass_yds_vals if v > 0]
+
+                if opp_pass_yds_nonzero:
+                    extra_features["opp_pass_yards_allowed"] = _mean(opp_pass_yds_nonzero)
+
+                if opp_pass_vals and opp_pass_yds_vals:
+                    opp_ypa_vals = []
+                    for oy, oa in zip(opp_pass_yds_vals, opp_pass_vals):
+                        if oa > 0:
+                            opp_ypa_vals.append(oy / oa)
+
+                    if opp_ypa_vals:
+                        extra_features["opp_yards_per_attempt_allowed"] = _mean(opp_ypa_vals)
+                        extra_features["opp_yards_per_attempt_trend"] = _trend_slope(opp_ypa_vals)
+
+                if pass_window:
+                    extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
+
+                team_pass_window = [float(g.get("team_pass_attempts_calc", 0.0) or 0.0) for g in window_games]
+                team_pass_nonzero = [v for v in team_pass_window if v > 0]
+
+                if team_pass_nonzero:
+                    extra_features["team_pass_attempts"] = _mean(team_pass_nonzero)
+                    extra_features["team_pass_attempts_trend"] = _trend_slope(team_pass_nonzero)
+
+                if pass_window and team_pass_window:
+                    share_vals = []
+                    for pa, tp in zip(pass_window, team_pass_window):
+                        if tp > 0:
+                            share_vals.append(pa / tp)
+
+                    if share_vals:
+                        extra_features["pass_share_mean"] = _mean(share_vals)
+                        extra_features["pass_share_trend"] = _trend_slope(share_vals)
+
+                if market_code == "pass_yds" and pass_window and pass_yds_window:
+                    ypa_vals = []
+                    for py, pa in zip(pass_yds_window, pass_window):
+                        if pa > 0:
+                            ypa_vals.append(py / pa)
+
+                    if ypa_vals:
+                        extra_features["yards_per_attempt_mean"] = _mean(ypa_vals)
+                        extra_features["yards_per_attempt_trend"] = _trend_slope(ypa_vals)
+
+                opp_pass_vals = [
+                    float(g.get("opp_pass_attempts_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                opp_pass_nonzero = [v for v in opp_pass_vals if v > 0]
+
+                if opp_pass_nonzero:
+                    extra_features["opp_pass_attempts_allowed"] = _mean(opp_pass_nonzero)
+                    extra_features["opp_pass_attempts_trend"] = _trend_slope(opp_pass_nonzero)
+
+                opp_pass_yds_vals = [
+                    float(g.get("opp_pass_yards_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                opp_pass_yds_nonzero = [v for v in opp_pass_yds_vals if v > 0]
+
+                if opp_pass_yds_nonzero:
+                    extra_features["opp_pass_yards_allowed"] = _mean(opp_pass_yds_nonzero)
+
+                if opp_pass_vals and opp_pass_yds_vals:
+                    opp_ypa_vals = []
+                    for oy, oa in zip(opp_pass_yds_vals, opp_pass_vals):
+                        if oa > 0:
+                            opp_ypa_vals.append(oy / oa)
+
+                    if opp_ypa_vals:
+                        extra_features["opp_yards_per_attempt_allowed"] = _mean(opp_ypa_vals)
+                        extra_features["opp_yards_per_attempt_trend"] = _trend_slope(opp_ypa_vals)
+
+                if pass_window:
+                    extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
+
+                team_pass_window = [float(g.get("team_pass_attempts_calc", 0.0) or 0.0) for g in window_games]
+                team_pass_nonzero = [v for v in team_pass_window if v > 0]
+
+                if team_pass_nonzero:
+                    extra_features["team_pass_attempts"] = _mean(team_pass_nonzero)
+                    extra_features["team_pass_attempts_trend"] = _trend_slope(team_pass_nonzero)
+
+                if pass_window and team_pass_window:
+                    share_vals = []
+                    for pa, tp in zip(pass_window, team_pass_window):
+                        if tp > 0:
+                            share_vals.append(pa / tp)
+
+                    if share_vals:
+                        extra_features["pass_share_mean"] = _mean(share_vals)
+                        extra_features["pass_share_trend"] = _trend_slope(share_vals)
+
+                opp_pass_vals = [
+                    float(g.get("opp_pass_attempts_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+
+                opp_pass_nonzero = [v for v in opp_pass_vals if v > 0]
+
+                if opp_pass_nonzero:
+                    extra_features["opp_pass_attempts_allowed"] = _mean(opp_pass_nonzero)
+                    extra_features["opp_pass_attempts_trend"] = _trend_slope(opp_pass_nonzero)
 
             if feature_family == "receiving":
                 targets_window = [float(g.get("targets", 0.0) or 0.0)
@@ -370,22 +679,24 @@ def build_features(
                     extra_features["targets_weighted_mean"] = _weighted_mean_recent(
                         targets_window)
 
-                if targets_window:
+                if targets_window and market_code == "rec_yds":
                     ypt_vals = [
                         (y / t) if t not in (None, 0, 0.0) else 0.0
                         for y, t in zip(window, targets_window)
                     ]
                     extra_features["yards_per_target_mean"] = _mean(ypt_vals)
-                    extra_features["yards_per_target_trend"] = _trend_slope(ypt_vals)
+                    extra_features["yards_per_target_trend"] = _trend_slope(
+                        ypt_vals)
 
                 team_pass_window = [
-                    float(g.get("team_pass_attempts", 0.0) or 0.0) for g in window_games]
+                    float(g.get("team_pass_attempts", 0.0) or 0.0) for g in window_games
+                ]
                 if team_pass_window:
                     extra_features["team_pass_attempts"] = _mean(
                         team_pass_window)
                     extra_features["team_pass_attempts_trend"] = _trend_slope(
                         team_pass_window)
-                    
+
                 if targets_window and team_pass_window:
                     ts_vals = []
                     for t, tp in zip(targets_window, team_pass_window):
@@ -396,7 +707,8 @@ def build_features(
 
                     if ts_vals:
                         extra_features["target_share_mean"] = _mean(ts_vals)
-                        extra_features["target_share_trend"] = _trend_slope(ts_vals)
+                        extra_features["target_share_trend"] = _trend_slope(
+                            ts_vals)
 
                 opp_rec_vals = []
                 opp_targets_vals = []
@@ -414,8 +726,6 @@ def build_features(
                         opp_rec_roll if opp_rec_roll > 0 else opp_rec_base)
                     opp_targets_vals.append(
                         opp_targets_roll if opp_targets_roll > 0 else opp_targets_base)
-                    
-                # Normalize opponent defense by team pass volume
 
                 opp_adj = []
                 for opp_y, team_pass in zip(opp_rec_vals, team_pass_window):
@@ -426,8 +736,8 @@ def build_features(
 
                 if opp_adj:
                     extra_features["opp_rec_yds_per_attempt"] = _mean(opp_adj)
-                    extra_features["opp_rec_yds_per_attempt_trend"] = _trend_slope(opp_adj)
-
+                    extra_features["opp_rec_yds_per_attempt_trend"] = _trend_slope(
+                        opp_adj)
 
                 opp_tgt_adj = []
                 for opp_t, team_pass in zip(opp_targets_vals, team_pass_window):
@@ -437,8 +747,10 @@ def build_features(
                         opp_tgt_adj.append(0.0)
 
                 if opp_tgt_adj:
-                    extra_features["opp_target_rate_allowed"] = _mean(opp_tgt_adj)
-                    extra_features["opp_target_rate_trend"] = _trend_slope(opp_tgt_adj)
+                    extra_features["opp_target_rate_allowed"] = _mean(
+                        opp_tgt_adj)
+                    extra_features["opp_target_rate_trend"] = _trend_slope(
+                        opp_tgt_adj)
 
             db.execute(
                 upsert_sql,
@@ -452,8 +764,8 @@ def build_features(
                     "stddev": sd,
                     "weighted_mean": wmu,
                     "trend": tr,
-                    "recs_mean": aux_mean,
-                    "recs_trend": aux_trend,
+                    "aux_mean": aux_mean,
+                    "aux_trend": aux_trend,
                     "extra_features": json.dumps(extra_features),
                 },
             )

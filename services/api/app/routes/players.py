@@ -188,8 +188,8 @@ def projection_ml(
               stddev,
               weighted_mean,
               trend,
-              COALESCE(recs_mean, 0.0) AS recs_mean,
-              COALESCE(recs_trend, 0.0) AS recs_trend,
+              COALESCE(aux_mean, COALESCE(recs_mean, 0.0)) AS aux_mean,
+              COALESCE(aux_trend, COALESCE(recs_trend, 0.0)) AS aux_trend,
               extra_features
             FROM player_market_features
             WHERE player_id = :external_id
@@ -213,8 +213,10 @@ def projection_ml(
         "stddev": float(feat["stddev"] or 0.0),
         "weighted_mean": float(feat["weighted_mean"] or 0.0),
         "trend": float(feat["trend"] or 0.0),
-        "recs_mean": float(feat["recs_mean"] or 0.0),
-        "recs_trend": float(feat["recs_trend"] or 0.0),
+        "aux_mean": float(feat["aux_mean"] or 0.0),
+        "aux_trend": float(feat["aux_trend"] or 0.0),
+        "recs_mean": float(feat["aux_mean"] or 0.0),
+        "recs_trend": float(feat["aux_trend"] or 0.0),
     }
 
     extra = feat["extra_features"] or {}
