@@ -21,9 +21,27 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+def build_model(model_name: str):
+    if model_name.startswith("gb"):
+        return GradientBoostingRegressor(
+            n_estimators=300,
+            learning_rate=0.05,
+            max_depth=3,
+            random_state=42,
+        )
+
+    return RandomForestRegressor(
+        n_estimators=300,
+        max_depth=8,
+        min_samples_split=10,
+        min_samples_leaf=5,
+        max_features="sqrt",
+        random_state=42,
+        n_jobs=-1,
+    )
 
 DB_HOST = os.getenv("POSTGRES_HOST", "postgres")
 DB_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
@@ -33,6 +51,7 @@ DB_PASS = os.getenv("POSTGRES_PASSWORD", "app")
 
 MARKET_CODE = os.getenv("MARKET_CODE", "rec_yds")
 LOOKBACK = int(os.getenv("LOOKBACK", "5"))
+model_name = os.getenv("MODEL_NAME", "rf_default")
 MODEL_NAME = os.getenv("MODEL_NAME", "rf_v1")
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 
@@ -243,13 +262,7 @@ def main():
         y_train = train_df[LABEL_COL].apply(_safe_float).astype(float)
         y_test = test_df[LABEL_COL].apply(_safe_float).astype(float)
 
-        model = RandomForestRegressor(
-            n_estimators=300,
-            max_depth=12,
-            min_samples_leaf=3,
-            random_state=42,
-            n_jobs=-1,
-        )
+        model = build_model(model_name)
         model.fit(X_train, y_train)
 
         preds = model.predict(X_test)

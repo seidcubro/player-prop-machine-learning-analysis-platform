@@ -51,7 +51,8 @@ def _trend_slope(vals):
 
 def _safe_identifier(name: str) -> str:
     if not name or not _IDENTIFIER_RE.match(name):
-        raise HTTPException(status_code=400, detail=f"Unsafe SQL identifier: {name}")
+        raise HTTPException(
+            status_code=400, detail=f"Unsafe SQL identifier: {name}")
     return name
 
 
@@ -115,7 +116,8 @@ def _get_market(db: Session, market_code: str):
     ).mappings().first()
 
     if not m:
-        raise HTTPException(status_code=404, detail=f"Unknown market_code: {market_code}")
+        raise HTTPException(
+            status_code=404, detail=f"Unknown market_code: {market_code}")
 
     return m
 
@@ -196,13 +198,17 @@ def build_features(
     m = _get_market(db, market_code)
 
     if not m["is_active"]:
-        raise HTTPException(status_code=400, detail=f"Market is inactive: {market_code}")
+        raise HTTPException(
+            status_code=400, detail=f"Market is inactive: {market_code}")
     if not m["train_enabled"]:
-        raise HTTPException(status_code=400, detail=f"Training disabled for market: {market_code}")
+        raise HTTPException(
+            status_code=400, detail=f"Training disabled for market: {market_code}")
     if m["scope"] != "player":
-        raise HTTPException(status_code=400, detail=f"Only player-scoped markets are supported here. Got: {m['scope']}")
+        raise HTTPException(
+            status_code=400, detail=f"Only player-scoped markets are supported here. Got: {m['scope']}")
     if m["target_kind"] != "regression":
-        raise HTTPException(status_code=400, detail=f"Only regression markets are supported here. Got: {m['target_kind']}")
+        raise HTTPException(
+            status_code=400, detail=f"Only regression markets are supported here. Got: {m['target_kind']}")
 
     stat_field = _safe_identifier(str(m["stat_field"]))
     if not _column_exists(db, "player_game_stats_app", stat_field):
@@ -222,13 +228,30 @@ def build_features(
 
     sql = f"""
         SELECT
-          pgs.player_id,
-          pgs.position,
-          pgs.game_date,
-          pgs.opponent,
-          COALESCE(pgs.{stat_field}, 0)::float8 AS y
-          {select_upstream_sql}
+            pgs.player_id,
+            pgs.team,
+            pgs.position,
+            pgs.game_date,
+            pgs.opponent,
+            COALESCE(pgs.{stat_field}, 0)::float8 AS y,
+            COALESCE(pgs.targets, 0)::float8 AS targets,
+            COALESCE(pgs.receptions, 0)::float8 AS receptions,
+            COALESCE(pgs.receiving_yards, 0)::float8 AS receiving_yards,
+            COALESCE(top.team_pass_attempts, 0)::float8 AS team_pass_attempts,
+            COALESCE(tdr.opp_rec_yds_allowed, 0)::float8 AS opp_rec_yds_allowed,
+            COALESCE(tdr.opp_targets_allowed, 0)::float8 AS opp_targets_allowed,
+            COALESCE(tdrr.opp_rec_yds_allowed_rolling, 0)::float8 AS opp_rec_yds_allowed_rolling,
+            COALESCE(tdrr.opp_targets_allowed_rolling, 0)::float8 AS opp_targets_allowed_rolling
+            {select_upstream_sql}
         FROM player_game_stats_app pgs
+        LEFT JOIN team_offense_pass top
+            ON top.team = pgs.team
+          AND top.game_date = pgs.game_date
+        LEFT JOIN team_defense_rec tdr
+            ON tdr.team = pgs.opponent
+        LEFT JOIN team_defense_rec_rolling tdrr
+            ON tdrr.defense_team = pgs.opponent
+          AND tdrr.game_date = pgs.game_date
         WHERE pgs.game_date IS NOT NULL
           AND pgs.opponent IS NOT NULL
         ORDER BY pgs.player_id, pgs.game_date
@@ -303,7 +326,6 @@ def build_features(
             wmu = _weighted_mean_recent(window)
             tr = _trend_slope(window)
 
-            # keep the old columns for compatibility with current train.py
             aux_mean = None
             aux_trend = None
 
@@ -334,12 +356,89 @@ def build_features(
                     aux_mean = _mean(aux_window)
                     aux_trend = _trend_slope(aux_window)
 
-            upstream_features = {}
+            extra_features = {}
             for code, _col in upstream_cols:
                 vals = [float(g.get(code, 0.0) or 0.0) for g in window_games]
                 if vals:
-                    upstream_features[f"{code}_mean"] = _mean(vals)
-                    upstream_features[f"{code}_trend"] = _trend_slope(vals)
+                    extra_features[f"{code}_mean"] = _mean(vals)
+                    extra_features[f"{code}_trend"] = _trend_slope(vals)
+
+            if feature_family == "receiving":
+                targets_window = [float(g.get("targets", 0.0) or 0.0)
+                                  for g in window_games]
+                if targets_window:
+                    extra_features["targets_weighted_mean"] = _weighted_mean_recent(
+                        targets_window)
+
+                if targets_window:
+                    ypt_vals = [
+                        (y / t) if t not in (None, 0, 0.0) else 0.0
+                        for y, t in zip(window, targets_window)
+                    ]
+                    extra_features["yards_per_target_mean"] = _mean(ypt_vals)
+                    extra_features["yards_per_target_trend"] = _trend_slope(ypt_vals)
+
+                team_pass_window = [
+                    float(g.get("team_pass_attempts", 0.0) or 0.0) for g in window_games]
+                if team_pass_window:
+                    extra_features["team_pass_attempts"] = _mean(
+                        team_pass_window)
+                    extra_features["team_pass_attempts_trend"] = _trend_slope(
+                        team_pass_window)
+                    
+                if targets_window and team_pass_window:
+                    ts_vals = []
+                    for t, tp in zip(targets_window, team_pass_window):
+                        if tp > 0:
+                            ts_vals.append(t / tp)
+                        else:
+                            ts_vals.append(0.0)
+
+                    if ts_vals:
+                        extra_features["target_share_mean"] = _mean(ts_vals)
+                        extra_features["target_share_trend"] = _trend_slope(ts_vals)
+
+                opp_rec_vals = []
+                opp_targets_vals = []
+                for g in window_games:
+                    opp_rec_roll = float(
+                        g.get("opp_rec_yds_allowed_rolling", 0.0) or 0.0)
+                    opp_rec_base = float(
+                        g.get("opp_rec_yds_allowed", 0.0) or 0.0)
+                    opp_targets_roll = float(
+                        g.get("opp_targets_allowed_rolling", 0.0) or 0.0)
+                    opp_targets_base = float(
+                        g.get("opp_targets_allowed", 0.0) or 0.0)
+
+                    opp_rec_vals.append(
+                        opp_rec_roll if opp_rec_roll > 0 else opp_rec_base)
+                    opp_targets_vals.append(
+                        opp_targets_roll if opp_targets_roll > 0 else opp_targets_base)
+                    
+                # Normalize opponent defense by team pass volume
+
+                opp_adj = []
+                for opp_y, team_pass in zip(opp_rec_vals, team_pass_window):
+                    if team_pass > 0:
+                        opp_adj.append(opp_y / team_pass)
+                    else:
+                        opp_adj.append(0.0)
+
+                if opp_adj:
+                    extra_features["opp_rec_yds_per_attempt"] = _mean(opp_adj)
+                    extra_features["opp_rec_yds_per_attempt_trend"] = _trend_slope(opp_adj)
+
+
+                opp_tgt_adj = []
+                for opp_t, team_pass in zip(opp_targets_vals, team_pass_window):
+                    if team_pass > 0:
+                        opp_tgt_adj.append(opp_t / team_pass)
+                    else:
+                        opp_tgt_adj.append(0.0)
+
+                if opp_tgt_adj:
+                    extra_features["opp_target_rate_allowed"] = _mean(opp_tgt_adj)
+                    extra_features["opp_target_rate_trend"] = _trend_slope(opp_tgt_adj)
 
             db.execute(
                 upsert_sql,
@@ -355,7 +454,7 @@ def build_features(
                     "trend": tr,
                     "recs_mean": aux_mean,
                     "recs_trend": aux_trend,
-                    "extra_features": json.dumps(upstream_features),
+                    "extra_features": json.dumps(extra_features),
                 },
             )
             upserts += 1
@@ -383,13 +482,17 @@ def attach_labels(
     m = _get_market(db, market_code)
 
     if not m["is_active"]:
-        raise HTTPException(status_code=400, detail=f"Market is inactive: {market_code}")
+        raise HTTPException(
+            status_code=400, detail=f"Market is inactive: {market_code}")
     if not m["train_enabled"]:
-        raise HTTPException(status_code=400, detail=f"Training disabled for market: {market_code}")
+        raise HTTPException(
+            status_code=400, detail=f"Training disabled for market: {market_code}")
     if m["scope"] != "player":
-        raise HTTPException(status_code=400, detail=f"Only player-scoped markets are supported here. Got: {m['scope']}")
+        raise HTTPException(
+            status_code=400, detail=f"Only player-scoped markets are supported here. Got: {m['scope']}")
     if m["target_kind"] != "regression":
-        raise HTTPException(status_code=400, detail=f"Only regression markets are supported here. Got: {m['target_kind']}")
+        raise HTTPException(
+            status_code=400, detail=f"Only regression markets are supported here. Got: {m['target_kind']}")
 
     stat_field = _safe_identifier(str(m["stat_field"]))
     if not _column_exists(db, "player_game_stats_app", stat_field):

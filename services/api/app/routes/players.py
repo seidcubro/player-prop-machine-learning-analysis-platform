@@ -1,4 +1,4 @@
-﻿"""Player-related API routes."""
+"""Player-related API routes."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -165,6 +165,19 @@ def projection_ml(
         raise HTTPException(
             status_code=500, detail=f"Model artifact not found at: {artifact_path}")
 
+    meta_path = os.path.splitext(artifact_path)[0] + ".json"
+    if not os.path.exists(meta_path):
+        raise HTTPException(
+            status_code=500, detail=f"Model metadata not found at: {meta_path}")
+
+    with open(meta_path, "r", encoding="utf-8") as f:
+        model_meta = json.load(f)
+
+    feature_order = model_meta.get("feature_cols") or model_meta.get("feature_columns")
+    if not feature_order:
+        raise HTTPException(
+            status_code=500, detail=f"Model metadata missing feature_cols in: {meta_path}")
+
     feat = db.execute(
         text(
             """
@@ -176,7 +189,8 @@ def projection_ml(
               weighted_mean,
               trend,
               COALESCE(recs_mean, 0.0) AS recs_mean,
-              COALESCE(recs_trend, 0.0) AS recs_trend
+              COALESCE(recs_trend, 0.0) AS recs_trend,
+              extra_features
             FROM player_market_features
             WHERE player_id = :external_id
               AND market_id = :market_id
@@ -194,9 +208,37 @@ def projection_ml(
             detail=f"No features found for player external_id={external_id}, market={market_code}, lookback={lookback}",
         )
 
-    features_obj = {c: float(feat[c]) for c in FEATURE_COLS}
+    features_obj = {
+        "mean": float(feat["mean"] or 0.0),
+        "stddev": float(feat["stddev"] or 0.0),
+        "weighted_mean": float(feat["weighted_mean"] or 0.0),
+        "trend": float(feat["trend"] or 0.0),
+        "recs_mean": float(feat["recs_mean"] or 0.0),
+        "recs_trend": float(feat["recs_trend"] or 0.0),
+    }
 
-    X = [[features_obj[c] for c in FEATURE_COLS]]
+    extra = feat["extra_features"] or {}
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except Exception:
+            extra = {}
+    elif not isinstance(extra, dict):
+        extra = {}
+
+    for k, v in extra.items():
+        try:
+            features_obj[str(k)] = float(v or 0.0)
+        except Exception:
+            features_obj[str(k)] = 0.0
+
+    if "targets_mean" in features_obj and "team_pass_attempts" in features_obj:
+        denom = float(features_obj.get("team_pass_attempts", 0.0) or 0.0)
+        numer = float(features_obj.get("targets_mean", 0.0) or 0.0)
+        features_obj["target_share"] = 0.0 if denom == 0.0 else max(0.0, min(1.0, numer / denom))
+
+    X = [[float(features_obj.get(col, 0.0)) for col in feature_order]]
+
     pipe = joblib.load(artifact_path)
     pred = float(pipe.predict(X)[0])
 
