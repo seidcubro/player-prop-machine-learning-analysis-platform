@@ -1380,6 +1380,38 @@ def ingest_pbp_aggregated(seasons: Iterable[int]):
     print(f"  ingest_pbp_aggregated: {len(out)} rows")
 
 
+def sync_targets_from_pbp():
+    """
+    Permanent target fix:
+    Use aggregated play-by-play receiver rows as the source of truth for targets.
+    In pbp_player_game, receiver rows use total_plays = number of pass targets for that player-game.
+    Merge those targets back into player_game_stats, then refresh player_game_stats_app.
+    """
+    with _engine().begin() as conn:
+        updated = conn.execute(text("""
+            UPDATE player_game_stats pgs
+            SET targets = src.targets
+            FROM (
+                SELECT
+                    player_id,
+                    game_id,
+                    CAST(total_plays AS FLOAT) AS targets
+                FROM pbp_player_game
+                WHERE player_id IS NOT NULL
+                  AND game_id IS NOT NULL
+                  AND total_plays IS NOT NULL
+                  AND total_plays > 0
+            ) AS src
+            WHERE pgs.player_id = src.player_id
+              AND pgs.game_id = src.game_id
+        """))
+        print(f"  sync_targets_from_pbp: updated {updated.rowcount} player_game_stats rows")
+
+        conn.execute(text("TRUNCATE TABLE player_game_stats_app"))
+        conn.execute(text("INSERT INTO player_game_stats_app SELECT * FROM player_game_stats"))
+        print("  sync_targets_from_pbp: refreshed player_game_stats_app")
+
+
 def ingest_ff_opportunity(seasons: Iterable[int]):
     seasons_list = list(seasons)
     df = _as_pandas(nflreadpy.load_ff_opportunity(seasons_list))
@@ -1575,6 +1607,9 @@ def run():
 
     print("--- PBP aggregated ---")
     ingest_pbp_aggregated(seasons)
+
+    print("--- sync targets from PBP into player_game_stats ---")
+    sync_targets_from_pbp()
 
     print("Ingestion complete.")
 
