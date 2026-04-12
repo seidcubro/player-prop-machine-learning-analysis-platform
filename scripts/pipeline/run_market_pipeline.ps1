@@ -43,7 +43,7 @@ function Wait-Api([string]$url, [int]$timeoutSeconds) {
   $start = Get-Date
   while ($true) {
     try {
-      Invoke-RestMethod $url | Out-Null
+      Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 5 | Out-Null
       Write-Host ("OK: API ready at " + $url)
       return
     } catch {
@@ -61,8 +61,8 @@ function Wait-Api([string]$url, [int]$timeoutSeconds) {
 
 Require-Command "docker"
 
-$ApiBase = "http://localhost:8000/api/v1"
-$OpenApiUrl = "http://localhost:8000/openapi.json"
+$ApiBase = "http://127.0.0.1:8000/api/v1"
+$OpenApiUrl = "http://127.0.0.1:8000/openapi.json"
 
 Write-Step "Repo root"
 Write-Host (Get-Location)
@@ -156,7 +156,7 @@ Write-Step "Projection response"
 $projectionResult.projection | ConvertTo-Json -Depth 50 | Out-Host
 
 Write-Step "Projection history (last 5)"
-$histUrl = "$ApiBase/players/$playerIdCandidate/projection_history"
+$histUrl = "$ApiBase/players/$chosenId/projection_history"
 $histUrl += "?market_code=$($MarketCode)"
 $histUrl += "&model_name=$($ModelName)"
 $histUrl += "&lookback=$($Lookback)"

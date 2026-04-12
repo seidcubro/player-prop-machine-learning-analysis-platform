@@ -3,6 +3,6 @@ WORKDIR /app
 RUN pip install --no-cache-dir -U pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY train.py eval.py .
+COPY train.py eval.py train_moneyline.py .
 CMD python train.py
 

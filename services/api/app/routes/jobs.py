@@ -129,19 +129,21 @@ def _get_safe_upstream_markets(db: Session, market_code: str):
     """
     allowed_by_market = {
         # receiving
-        "rec_yds": ["targets", "recs"],
-        "recs": ["targets"],
-        "rec_tds": ["targets", "recs"],
-
-        # passing
-        "pass_yds": ["pass_att"],
-        "pass_tds": ["pass_att", "pass_completions"],
-        "pass_ints": ["pass_att", "pass_completions"],
-        "pass_completions": ["pass_att"],
+        "recs": [],
+        "rec_yds": ["recs"],
+        "rec_td": ["recs"],
 
         # rushing
+        "rush_att": [],
         "rush_yds": ["rush_att"],
-        "rush_tds": ["rush_att"],
+        "rush_td": ["rush_att"],
+
+        # passing
+        "pass_att": [],
+        "pass_completions": ["pass_att"],
+        "pass_yds": ["pass_att"],
+        "pass_td": ["pass_att", "pass_completions"],
+        "pass_ints": ["pass_att", "pass_completions"],
 
         # others isolated for now
         "carries": [],
@@ -281,11 +283,14 @@ def build_features(
             COALESCE(pgs.targets, 0)::float8 AS targets,
             COALESCE(pgs.receptions, 0)::float8 AS receptions,
             COALESCE(pgs.receiving_yards, 0)::float8 AS receiving_yards,
+            COALESCE(pgs.receiving_tds, 0)::float8 AS receiving_tds,
             COALESCE(pgs.carries, 0)::float8 AS carries,
             COALESCE(pgs.rushing_yards, 0)::float8 AS rushing_yards,
+            COALESCE(pgs.rushing_tds, 0)::float8 AS rushing_tds,
             COALESCE(pgs.attempts, 0)::float8 AS pass_attempts,
             COALESCE(pgs.completions, 0)::float8 AS completions,
             COALESCE(pgs.passing_yards, 0)::float8 AS passing_yards,
+            COALESCE(pgs.passing_tds, 0)::float8 AS passing_tds,
             COALESCE(tpo.team_pass_attempts_calc, 0)::float8 AS team_pass_attempts_calc,
             COALESCE(tpd.opp_pass_attempts_allowed, 0)::float8 AS opp_pass_attempts_allowed,
             COALESCE(tpd.opp_pass_yards_allowed, 0)::float8 AS opp_pass_yards_allowed,
@@ -476,6 +481,17 @@ def build_features(
                         extra_features["yards_per_carry_mean"] = _mean(ypc_vals)
                         extra_features["yards_per_carry_trend"] = _trend_slope(ypc_vals)
 
+                if market_code == "rush_td" and carries_window:
+                    td_window = [float(g.get("rushing_tds", 0.0) or 0.0) for g in window_games]
+
+                    td_rate_vals = []
+                    for td, c in zip(td_window, carries_window):
+                        if c > 0:
+                            td_rate_vals.append(td / c)
+
+                    if td_rate_vals:
+                        extra_features["rush_td_rate_mean"] = _mean(td_rate_vals)
+                        extra_features["rush_td_rate_trend"] = _trend_slope(td_rate_vals)
                 opp_rush_vals = [
                     float(g.get("opp_rush_yards_allowed", 0.0) or 0.0)
                     for g in window_games
@@ -512,6 +528,86 @@ def build_features(
                 pass_window = [float(g.get("pass_attempts", 0.0) or 0.0) for g in window_games]
                 completions_window = [float(g.get("completions", 0.0) or 0.0) for g in window_games]
                 pass_yds_window = [float(g.get("passing_yards", 0.0) or 0.0) for g in window_games]
+                pass_td_window = [float(g.get("passing_tds", 0.0) or 0.0) for g in window_games]
+
+                if pass_window:
+                    extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
+
+                team_pass_window = [float(g.get("team_pass_attempts_calc", 0.0) or 0.0) for g in window_games]
+                team_pass_nonzero = [v for v in team_pass_window if v > 0]
+
+                if team_pass_nonzero:
+                    extra_features["team_pass_attempts"] = _mean(team_pass_nonzero)
+                    extra_features["team_pass_attempts_trend"] = _trend_slope(team_pass_nonzero)
+
+                if pass_window and team_pass_window:
+                    share_vals = []
+                    for pa, tp in zip(pass_window, team_pass_window):
+                        if tp > 0:
+                            share_vals.append(pa / tp)
+
+                    if share_vals:
+                        extra_features["pass_share_mean"] = _mean(share_vals)
+                        extra_features["pass_share_trend"] = _trend_slope(share_vals)
+
+                if market_code == "pass_completions" and pass_window and completions_window:
+                    comp_rate_vals = []
+                    for comp, att in zip(completions_window, pass_window):
+                        if att > 0:
+                            comp_rate_vals.append(comp / att)
+
+                    if comp_rate_vals:
+                        extra_features["completion_rate_mean"] = _mean(comp_rate_vals)
+                        extra_features["completion_rate_trend"] = _trend_slope(comp_rate_vals)
+
+                if market_code == "pass_yds" and pass_window and pass_yds_window:
+                    ypa_vals = []
+                    for py, pa in zip(pass_yds_window, pass_window):
+                        if pa > 0:
+                            ypa_vals.append(py / pa)
+
+                    if ypa_vals:
+                        extra_features["yards_per_attempt_mean"] = _mean(ypa_vals)
+                        extra_features["yards_per_attempt_trend"] = _trend_slope(ypa_vals)
+
+                if market_code == "pass_td" and pass_window and pass_td_window:
+                    td_rate_vals = []
+                    for td, att in zip(pass_td_window, pass_window):
+                        if att > 0:
+                            td_rate_vals.append(td / att)
+
+                    if td_rate_vals:
+                        extra_features["pass_td_rate_mean"] = _mean(td_rate_vals)
+                        extra_features["pass_td_rate_trend"] = _trend_slope(td_rate_vals)
+
+                opp_pass_vals = [
+                    float(g.get("opp_pass_attempts_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                opp_pass_nonzero = [v for v in opp_pass_vals if v > 0]
+
+                if opp_pass_nonzero:
+                    extra_features["opp_pass_attempts_allowed"] = _mean(opp_pass_nonzero)
+                    extra_features["opp_pass_attempts_trend"] = _trend_slope(opp_pass_nonzero)
+
+                opp_pass_yds_vals = [
+                    float(g.get("opp_pass_yards_allowed", 0.0) or 0.0)
+                    for g in window_games
+                ]
+                opp_pass_yds_nonzero = [v for v in opp_pass_yds_vals if v > 0]
+
+                if opp_pass_yds_nonzero:
+                    extra_features["opp_pass_yards_allowed"] = _mean(opp_pass_yds_nonzero)
+
+                if opp_pass_vals and opp_pass_yds_vals:
+                    opp_ypa_vals = []
+                    for oy, oa in zip(opp_pass_yds_vals, opp_pass_vals):
+                        if oa > 0:
+                            opp_ypa_vals.append(oy / oa)
+
+                    if opp_ypa_vals:
+                        extra_features["opp_yards_per_attempt_allowed"] = _mean(opp_ypa_vals)
+                        extra_features["opp_yards_per_attempt_trend"] = _trend_slope(opp_ypa_vals)
 
                 if pass_window:
                     extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
@@ -751,6 +847,19 @@ def build_features(
                         opp_tgt_adj)
                     extra_features["opp_target_rate_trend"] = _trend_slope(
                         opp_tgt_adj)
+                    
+                if market_code == "rec_td":
+                    recs_window = [float(g.get("receptions", 0.0) or 0.0) for g in window_games]
+                    td_window = [float(g.get("receiving_tds", 0.0) or 0.0) for g in window_games]
+
+                    td_rate_vals = []
+                    for td, rec in zip(td_window, recs_window):
+                        if rec > 0:
+                            td_rate_vals.append(td / rec)
+
+                    if td_rate_vals:
+                        extra_features["rec_td_rate_mean"] = _mean(td_rate_vals)
+                        extra_features["rec_td_rate_trend"] = _trend_slope(td_rate_vals)
 
             db.execute(
                 upsert_sql,

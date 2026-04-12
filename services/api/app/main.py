@@ -16,7 +16,8 @@ Operational notes:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import router
+from app.routes import router
+from app.routes.odds import router as odds_router
 
 app = FastAPI(title="Player Prop API", version="0.1.0")
 
@@ -33,6 +34,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(odds_router, prefix="/api/v1")
 
 @app.get("/health")
 def health():
