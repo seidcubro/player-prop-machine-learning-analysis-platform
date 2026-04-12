@@ -1,4 +1,4 @@
-"""Player-related API routes."""
+﻿"""Player-related API routes."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -11,8 +11,39 @@ from ..db import get_db
 
 router = APIRouter()
 
+
+def _clean_feature_payload(feature_map: dict, meta: dict) -> dict:
+    feature_cols = list(meta.get("feature_cols") or [])
+    if not feature_cols:
+        return dict(feature_map)
+
+    cleaned = {}
+    for col in feature_cols:
+        if col in feature_map:
+            cleaned[col] = feature_map[col]
+    return cleaned
+
+
+def _meta_summary(meta: dict) -> dict:
+    return {
+        "market_name": meta.get("market_name"),
+        "feature_family": meta.get("feature_family"),
+        "base_feature_cols": list(meta.get("base_feature_cols") or []),
+        "extra_feature_cols": list(meta.get("extra_feature_cols") or []),
+        "upstream_features_used": [
+            c for c in list(meta.get("extra_feature_cols") or [])
+            if c.endswith("_mean") or c.endswith("_trend")
+        ],
+        "model_metrics": {
+            "mae": meta.get("mae"),
+            "rmse": meta.get("rmse"),
+            "r2": meta.get("r2"),
+        },
+    }
+
+
 FEATURE_COLS = ["mean", "stddev", "weighted_mean",
-                "trend", "recs_mean", "recs_trend"]
+                "trend", "aux_mean", "aux_trend"]
 
 
 def _get_player_row(db: Session, player_id: int):
@@ -215,8 +246,6 @@ def projection_ml(
         "trend": float(feat["trend"] or 0.0),
         "aux_mean": float(feat["aux_mean"] or 0.0),
         "aux_trend": float(feat["aux_trend"] or 0.0),
-        "recs_mean": float(feat["aux_mean"] or 0.0),
-        "recs_trend": float(feat["aux_trend"] or 0.0),
     }
 
     extra = feat["extra_features"] or {}
@@ -273,18 +302,27 @@ def projection_ml(
     )
     db.commit()
 
+    cleaned_features = _clean_feature_payload(features_obj, model_meta)
+    meta_info = _meta_summary(model_meta)
+
     return {
         "ok": True,
         "player_id": player_id,
         "external_id": external_id,
         "player_name": player["display_name"],
         "market_code": market_code,
+        "market_name": meta_info["market_name"],
+        "feature_family": meta_info["feature_family"],
         "model_name": model_name,
         "lookback": lookback,
         "as_of_game_date": str(feat["as_of_game_date"]),
         "opponent": feat["opponent"],
         "prediction": pred,
-        "features": features_obj,
+        "features": cleaned_features,
+        "base_feature_cols": meta_info["base_feature_cols"],
+        "extra_feature_cols": meta_info["extra_feature_cols"],
+        "upstream_features_used": meta_info["upstream_features_used"],
+        "model_metrics": meta_info["model_metrics"],
         "artifact_path": artifact_path,
     }
 
@@ -337,7 +375,57 @@ def projection_history(
         },
     ).mappings().all()
 
-    return {"ok": True, "rows": [dict(r) for r in rows]}
+    artifact_path = None
+    for r in rows:
+        artifact_path = r["artifact_path"]
+        if artifact_path:
+            break
+
+    meta_info = {
+        "market_name": None,
+        "feature_family": None,
+        "base_feature_cols": [],
+        "extra_feature_cols": [],
+        "upstream_features_used": [],
+        "model_metrics": {"mae": None, "rmse": None, "r2": None},
+    }
+
+    if artifact_path:
+        meta_path = os.path.splitext(artifact_path)[0] + ".json"
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as f:
+                hist_meta = json.load(f)
+            meta_info = _meta_summary(hist_meta)
+
+    cleaned_rows = []
+    for r in rows:
+        row_dict = dict(r)
+        row_features = row_dict.get("features") or {}
+        if isinstance(row_features, str):
+            try:
+                row_features = json.loads(row_features)
+            except Exception:
+                row_features = {}
+        elif not isinstance(row_features, dict):
+            row_features = {}
+
+        if artifact_path:
+            row_dict["features"] = _clean_feature_payload(row_features, hist_meta)
+        else:
+            row_dict["features"] = row_features
+
+        cleaned_rows.append(row_dict)
+
+    return {
+        "ok": True,
+        "market_name": meta_info["market_name"],
+        "feature_family": meta_info["feature_family"],
+        "base_feature_cols": meta_info["base_feature_cols"],
+        "extra_feature_cols": meta_info["extra_feature_cols"],
+        "upstream_features_used": meta_info["upstream_features_used"],
+        "model_metrics": meta_info["model_metrics"],
+        "rows": cleaned_rows,
+    }
 
 
 @router.get("/players/{player_id}/projection_baseline")
@@ -394,3 +482,4 @@ def get_projection_baseline(
         "p_over": float(row["p_over"]),
         "created_at": str(row["created_at"]),
     }
+

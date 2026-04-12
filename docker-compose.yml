@@ -24,6 +24,12 @@ services:
     environment:
       DATABASE_URL: postgresql://app:app@postgres:5432/app
       REDIS_URL: redis://redis:6379/0
+      ODDS_API_KEY: ${ODDS_API_KEY}
+      ODDS_API_BASE_URL: ${ODDS_API_BASE_URL}
+      ODDS_API_SPORT: ${ODDS_API_SPORT}
+      ODDS_API_REGIONS: ${ODDS_API_REGIONS}
+      ODDS_API_ODDS_FORMAT: ${ODDS_API_ODDS_FORMAT}
+      ODDS_API_BOOKMAKERS: ${ODDS_API_BOOKMAKERS}
     ports:
       - 8000:8000
     volumes:
@@ -48,15 +54,13 @@ services:
     build:
       context: ./services/training
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: app
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      MARKET_CODE: rec_yds
-      LOOKBACK: 5
-      MODEL_NAME: ridge_v1
       ARTIFACT_DIR: /artifacts
+      LOOKBACK: "5"
+      POSTGRES_DB: app
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: app
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: app
     volumes:
       - ./services/training/artifacts:/artifacts
     depends_on:

@@ -1,4 +1,4 @@
-﻿"""Training script for market-specific projection models.
+"""Training script for market-specific projection models.
 
 Market-driven training:
 - reads market metadata from prop_markets
@@ -52,7 +52,7 @@ DB_PASS = os.getenv("POSTGRES_PASSWORD", "app")
 MARKET_CODE = os.getenv("MARKET_CODE", "rec_yds")
 LOOKBACK = int(os.getenv("LOOKBACK", "5"))
 model_name = os.getenv("MODEL_NAME", "rf_default")
-MODEL_NAME = os.getenv("MODEL_NAME", "rf_v1")
+MODEL_NAME = model_name
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 
 LABEL_COL = "label_actual"
@@ -301,7 +301,7 @@ def main():
             "feature_family": m["feature_family"],
             "stat_field": m["stat_field"],
             "lookback": LOOKBACK,
-            "model_type": "RandomForestRegressor",
+            "model_type": type(model).__name__,
             "feature_cols": feature_cols,
             "base_feature_cols": BASE_FEATURE_COLS,
             "extra_feature_cols": [c for c in feature_cols if c not in BASE_FEATURE_COLS],
