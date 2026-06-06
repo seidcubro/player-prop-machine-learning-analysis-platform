@@ -331,7 +331,9 @@ def main():
         line_value = float(o["line"])
 
         std = float(frow.get("stddev", 0.0) or 0.0)
-        std = min(std, mean * 0.75)
+        mean_value = float(frow.get("mean", 0.0))
+        std_cap_base = max(weighted_mean, mean_value, line_value, 1.0)
+        std = min(std, std_cap_base * 0.75)
         std = max(std, 1e-6)
 
         z = (line_value - projection) / std
