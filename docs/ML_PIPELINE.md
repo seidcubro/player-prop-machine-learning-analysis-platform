@@ -96,8 +96,10 @@ reading):
    streak. Fixed by always taking the single most-recent row `<= event_date`.
 2. **`player_market_features.team` was NULL for every market except `rec_yds`** — silently
    zeroed out edge generation for every other market via the team sanity-check.
-   `db/backfills/fix_team_from_pgs.sql` already had the correct general fix; it had only
-   ever been run once, before other markets' rows existed.
+   `db/backfills/fix_team_final.sql` already had the correct general fix (joining
+   `player_game_stats_app`, the table the live pipeline actually uses, on
+   `player_id`+`as_of_game_date`, no market restriction); it had only ever been run
+   once, before other markets' rows existed.
 3. **`eval.py` itself was broken** — joined `players p ON p.id = pmf.player_id` instead of
    `p.external_id` (a hard SQL type error), and never expanded `extra_features` JSON, so it
    could never have evaluated any current model correctly even once the join was fixed.
