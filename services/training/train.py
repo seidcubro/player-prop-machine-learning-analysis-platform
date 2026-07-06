@@ -266,13 +266,26 @@ def main():
         X_test, _ = _build_feature_dataframe(test_df)
         X_test = X_test.reindex(columns=feature_cols, fill_value=0.0)
 
-        y_train = train_df[LABEL_COL].apply(_safe_float).astype(float)
+        TARGET_TRANSFORM = os.getenv("TARGET_TRANSFORM", "none").lower().strip()
+
+        y_train_raw = train_df[LABEL_COL].apply(_safe_float).astype(float)
         y_test = test_df[LABEL_COL].apply(_safe_float).astype(float)
+
+        if TARGET_TRANSFORM == "log1p":
+            y_train = y_train_raw.clip(lower=0.0).apply(math.log1p)
+        else:
+            y_train = y_train_raw
 
         model = build_model(model_name)
         model.fit(X_train, y_train)
 
-        preds = model.predict(X_test)
+        preds_raw = model.predict(X_test)
+
+        if TARGET_TRANSFORM == "log1p":
+            preds = pd.Series(preds_raw).apply(math.expm1).clip(lower=0.0).to_numpy()
+        else:
+            preds = preds_raw
+
         mae = float(mean_absolute_error(y_test, preds))
         rmse = float(math.sqrt(mean_squared_error(y_test, preds)))
         r2 = float(r2_score(y_test, preds))
@@ -302,6 +315,7 @@ def main():
             "stat_field": m["stat_field"],
             "lookback": LOOKBACK,
             "model_type": type(model).__name__,
+            "target_transform": TARGET_TRANSFORM,
             "feature_cols": feature_cols,
             "base_feature_cols": BASE_FEATURE_COLS,
             "extra_feature_cols": [c for c in feature_cols if c not in BASE_FEATURE_COLS],

@@ -10,6 +10,8 @@ import pandas as pd
 from scipy.stats import norm
 from sqlalchemy import create_engine, text
 
+import math
+
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "app")
@@ -100,7 +102,7 @@ def load_model_meta(artifact_dir: Path, market_code: str):
         "rush_yds": "rf_rush_yds_v1_rush_yds_lb5.json",
         "rush_td": "rf_rush_td_v1_rush_td_lb5.json",
         "recs": "rf_recs_v3_recs_lb5.json",
-        "rec_yds": "rf_v13_rec_yds_lb5.json",
+        "rec_yds": "rf_rec_yds_log_v1_rec_yds_lb5.json",
         "rec_td": "rf_rec_td_v1_rec_td_lb5.json",
     }
     meta_name = candidates.get(market_code)
@@ -315,8 +317,16 @@ def main():
 
         x = pd.DataFrame([row_features])
 
-        model_projection = float(model.predict(x)[0])
-        weighted_mean = float(frow.get("weighted_mean", 0.0))
+        model_projection_raw = float(model.predict(x)[0])
+
+        if meta.get("target_transform") == "log1p":
+            model_projection = math.expm1(model_projection_raw)
+        else:
+            model_projection = model_projection_raw
+
+        model_projection = max(0.0, model_projection)
+
+        weighted_mean = float(frow.get("weighted_mean", 0.0) or 0.0)
 
         projection = 0.3 * model_projection + 0.7 * weighted_mean
 
