@@ -1,14 +1,25 @@
 """Training script for market-specific projection models.
 
 Market-driven training:
-- reads market metadata from prop_markets
-- loads base rolling features from player_market_features
+- reads market metadata from prop_markets, including eligible_positions
+- loads base rolling features from player_market_features, joined to players
+  and filtered to eligible_positions (see db/migrations/populate_eligible_positions.sql
+  -- without this, training is diluted by rows from positions that structurally
+  never produce the stat, e.g. a lineman's rushing yards)
 - flattens extra_features JSON into model columns
 - derives model-level hybrid features like target_share
-- uses a time-ordered train/test split
-- trains a non-linear Random Forest model
+- uses a time-ordered train/test split (never shuffled -- this is forecasting)
+- trains a RandomForest (default) or GradientBoosting (MODEL_NAME startswith "gb")
+- optionally trains on log1p(y) via TARGET_TRANSFORM=log1p -- currently unused in
+  production; an eval.py comparison showed it introduces a systematic
+  underprediction bias for right-skewed stats like receiving yards (see
+  docs/ML_PIPELINE.md "History"). Kept as a supported option, not a default.
 - writes model + metadata artifacts
 - updates trained_models and active_models
+
+Always validate a new model with eval.py, not just this script's own printed
+metrics -- eval.py rebuilds the feature matrix independently and checks bias,
+which is what caught the log1p regression above.
 """
 
 import os

@@ -1,93 +1,87 @@
-﻿# ML Design Spec
+# ML Design Spec
 
-Last updated: 2026-02-16
+Last updated: 2026-07-05
+
+This replaces an earlier version of this doc describing a Ridge-regression, per-market
+`features_{market}` table design — that was never built. The real system is described
+below and in `docs/ML_PIPELINE.md` (which also has the full bug-history — read that first
+if you're touching this pipeline).
 
 ---
 
 ## 1. Architecture
 
-Market-scoped ML:
-- market
-- model_name
-- lookback
+Market-scoped ML, keyed by `(market_code, model_name, lookback)`. Current production model
+family: `rf_posfilt_v4` (RandomForestRegressor, one per market, position-filtered).
 
-Current model:
-Ridge regression (ridge_v1)
+## 2. Feature engineering
 
----
+See `docs/ML_PIPELINE.md` for the full feature list. Summary: rolling
+mean/stddev/weighted_mean/trend (lookback=5) + market-specific engineered ratios/rates +
+rolling snap share + `ff_opportunity` expected usage + current-game Vegas context + injury
+flags. All features are reproducible from `player_game_stats_app` + the supporting nflverse
+tables via `POST /jobs/build_features`.
 
-## 2. Feature Engineering v1
-
-- rolling mean (N games)
-- rolling stddev
-- rolling median (optional)
-- usage metrics
-- home/away flag
-
-Features must be reproducible from player_game_stats.
-
----
+Position eligibility (`prop_markets.eligible_positions`) is enforced in both `train.py` and
+`eval.py` — this was missing for most of the project's history (see ML_PIPELINE.md History)
+and caused misleading cross-market R² comparisons.
 
 ## 3. Labels
 
-y = realized market value for that game.
+`y` = realized value of `prop_markets.stat_field` for the target game (e.g. `rec_yds` ->
+`receiving_yards`). Filled by `attach_labels` once the game has been played.
 
-Example:
-rec_yds -> actual receiving yards.
+## 4. Training contract
 
----
+Input: `player_market_features` (joined to `players` for position filtering) for one
+`(market_code, lookback)`, `label_actual IS NOT NULL`.
 
-## 4. Training Contract
+Output: artifact bundle —
+- `{model_name}_{market_code}_lb{lookback}.joblib` — serialized estimator
+- `{model_name}_{market_code}_lb{lookback}.json` — metadata:
+  - `market_code`, `market_id`, `lookback`, `model_type`, `target_transform`
+  - `feature_cols` (exact column order the model expects — must be reproduced identically
+    at inference time; `eval.py`'s `build_feature_matrix` and `build_prop_edges.py`'s
+    per-row feature dict construction both do this)
+  - `eligible_positions`, `train_rows`, `test_rows`, `train_date_min/max`, `test_date_min/max`
+  - `mae`, `rmse`, `r2`, `feature_importances`
 
-Input:
-features_{market} + labels_{market}
+`target_transform` support: `"none"` (default) or `"log1p"` (train in `log1p(y)` space,
+`expm1` at inference). **Currently unused in production** — see History in ML_PIPELINE.md
+for why it was tried and reverted (it introduced a systematic underprediction bias).
 
-Output:
-artifact bundle including:
-- model
-- metadata.json
-  - market
-  - model_name
-  - lookback
-  - feature list
-  - train_rows
-  - train_start
-  - train_end
-  - created_at
+## 5. Inference contract
 
----
+Two separate paths exist today — this is a known architectural gap, not a design choice:
 
-## 5. Inference Contract
+- **`build_prop_edges.py`** — full pipeline: load artifact, build feature vector from the
+  most recent `player_market_features` row, predict, un-transform if needed, blend with
+  `weighted_mean`, compare to a sportsbook line, compute edge/win probability. Writes
+  `prop_edges`. Not exposed via any API route yet.
+- **`services/api/app/routes/players.py` `projection_ml`** — loads the artifact from
+  `active_models`, builds a feature vector from the single most recent
+  `player_market_features` row, returns the raw prediction. No sportsbook comparison, no
+  edge, no odds concept, and **no `target_transform` handling** (would silently return a
+  log-space value if a `log1p` model were ever made active again — currently moot since no
+  active model uses it, but worth fixing if that changes).
 
-Steps:
-1. Load artifact bundle
-2. Recompute features with same lookback
-3. Apply model
-4. Return projection
-
-Failure modes:
-- unsupported_market
-- insufficient_data
-- artifact_missing
-
----
+Failure modes handled: `unsupported_market` (market not found/inactive), `insufficient_data`
+(no matching feature row), `artifact_missing`.
 
 ## 6. Evaluation
 
-Track:
-- MAE per market
-- MAE per position group
+`eval.py` reports, per model: MAE, RMSE, R², bias (mean of prediction - actual, positive =
+overprediction), broken down by position and by label-magnitude bucket, plus lift vs. a
+naive `weighted_mean` baseline. Reports are written to
+`services/training/artifacts/evals/{model_name}_{market_code}_lb{lookback}_eval.json`.
 
-Store under:
-data/eval/
+**Always trust `eval.py` over training's own printed metrics** — training's split can differ
+subtly, and `eval.py` was specifically built to catch bias/leakage issues that a plain R²
+number won't surface (see ML_PIPELINE.md History for how this caught a real, material bug).
 
----
+## 7. Roadmap / untried ideas
 
-## 7. Roadmap
-
-- Market-specific feature tables
-- Label tables
-- Model registry structure
-- Opponent context features
-- Probabilistic outputs
-
+See `docs/ML_PIPELINE.md` "Untried ideas for further R² improvement". The most concrete next
+step for this pipeline specifically, though, is closing the two-inference-paths gap above:
+either give `build_prop_edges.py`'s output a real API route, or fold its blend/edge logic
+into `projection_ml` (and add `target_transform` handling there either way).

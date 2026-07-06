@@ -197,6 +197,19 @@ def build_features(
     lookback: int = Query(5, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
+    """Compute rolling + contextual features for one market and upsert them.
+
+    For every eligible-position player/game, builds features from a strictly
+    prior lookback window (never the target game itself): base rolling stats
+    (mean/stddev/weighted_mean/trend), market-specific engineered ratios
+    (target share, yards per target/carry/attempt, opponent defensive rates),
+    rolling snap share, nflverse's `ff_opportunity` expected-usage model, and
+    the *current* game's pre-game Vegas/weather/injury context (not averaged
+    over the window -- see the "Pre-game Vegas context" comment below for why
+    that's legitimate, not leakage). Writes to `player_market_features`.
+
+    See docs/ML_PIPELINE.md for the full feature list and rationale.
+    """
     m = _get_market(db, market_code)
 
     if not m["is_active"]:
@@ -228,7 +241,11 @@ def build_features(
         alias = _safe_identifier(code)
         select_upstream_sql += f", COALESCE(pgs.{col}, 0)::float8 AS {alias}"
 
-
+    # NOTE: team_offense_pass, team_defense_rec, and team_defense_rec_rolling
+    # below are not CTEs defined in this query -- they're real Postgres VIEWS
+    # (see db/views/create_team_pass.sql, create_rec_defense_fixed.sql,
+    # create_rolling_defense.sql). Easy to miss since every other join target
+    # here is a local WITH-clause CTE.
     sql = f"""
         WITH team_rush_offense AS (
             SELECT
@@ -600,7 +617,7 @@ def build_features(
                             opp_ypc_vals)
                         extra_features["opp_yards_per_carry_trend"] = _trend_slope(
                             opp_ypc_vals)
-                        
+
             if feature_family == "passing":
                 pass_window = [float(g.get("pass_attempts", 0.0) or 0.0) for g in window_games]
                 completions_window = [float(g.get("completions", 0.0) or 0.0) for g in window_games]
@@ -686,165 +703,6 @@ def build_features(
                         extra_features["opp_yards_per_attempt_allowed"] = _mean(opp_ypa_vals)
                         extra_features["opp_yards_per_attempt_trend"] = _trend_slope(opp_ypa_vals)
 
-                if pass_window:
-                    extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
-
-                team_pass_window = [float(g.get("team_pass_attempts_calc", 0.0) or 0.0) for g in window_games]
-                team_pass_nonzero = [v for v in team_pass_window if v > 0]
-
-                if team_pass_nonzero:
-                    extra_features["team_pass_attempts"] = _mean(team_pass_nonzero)
-                    extra_features["team_pass_attempts_trend"] = _trend_slope(team_pass_nonzero)
-
-                if pass_window and team_pass_window:
-                    share_vals = []
-                    for pa, tp in zip(pass_window, team_pass_window):
-                        if tp > 0:
-                            share_vals.append(pa / tp)
-
-                    if share_vals:
-                        extra_features["pass_share_mean"] = _mean(share_vals)
-                        extra_features["pass_share_trend"] = _trend_slope(share_vals)
-
-                if market_code == "pass_completions" and pass_window and completions_window:
-                    comp_rate_vals = []
-                    for comp, att in zip(completions_window, pass_window):
-                        if att > 0:
-                            comp_rate_vals.append(comp / att)
-
-                    if comp_rate_vals:
-                        extra_features["completion_rate_mean"] = _mean(comp_rate_vals)
-                        extra_features["completion_rate_trend"] = _trend_slope(comp_rate_vals)
-
-                if market_code == "pass_yds" and pass_window and pass_yds_window:
-                    ypa_vals = []
-                    for py, pa in zip(pass_yds_window, pass_window):
-                        if pa > 0:
-                            ypa_vals.append(py / pa)
-
-                    if ypa_vals:
-                        extra_features["yards_per_attempt_mean"] = _mean(ypa_vals)
-                        extra_features["yards_per_attempt_trend"] = _trend_slope(ypa_vals)
-
-                opp_pass_vals = [
-                    float(g.get("opp_pass_attempts_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-                opp_pass_nonzero = [v for v in opp_pass_vals if v > 0]
-
-                if opp_pass_nonzero:
-                    extra_features["opp_pass_attempts_allowed"] = _mean(opp_pass_nonzero)
-                    extra_features["opp_pass_attempts_trend"] = _trend_slope(opp_pass_nonzero)
-
-                opp_pass_yds_vals = [
-                    float(g.get("opp_pass_yards_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-                opp_pass_yds_nonzero = [v for v in opp_pass_yds_vals if v > 0]
-
-                if opp_pass_yds_nonzero:
-                    extra_features["opp_pass_yards_allowed"] = _mean(opp_pass_yds_nonzero)
-
-                if opp_pass_vals and opp_pass_yds_vals:
-                    opp_ypa_vals = []
-                    for oy, oa in zip(opp_pass_yds_vals, opp_pass_vals):
-                        if oa > 0:
-                            opp_ypa_vals.append(oy / oa)
-
-                    if opp_ypa_vals:
-                        extra_features["opp_yards_per_attempt_allowed"] = _mean(opp_ypa_vals)
-                        extra_features["opp_yards_per_attempt_trend"] = _trend_slope(opp_ypa_vals)
-
-                if pass_window:
-                    extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
-
-                team_pass_window = [float(g.get("team_pass_attempts_calc", 0.0) or 0.0) for g in window_games]
-                team_pass_nonzero = [v for v in team_pass_window if v > 0]
-
-                if team_pass_nonzero:
-                    extra_features["team_pass_attempts"] = _mean(team_pass_nonzero)
-                    extra_features["team_pass_attempts_trend"] = _trend_slope(team_pass_nonzero)
-
-                if pass_window and team_pass_window:
-                    share_vals = []
-                    for pa, tp in zip(pass_window, team_pass_window):
-                        if tp > 0:
-                            share_vals.append(pa / tp)
-
-                    if share_vals:
-                        extra_features["pass_share_mean"] = _mean(share_vals)
-                        extra_features["pass_share_trend"] = _trend_slope(share_vals)
-
-                if market_code == "pass_yds" and pass_window and pass_yds_window:
-                    ypa_vals = []
-                    for py, pa in zip(pass_yds_window, pass_window):
-                        if pa > 0:
-                            ypa_vals.append(py / pa)
-
-                    if ypa_vals:
-                        extra_features["yards_per_attempt_mean"] = _mean(ypa_vals)
-                        extra_features["yards_per_attempt_trend"] = _trend_slope(ypa_vals)
-
-                opp_pass_vals = [
-                    float(g.get("opp_pass_attempts_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-                opp_pass_nonzero = [v for v in opp_pass_vals if v > 0]
-
-                if opp_pass_nonzero:
-                    extra_features["opp_pass_attempts_allowed"] = _mean(opp_pass_nonzero)
-                    extra_features["opp_pass_attempts_trend"] = _trend_slope(opp_pass_nonzero)
-
-                opp_pass_yds_vals = [
-                    float(g.get("opp_pass_yards_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-                opp_pass_yds_nonzero = [v for v in opp_pass_yds_vals if v > 0]
-
-                if opp_pass_yds_nonzero:
-                    extra_features["opp_pass_yards_allowed"] = _mean(opp_pass_yds_nonzero)
-
-                if opp_pass_vals and opp_pass_yds_vals:
-                    opp_ypa_vals = []
-                    for oy, oa in zip(opp_pass_yds_vals, opp_pass_vals):
-                        if oa > 0:
-                            opp_ypa_vals.append(oy / oa)
-
-                    if opp_ypa_vals:
-                        extra_features["opp_yards_per_attempt_allowed"] = _mean(opp_ypa_vals)
-                        extra_features["opp_yards_per_attempt_trend"] = _trend_slope(opp_ypa_vals)
-
-                if pass_window:
-                    extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
-
-                team_pass_window = [float(g.get("team_pass_attempts_calc", 0.0) or 0.0) for g in window_games]
-                team_pass_nonzero = [v for v in team_pass_window if v > 0]
-
-                if team_pass_nonzero:
-                    extra_features["team_pass_attempts"] = _mean(team_pass_nonzero)
-                    extra_features["team_pass_attempts_trend"] = _trend_slope(team_pass_nonzero)
-
-                if pass_window and team_pass_window:
-                    share_vals = []
-                    for pa, tp in zip(pass_window, team_pass_window):
-                        if tp > 0:
-                            share_vals.append(pa / tp)
-
-                    if share_vals:
-                        extra_features["pass_share_mean"] = _mean(share_vals)
-                        extra_features["pass_share_trend"] = _trend_slope(share_vals)
-
-                opp_pass_vals = [
-                    float(g.get("opp_pass_attempts_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-
-                opp_pass_nonzero = [v for v in opp_pass_vals if v > 0]
-
-                if opp_pass_nonzero:
-                    extra_features["opp_pass_attempts_allowed"] = _mean(opp_pass_nonzero)
-                    extra_features["opp_pass_attempts_trend"] = _trend_slope(opp_pass_nonzero)
-
             if feature_family == "receiving":
                 targets_window = [float(g.get("targets", 0.0) or 0.0)
                                   for g in window_games]
@@ -924,7 +782,7 @@ def build_features(
                         opp_tgt_adj)
                     extra_features["opp_target_rate_trend"] = _trend_slope(
                         opp_tgt_adj)
-                    
+
                 if market_code == "rec_td":
                     recs_window = [float(g.get("receptions", 0.0) or 0.0) for g in window_games]
                     td_window = [float(g.get("receiving_tds", 0.0) or 0.0) for g in window_games]
@@ -1020,6 +878,12 @@ def attach_labels(
     market_code: str,
     db: Session = Depends(get_db),
 ):
+    """Fill in `label_actual` for rows whose target game has since been played.
+
+    Matches `player_market_features` rows to `player_game_stats_app` on
+    (player_id, as_of_game_date, opponent, market_id) and copies the real
+    stat value. Run this after a game week completes and before retraining.
+    """
     m = _get_market(db, market_code)
 
     if not m["is_active"]:

@@ -151,6 +151,18 @@ def projection_ml(
     lookback: int = Query(5, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
+    """Return a raw model projection for a player/market (no odds comparison).
+
+    NOTE: this is a separate, simpler code path from
+    services/training/build_prop_edges.py -- it has no concept of a
+    sportsbook line, edge, or win probability, and does NOT apply
+    target_transform un-transforming (would silently return a log-space
+    value if a log1p model were ever made active again; currently moot since
+    no active model uses log1p, see docs/ML_PIPELINE.md "History"). This is
+    the actual "compare model to sportsbook line" gap described in
+    docs/API.md -- closing it means either giving build_prop_edges.py's
+    output a real route, or folding its blend/edge logic into this one.
+    """
     player = _get_player_row(db, player_id)
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")

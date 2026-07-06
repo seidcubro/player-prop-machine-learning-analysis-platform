@@ -1,3 +1,24 @@
+"""Compute betting edges: sportsbook props vs. model projections.
+
+For every sportsbook player prop in odds_player_props, this:
+1. maps the odds market key to an internal market_code (ODDS_TO_MARKET)
+2. finds the single most-recent player_market_features row as of (<=) the
+   event date -- deliberately NOT by searching history for a prior game
+   against the same opponent (that was the root cause of a long-standing
+   overprojection bug: it could pick up a rolling-window snapshot from a
+   different season/team whenever an opponent repeated -- see
+   docs/ML_PIPELINE.md "History"). Opponent-specific signal comes from that
+   row's own opp_* extra_features, not from re-selecting an old row.
+3. predicts with the market's active model, un-transforms if target_transform
+   calls for it, blends with the rolling weighted_mean, and clamps to within
+   one stddev of weighted_mean
+4. compares to the sportsbook line to get win probability (normal
+   approximation) and an edge tier
+5. writes everything to prop_edges
+
+Not currently exposed via any API route -- see docs/API.md "The gap".
+"""
+
 from __future__ import annotations
 
 import json
