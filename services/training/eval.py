@@ -165,11 +165,21 @@ def load_labeled_rows(feature_cols: list[str]) -> pd.DataFrame:
       - label_actual
 
     Note:
-      For certain markets (e.g., receiving yards), we only want to evaluate
-      relevant skill positions. We apply that filter in Python to avoid SQL
-      placeholder mistakes and to keep evaluation logic explicit.
+      Every market restricts evaluation to prop_markets.eligible_positions
+      (same population train.py trains on). Without this, markets with no
+      eligible_positions filter get flooded with rows for positions that
+      trivially never touch that stat (e.g. defensive linemen always
+      rushing for 0 yards), which mechanically inflates R2 and shrinks
+      MAE/RMSE -- making cross-market quality comparisons meaningless.
     """
     with connect() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            "SELECT eligible_positions FROM prop_markets WHERE code = %s",
+            (MARKET_CODE,),
+        )
+        market_row = cur.fetchone()
+        eligible_positions = (market_row or {}).get("eligible_positions")
+
         cur.execute(
             """
             SELECT
@@ -202,9 +212,9 @@ def load_labeled_rows(feature_cols: list[str]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     df["as_of_game_date"] = pd.to_datetime(df["as_of_game_date"]).dt.date
 
-    # Market-specific evaluation population filters (prevents zero-inflation cheating).
-    if MARKET_CODE == "rec_yds":
-        df = df[df["position"].isin(["WR", "TE", "RB", "FB"])]
+    # Market-specific evaluation population filter (prevents zero-inflation cheating).
+    if eligible_positions:
+        df = df[df["position"].isin(eligible_positions)]
 
     # Enforce column presence (raw columns fetched from the DB; the model's
     # actual feature_cols are derived from these via build_feature_matrix,

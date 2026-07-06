@@ -93,17 +93,22 @@ def edge_tier(raw_edge: float) -> str:
 
 
 def load_model_meta(artifact_dir: Path, market_code: str):
+    # All markets now trained by the same rf_posfilt_v1 run, which fixed
+    # eligible_positions filtering (see train.py/eval.py) so every model is
+    # trained and evaluated only on the positions that actually produce that
+    # stat, instead of being diluted by trivially-zero rows from irrelevant
+    # positions.
     candidates = {
-        "pass_att": "rf_pass_att_v1_pass_att_lb5.json",
-        "pass_yds": "rf_pass_yds_v1_pass_yds_lb5.json",
-        "pass_completions": "rf_pass_cmp_v1_pass_completions_lb5.json",
-        "pass_td": "rf_pass_td_clean_v1_pass_td_lb5.json",
-        "rush_att": "rf_rush_att_v4_rush_att_lb5.json",
-        "rush_yds": "rf_rush_yds_v1_rush_yds_lb5.json",
-        "rush_td": "rf_rush_td_v1_rush_td_lb5.json",
-        "recs": "rf_recs_v3_recs_lb5.json",
-        "rec_yds": "rf_v14_rec_yds_lb5.json",
-        "rec_td": "rf_rec_td_v1_rec_td_lb5.json",
+        "pass_att": "rf_posfilt_v1_pass_att_lb5.json",
+        "pass_yds": "rf_posfilt_v1_pass_yds_lb5.json",
+        "pass_completions": "rf_posfilt_v1_pass_completions_lb5.json",
+        "pass_td": "rf_posfilt_v1_pass_td_lb5.json",
+        "rush_att": "rf_posfilt_v1_rush_att_lb5.json",
+        "rush_yds": "rf_posfilt_v1_rush_yds_lb5.json",
+        "rush_td": "rf_posfilt_v1_rush_td_lb5.json",
+        "recs": "rf_posfilt_v1_recs_lb5.json",
+        "rec_yds": "rf_posfilt_v1_rec_yds_lb5.json",
+        "rec_td": "rf_posfilt_v1_rec_td_lb5.json",
     }
     meta_name = candidates.get(market_code)
     if not meta_name:

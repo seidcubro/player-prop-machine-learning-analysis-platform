@@ -196,7 +196,8 @@ def main():
               feature_family,
               is_active,
               train_enabled,
-              predict_enabled
+              predict_enabled,
+              eligible_positions
             FROM prop_markets
             WHERE code = %s
             """,
@@ -225,27 +226,34 @@ def main():
         cur.execute(
             """
             SELECT
-              player_id,
-              as_of_game_date,
-              opponent,
-              team,
-              mean,
-              stddev,
-              weighted_mean,
-              trend,
-              aux_mean,
-              aux_trend,
-              extra_features,
-              label_actual
-            FROM player_market_features
-            WHERE market_id = %s
-              AND lookback = %s
-              AND label_actual IS NOT NULL
-            ORDER BY as_of_game_date, player_id
+              pmf.player_id,
+              p.position,
+              pmf.as_of_game_date,
+              pmf.opponent,
+              pmf.team,
+              pmf.mean,
+              pmf.stddev,
+              pmf.weighted_mean,
+              pmf.trend,
+              pmf.aux_mean,
+              pmf.aux_trend,
+              pmf.extra_features,
+              pmf.label_actual
+            FROM player_market_features pmf
+            JOIN players p ON p.external_id = pmf.player_id
+            WHERE pmf.market_id = %s
+              AND pmf.lookback = %s
+              AND pmf.label_actual IS NOT NULL
+            ORDER BY pmf.as_of_game_date, pmf.player_id
             """,
             (market_id, LOOKBACK),
         )
         rows = cur.fetchall()
+
+        eligible_positions = m["eligible_positions"]
+        if eligible_positions:
+            rows = [r for r in rows if r["position"] in eligible_positions]
+
         if len(rows) < 10:
             raise SystemExit(
                 f"Not enough labeled rows to train (need >= 10). Found: {len(rows)}"
@@ -313,6 +321,7 @@ def main():
             "market_id": market_id,
             "feature_family": m["feature_family"],
             "stat_field": m["stat_field"],
+            "eligible_positions": eligible_positions,
             "lookback": LOOKBACK,
             "model_type": type(model).__name__,
             "target_transform": TARGET_TRANSFORM,
