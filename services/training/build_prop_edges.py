@@ -102,7 +102,7 @@ def load_model_meta(artifact_dir: Path, market_code: str):
         "rush_yds": "rf_rush_yds_v1_rush_yds_lb5.json",
         "rush_td": "rf_rush_td_v1_rush_td_lb5.json",
         "recs": "rf_recs_v3_recs_lb5.json",
-        "rec_yds": "rf_rec_yds_log_v1_rec_yds_lb5.json",
+        "rec_yds": "rf_v14_rec_yds_lb5.json",
         "rec_td": "rf_rec_td_v1_rec_td_lb5.json",
     }
     meta_name = candidates.get(market_code)
