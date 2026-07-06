@@ -29,7 +29,9 @@ Environment variables:
 
 import os
 import json
+import math
 from datetime import date
+from typing import Any
 import joblib
 import pandas as pd
 import psycopg2
@@ -50,7 +52,75 @@ ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 TEST_FRAC = float(os.getenv("TEST_FRAC", "0.20"))
 
 DEFAULT_FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend"]
+BASE_FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend", "aux_mean", "aux_trend"]
 LABEL_COL = "label_actual"
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        if isinstance(value, float) and math.isnan(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _normalize_extra_features(value: Any) -> dict[str, float]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        raw = value
+    elif isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return {}
+        try:
+            raw = json.loads(s)
+        except Exception:
+            return {}
+    else:
+        return {}
+    return {str(k): _safe_float(v, 0.0) for k, v in raw.items()}
+
+
+def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+    """Mirror train.py's _build_feature_dataframe so eval uses the exact same
+    feature construction (base cols + expanded extra_features JSON + the
+    target_share derived feature) the model was actually trained on.
+    """
+    work = df.copy()
+    for c in BASE_FEATURE_COLS:
+        if c not in work.columns:
+            work[c] = 0.0
+        work[c] = pd.to_numeric(work[c], errors="coerce").fillna(0.0)
+
+    if "extra_features" not in work.columns:
+        work["extra_features"] = None
+    extras_series = work["extra_features"].apply(_normalize_extra_features)
+    extra_keys = sorted({k for d in extras_series for k in d.keys()})
+    extra_df = pd.DataFrame(
+        [{k: d.get(k, 0.0) for k in extra_keys} for d in extras_series],
+        index=work.index,
+    )
+    if not extra_df.empty:
+        extra_df = extra_df.fillna(0.0).astype(float)
+
+    X = work[BASE_FEATURE_COLS].copy()
+    if not extra_df.empty:
+        X = pd.concat([X, extra_df], axis=1)
+
+    if "targets_mean" in X.columns and "team_pass_attempts" in X.columns:
+        denom = pd.to_numeric(X["team_pass_attempts"], errors="coerce").fillna(0.0)
+        numer = pd.to_numeric(X["targets_mean"], errors="coerce").fillna(0.0)
+        target_share = numer / denom.replace(0, pd.NA)
+        X["target_share"] = (
+            pd.to_numeric(target_share, errors="coerce").fillna(0.0).clip(lower=0.0, upper=1.0)
+        )
+
+    X = X.loc[:, ~X.columns.duplicated()]
+    return X.reindex(columns=feature_cols, fill_value=0.0).astype(float)
 
 
 def connect():
@@ -64,24 +134,24 @@ def connect():
     )
 
 
-def load_feature_cols_from_metadata() -> list[str]:
-    """Load feature column order from the model metadata JSON if available.
+def load_model_metadata() -> dict:
+    """Load the model metadata JSON if available (feature_cols, target_transform).
 
-    This prevents silent schema drift: evaluation must use the same feature
-    order the model was trained on.
+    This prevents silent schema/target drift: evaluation must reproduce the
+    exact feature construction and target transform used at training time.
     """
     meta_path = os.path.join(ARTIFACT_DIR, f"{MODEL_NAME}_{MARKET_CODE}_lb{LOOKBACK}.json")
     if not os.path.exists(meta_path):
-        return DEFAULT_FEATURE_COLS
+        return {"feature_cols": DEFAULT_FEATURE_COLS, "target_transform": "none"}
 
     with open(meta_path, "r") as f:
         meta = json.load(f)
 
     cols = meta.get("feature_cols")
     if not cols or not isinstance(cols, list):
-        return DEFAULT_FEATURE_COLS
-
-    return cols
+        meta["feature_cols"] = DEFAULT_FEATURE_COLS
+    meta.setdefault("target_transform", "none")
+    return meta
 
 
 def load_labeled_rows(feature_cols: list[str]) -> pd.DataFrame:
@@ -110,10 +180,13 @@ def load_labeled_rows(feature_cols: list[str]) -> pd.DataFrame:
               pmf.stddev,
               pmf.weighted_mean,
               pmf.trend,
+              pmf.aux_mean,
+              pmf.aux_trend,
+              pmf.extra_features,
               pmf.label_actual
             FROM player_market_features pmf
             JOIN prop_markets pm ON pm.id = pmf.market_id
-            JOIN players p ON p.id = pmf.player_id
+            JOIN players p ON p.external_id = pmf.player_id
             WHERE pm.code = %s
               AND pmf.lookback = %s
               AND pmf.label_actual IS NOT NULL
@@ -133,8 +206,11 @@ def load_labeled_rows(feature_cols: list[str]) -> pd.DataFrame:
     if MARKET_CODE == "rec_yds":
         df = df[df["position"].isin(["WR", "TE", "RB", "FB"])]
 
-    # Enforce column presence
-    missing = [c for c in (feature_cols + [LABEL_COL]) if c not in df.columns]
+    # Enforce column presence (raw columns fetched from the DB; the model's
+    # actual feature_cols are derived from these via build_feature_matrix,
+    # so they are not expected to already exist as literal df columns).
+    raw_cols = BASE_FEATURE_COLS + ["extra_features", LABEL_COL]
+    missing = [c for c in raw_cols if c not in df.columns]
     if missing:
         raise SystemExit(f"Missing expected columns in evaluation query: {missing}")
 
@@ -206,7 +282,9 @@ def main():
     """Run evaluation and write JSON report."""
     os.makedirs(os.path.join(ARTIFACT_DIR, "evals"), exist_ok=True)
 
-    feature_cols = load_feature_cols_from_metadata()
+    meta = load_model_metadata()
+    feature_cols = meta["feature_cols"]
+    target_transform = meta.get("target_transform", "none")
 
     artifact_path = os.path.join(
         ARTIFACT_DIR, f"{MODEL_NAME}_{MARKET_CODE}_lb{LOOKBACK}.joblib"
@@ -219,9 +297,14 @@ def main():
     df = load_labeled_rows(feature_cols)
     train_df, test_df = time_split(df, TEST_FRAC)
 
-    X_test = test_df[feature_cols].astype(float)
+    X_test = build_feature_matrix(test_df, feature_cols)
     y_test = test_df[LABEL_COL].astype(float)
-    preds = model.predict(X_test)
+    preds_raw = model.predict(X_test)
+
+    if target_transform == "log1p":
+        preds = pd.Series(preds_raw).apply(math.expm1).clip(lower=0.0).to_numpy()
+    else:
+        preds = preds_raw
 
     test_df = test_df.copy()
     test_df["prediction"] = preds.astype(float)
