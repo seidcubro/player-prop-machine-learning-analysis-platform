@@ -302,7 +302,24 @@ def build_features(
 
             COALESCE(tro.team_rush_attempts, 0)::float8 AS team_rush_attempts,
             COALESCE(trd.opp_rush_yards_allowed, 0)::float8 AS opp_rush_yards_allowed,
-            COALESCE(trd.opp_carries_allowed, 0)::float8 AS opp_carries_allowed
+            COALESCE(trd.opp_carries_allowed, 0)::float8 AS opp_carries_allowed,
+
+            COALESCE(sc.offense_pct, 0)::float8 AS snap_pct,
+            COALESCE(fo.rec_yards_gained_exp, 0)::float8 AS exp_rec_yards,
+            COALESCE(fo.receptions_exp, 0)::float8 AS exp_receptions,
+            COALESCE(fo.rec_touchdown_exp, 0)::float8 AS exp_rec_td,
+            COALESCE(fo.rush_yards_gained_exp, 0)::float8 AS exp_rush_yards,
+            COALESCE(fo.rush_touchdown_exp, 0)::float8 AS exp_rush_td,
+            COALESCE(fo.pass_yards_gained_exp, 0)::float8 AS exp_pass_yards,
+
+            ng.home_team AS game_home_team,
+            ng.away_team AS game_away_team,
+            ng.spread_line AS game_spread_line,
+            ng.total_line AS game_total_line,
+            ng.temp AS game_temp,
+            ng.wind AS game_wind,
+            COALESCE(ng.div_game, 0)::float8 AS game_div_game,
+            inj.report_status AS game_injury_status
 
             {select_upstream_sql}
         FROM player_game_stats_app pgs
@@ -327,6 +344,18 @@ def build_features(
         LEFT JOIN team_rush_defense trd
             ON trd.defense_team = pgs.opponent
            AND trd.game_date = pgs.game_date
+        LEFT JOIN snap_counts sc
+            ON sc.player_id = pgs.player_id
+           AND sc.game_id = pgs.game_id
+        LEFT JOIN ff_opportunity fo
+            ON fo.player_id = pgs.player_id
+           AND fo.game_id = pgs.game_id
+        LEFT JOIN nfl_games ng
+            ON ng.game_id = pgs.game_id
+        LEFT JOIN injuries inj
+            ON inj.player_id = pgs.player_id
+           AND inj.season = pgs.season
+           AND inj.week = pgs.week
         WHERE pgs.game_date IS NOT NULL
           AND pgs.opponent IS NOT NULL
         ORDER BY pgs.player_id, pgs.game_date
@@ -438,6 +467,54 @@ def build_features(
                 if vals:
                     extra_features[f"{code}_mean"] = _mean(vals)
                     extra_features[f"{code}_trend"] = _trend_slope(vals)
+
+            # Snap share (offense_pct from nflverse snap_counts) is a strong,
+            # market-agnostic proxy for opportunity/role that isn't captured
+            # by rolling production stats alone (e.g. a role change shows up
+            # in snaps before it shows up in a full box score sample).
+            snap_pct_window = [
+                float(g.get("snap_pct", 0.0) or 0.0) for g in window_games
+            ]
+            snap_pct_nonzero = [v for v in snap_pct_window if v > 0]
+            if snap_pct_nonzero:
+                extra_features["snap_share_mean"] = _mean(snap_pct_nonzero)
+                extra_features["snap_share_trend"] = _trend_slope(snap_pct_nonzero)
+
+            # nflverse's own play-context "expected" opportunity model
+            # (ff_opportunity), lagged the same way as every other feature.
+            # This carries signal the raw box score mean/weighted_mean can't:
+            # it reflects usage implied by air yards / red zone role / etc.,
+            # so it can disagree with a player's recent box score (e.g. after
+            # a drop-heavy or garbage-time-heavy game) in informative ways.
+            if feature_family == "receiving":
+                exp_rec_yards_window = [
+                    float(g.get("exp_rec_yards", 0.0) or 0.0) for g in window_games
+                ]
+                exp_receptions_window = [
+                    float(g.get("exp_receptions", 0.0) or 0.0) for g in window_games
+                ]
+                if any(exp_rec_yards_window):
+                    extra_features["exp_rec_yards_mean"] = _mean(exp_rec_yards_window)
+                    extra_features["exp_rec_yards_trend"] = _trend_slope(exp_rec_yards_window)
+                if any(exp_receptions_window):
+                    extra_features["exp_receptions_mean"] = _mean(exp_receptions_window)
+                    extra_features["exp_receptions_trend"] = _trend_slope(exp_receptions_window)
+
+            elif feature_family == "rushing":
+                exp_rush_yards_window = [
+                    float(g.get("exp_rush_yards", 0.0) or 0.0) for g in window_games
+                ]
+                if any(exp_rush_yards_window):
+                    extra_features["exp_rush_yards_mean"] = _mean(exp_rush_yards_window)
+                    extra_features["exp_rush_yards_trend"] = _trend_slope(exp_rush_yards_window)
+
+            elif feature_family == "passing":
+                exp_pass_yards_window = [
+                    float(g.get("exp_pass_yards", 0.0) or 0.0) for g in window_games
+                ]
+                if any(exp_pass_yards_window):
+                    extra_features["exp_pass_yards_mean"] = _mean(exp_pass_yards_window)
+                    extra_features["exp_pass_yards_trend"] = _trend_slope(exp_pass_yards_window)
 
             if feature_family == "rushing":
                 carries_window = [float(g.get("carries", 0.0) or 0.0)
@@ -860,6 +937,49 @@ def build_features(
                     if td_rate_vals:
                         extra_features["rec_td_rate_mean"] = _mean(td_rate_vals)
                         extra_features["rec_td_rate_trend"] = _trend_slope(td_rate_vals)
+
+            # Pre-game Vegas context for the game being predicted (games[i]
+            # itself, not the lookback window). This is known before kickoff
+            # -- same information a sportsbook prop line is priced off of --
+            # so it's not leakage, and it carries far more signal about this
+            # specific game's likely script/volume than any rolling average
+            # of past games can.
+            target_game = games[i]
+            spread_line = target_game.get("game_spread_line")
+            total_line = target_game.get("game_total_line")
+            home_team = target_game.get("game_home_team")
+            away_team = target_game.get("game_away_team")
+            if spread_line is not None and total_line is not None and home_team:
+                spread_line = float(spread_line)
+                total_line = float(total_line)
+                if target_game.get("team") == home_team:
+                    team_implied_total = (total_line + spread_line) / 2.0
+                    team_spread = spread_line
+                elif target_game.get("team") == away_team:
+                    team_implied_total = (total_line - spread_line) / 2.0
+                    team_spread = -spread_line
+                else:
+                    team_implied_total = total_line / 2.0
+                    team_spread = 0.0
+                extra_features["game_total_line"] = total_line
+                extra_features["team_implied_total"] = team_implied_total
+                extra_features["team_spread"] = team_spread
+
+            game_wind = target_game.get("game_wind")
+            game_temp = target_game.get("game_temp")
+            if game_wind is not None:
+                extra_features["game_wind"] = float(game_wind)
+            if game_temp is not None:
+                extra_features["game_temp"] = float(game_temp)
+            extra_features["game_div_game"] = float(target_game.get("game_div_game", 0.0) or 0.0)
+
+            # Player's own current-week injury report (pre-game known). Rows
+            # with no injury report entry are healthy by construction (only
+            # injured players get listed), so absence -> all flags 0.
+            injury_status = (target_game.get("game_injury_status") or "").strip()
+            extra_features["injury_questionable"] = 1.0 if injury_status == "Questionable" else 0.0
+            extra_features["injury_doubtful"] = 1.0 if injury_status == "Doubtful" else 0.0
+            extra_features["injury_out"] = 1.0 if injury_status == "Out" else 0.0
 
             db.execute(
                 upsert_sql,

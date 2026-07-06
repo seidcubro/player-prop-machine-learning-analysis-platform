@@ -93,22 +93,23 @@ def edge_tier(raw_edge: float) -> str:
 
 
 def load_model_meta(artifact_dir: Path, market_code: str):
-    # All markets now trained by the same rf_posfilt_v1 run, which fixed
-    # eligible_positions filtering (see train.py/eval.py) so every model is
-    # trained and evaluated only on the positions that actually produce that
-    # stat, instead of being diluted by trivially-zero rows from irrelevant
-    # positions.
+    # All markets trained by the same rf_posfilt_v4 run: eligible_positions
+    # filtering (train.py/eval.py no longer dilute training with rows from
+    # positions that never produce the stat) plus jobs.py feature additions
+    # -- snap share, nflverse ff_opportunity expected usage, and current-game
+    # Vegas context (spread/total/weather/injury status) -- on top of the
+    # original rolling box-score features.
     candidates = {
-        "pass_att": "rf_posfilt_v1_pass_att_lb5.json",
-        "pass_yds": "rf_posfilt_v1_pass_yds_lb5.json",
-        "pass_completions": "rf_posfilt_v1_pass_completions_lb5.json",
-        "pass_td": "rf_posfilt_v1_pass_td_lb5.json",
-        "rush_att": "rf_posfilt_v1_rush_att_lb5.json",
-        "rush_yds": "rf_posfilt_v1_rush_yds_lb5.json",
-        "rush_td": "rf_posfilt_v1_rush_td_lb5.json",
-        "recs": "rf_posfilt_v1_recs_lb5.json",
-        "rec_yds": "rf_posfilt_v1_rec_yds_lb5.json",
-        "rec_td": "rf_posfilt_v1_rec_td_lb5.json",
+        "pass_att": "rf_posfilt_v4_pass_att_lb5.json",
+        "pass_yds": "rf_posfilt_v4_pass_yds_lb5.json",
+        "pass_completions": "rf_posfilt_v4_pass_completions_lb5.json",
+        "pass_td": "rf_posfilt_v4_pass_td_lb5.json",
+        "rush_att": "rf_posfilt_v4_rush_att_lb5.json",
+        "rush_yds": "rf_posfilt_v4_rush_yds_lb5.json",
+        "rush_td": "rf_posfilt_v4_rush_td_lb5.json",
+        "recs": "rf_posfilt_v4_recs_lb5.json",
+        "rec_yds": "rf_posfilt_v4_rec_yds_lb5.json",
+        "rec_td": "rf_posfilt_v4_rec_td_lb5.json",
     }
     meta_name = candidates.get(market_code)
     if not meta_name:

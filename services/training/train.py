@@ -27,18 +27,20 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 def build_model(model_name: str):
     if model_name.startswith("gb"):
         return GradientBoostingRegressor(
-            n_estimators=300,
-            learning_rate=0.05,
-            max_depth=3,
+            n_estimators=int(os.getenv("N_ESTIMATORS", "300")),
+            learning_rate=float(os.getenv("LEARNING_RATE", "0.05")),
+            max_depth=int(os.getenv("MAX_DEPTH", "3")),
+            min_samples_leaf=int(os.getenv("MIN_SAMPLES_LEAF", "1")),
+            subsample=float(os.getenv("SUBSAMPLE", "1.0")),
             random_state=42,
         )
 
     return RandomForestRegressor(
-        n_estimators=300,
-        max_depth=8,
-        min_samples_split=10,
-        min_samples_leaf=5,
-        max_features="sqrt",
+        n_estimators=int(os.getenv("N_ESTIMATORS", "300")),
+        max_depth=int(os.getenv("MAX_DEPTH", "8")),
+        min_samples_split=int(os.getenv("MIN_SAMPLES_SPLIT", "10")),
+        min_samples_leaf=int(os.getenv("MIN_SAMPLES_LEAF", "5")),
+        max_features=os.getenv("MAX_FEATURES", "sqrt"),
         random_state=42,
         n_jobs=-1,
     )
