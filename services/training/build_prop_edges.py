@@ -236,37 +236,33 @@ def main():
         if player_market_rows.empty:
             continue
 
-        # infer which team this player belongs to for this event using the most recent known team
-        team_guess_rows = player_market_rows[player_market_rows["as_of_game_date"] < o["event_date"]].copy()
-        if team_guess_rows.empty:
-            continue
-
-        latest_team_row = team_guess_rows.sort_values("as_of_game_date").iloc[-1]
-        player_team_norm = latest_team_row["team_norm"]
-
-        if player_team_norm == o["home_team_norm"]:
-            event_opp_norm = o["away_team_norm"]
-        elif player_team_norm == o["away_team_norm"]:
-            event_opp_norm = o["home_team_norm"]
-        else:
-            continue
-
-        # try strict opponent match first
-        match = player_market_rows[
-            (player_market_rows["as_of_game_date"] < o["event_date"]) &
-            (player_market_rows["opponent_norm"] == event_opp_norm)
+        # Use the most recent feature snapshot as of (and including) this game's date.
+        # NOTE: each row's "opponent" column is simply who that historical game happened
+        # to be against -- it is NOT a matchup key. Do not use it to search backward
+        # through the player's history for "the last time they played this opponent";
+        # that previously caused very old (sometimes 1-2 seasons stale, different-team)
+        # rolling windows to be selected whenever the upcoming opponent happened to
+        # repeat, producing wildly inflated projections. Opponent-specific signal is
+        # already captured in this row's own opp_* extra_features, computed against
+        # the real opponent for this exact as_of_game_date.
+        candidates = player_market_rows[
+            player_market_rows["as_of_game_date"] <= o["event_date"]
         ].copy()
-
-        # fallback: ignore opponent if no match
-        if match.empty:
-            match = player_market_rows[
-                (player_market_rows["as_of_game_date"] < o["event_date"])
-            ].copy()
-
-        if match.empty:
+        if candidates.empty:
             continue
 
-        recent_rows = match.sort_values("as_of_game_date").tail(3)
+        candidates = candidates.sort_values("as_of_game_date")
+
+        latest_row = candidates.iloc[-1]
+        player_team_norm = latest_row["team_norm"]
+
+        # sanity check: the player's most recently known team should be one of the
+        # two teams in this event, otherwise this is likely a stale/traded player.
+        if player_team_norm not in (o["home_team_norm"], o["away_team_norm"]):
+            continue
+
+        match = candidates
+        recent_rows = match.tail(3)
         frow = recent_rows.iloc[-1].copy()
 
         numeric_cols = [
