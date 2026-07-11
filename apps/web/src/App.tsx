@@ -1,39 +1,32 @@
 /**
- * Root React application component and route wiring.
+ * App shell: sticky navbar (logo + nav) and routed page content.
  */
 
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { NavLink, Outlet } from "react-router-dom";
+import Logo from "./components/Logo";
 
-function App() {
-  const [count, setCount] = useState(0)
-
+export default function App() {
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <div className="ps-shell">
+      <header>
+        <nav className="ps-nav" aria-label="Main">
+          <NavLink to="/" className="ps-nav-brand">
+            <Logo size={30} title="" />
+            <span>
+              Prop<span className="sig">Signal</span>
+            </span>
+          </NavLink>
+          <div className="ps-nav-links">
+            <NavLink to="/" end>
+              Edges
+            </NavLink>
+            <NavLink to="/players">Players</NavLink>
+          </div>
+        </nav>
+      </header>
+      <main className="ps-main">
+        <Outlet />
+      </main>
+    </div>
+  );
 }
-
-export default App

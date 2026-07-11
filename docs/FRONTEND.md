@@ -5,23 +5,45 @@ Location: `apps/web`
 
 ## Current state
 
-Two pages: `PlayersSearch.tsx` (search) and `PlayerDetail.tsx` (recent games + baseline/ML
-projection). Both only call `projection_ml`/`projection_baseline`/`fetchPlayerGames` — there
-is **no concept of a sportsbook line, an edge, or a recommendation anywhere in the frontend**.
-This is the actual product goal (compare model projections to sportsbook lines) and it does
-not exist in the UI yet. See `docs/API.md` "The gap: no prop_edges route" — that's the
-blocker, not anything frontend-specific.
+Three routed pages under a shared shell (`App.tsx`: sticky navbar + `<Outlet/>`):
 
-## Next step (not yet built)
+- **`EdgesDashboard.tsx` (`/`, the core screen)** — sportsbook line vs. model projection
+  vs. edge vs. win probability, per row. Summary stat cards (`GET /edges/summary`),
+  debounced player search, market/tier/side filters, sortable columns, pagination
+  (`GET /edges`). Desktop renders a dense table; below 760px the same table collapses
+  into stacked labeled cards via CSS only (`data-label` attributes).
+- `PlayersSearch.tsx` (`/players`) and `PlayerDetail.tsx` (`/players/:id`) — the original
+  player browse/projection pages, now living under the shared shell.
 
-Once a `GET /edges`-style route exists (see `docs/API.md`), add:
-- an `Edges`/`Dashboard`-style page listing `prop_edges` rows, filterable by market and
-  edge tier, showing line vs. projection vs. win probability vs. recommended side
-- a corresponding `fetchPropEdges()` in `apps/web/src/api.ts`, following the existing
-  `fetch*` function pattern (base URL resolution, `qs()` helper, typed response)
+## Brand / design system
 
-This deserves its own focused design pass (layout, filtering UX, styling direction) rather
-than being bolted on ad hoc.
+PropSignal is dark-mode-native ("trading terminal for props"). All theming lives in
+`:root` custom properties in `src/index.css` — surfaces, text tiers, the signal palette
+(green = value/over, red = avoid/under), and edge-tier badge colors. A future mobile app
+or theme pass should only touch tokens, not components.
+
+The logo is an inline-SVG recreation of the brand mark (`src/components/Logo.tsx`:
+circle ring + "W" waveform + emitted beam) so it stays crisp at navbar/favicon sizes;
+`public/favicon.svg` is the flat high-contrast tile variant. The raster brand PNGs
+(from the branding session) are marketing assets and are not yet in the repo.
+
+## Accessibility (maintain these when changing the UI)
+
+- All text/background pairs meet WCAG AA; contrast ratios are annotated next to each
+  token in `index.css`.
+- `:focus-visible` outlines everywhere (restyle, never remove); sortable headers are
+  real `<button>`s with `aria-sort`/`aria-label`; nav uses `aria-current`; the table has
+  a visually-hidden `<caption>`; pager status is `aria-live`; decorative logo instances
+  are `aria-hidden`.
+- `prefers-reduced-motion` disables transitions.
+
+## Dev
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
 
 ## Dev
 

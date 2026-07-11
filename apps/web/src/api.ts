@@ -131,6 +131,45 @@ export type MLProjectionRow = {
   created_at: string;
 };
 
+export type EdgeTier = "small" | "medium" | "strong" | "elite";
+
+export type PropEdge = {
+  id: number;
+  event_id: string | null;
+  commence_time: string | null;
+  home_team: string | null;
+  away_team: string | null;
+  player_name: string;
+  market_code: string;
+  bookmaker_key: string;
+  bookmaker_title: string | null;
+  line: number | null;
+  price_american: number | null;
+  model_name: string;
+  model_r2: number | null;
+  projection: number;
+  raw_edge: number;
+  win_prob: number | null;
+  recommended_side: string;
+  edge_tier: EdgeTier;
+  created_at: string;
+};
+
+export type EdgesResponse = {
+  ok: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  edges: PropEdge[];
+};
+
+export type EdgesSummary = {
+  ok: boolean;
+  by_market: { market_code: string; count: number; avg_abs_edge: number }[];
+  by_tier: Partial<Record<EdgeTier, number>>;
+  last_updated: string | null;
+};
+
 /* =========================
    Helpers
    ========================= */
@@ -287,4 +326,41 @@ export async function fetchMLProjectionHistory(args: {
   })}`;
   const data = await http<{ ok: boolean; rows: MLProjectionRow[] }>(url);
   return data.rows;
+}
+
+/**
+ * Fetch computed betting edges (sportsbook line vs. model projection).
+ *
+ * Backend: GET /edges?market_code=&min_tier=&side=&search=&sort=&order=&limit=&offset=
+ */
+export async function fetchEdges(args?: {
+  market_code?: string | null;
+  min_tier?: EdgeTier | null;
+  side?: "over" | "under" | null;
+  search?: string | null;
+  sort?: string;
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}): Promise<EdgesResponse> {
+  const url = `${getApiBase()}/edges?${qs({
+    market_code: args?.market_code ?? undefined,
+    min_tier: args?.min_tier ?? undefined,
+    side: args?.side ?? undefined,
+    search: args?.search ?? undefined,
+    sort: args?.sort ?? "edge",
+    order: args?.order ?? "desc",
+    limit: args?.limit ?? 50,
+    offset: args?.offset ?? 0,
+  })}`;
+  return http<EdgesResponse>(url);
+}
+
+/**
+ * Fetch dashboard summary stats (counts per market / tier, last run time).
+ *
+ * Backend: GET /edges/summary
+ */
+export async function fetchEdgesSummary(): Promise<EdgesSummary> {
+  return http<EdgesSummary>(`${getApiBase()}/edges/summary`);
 }

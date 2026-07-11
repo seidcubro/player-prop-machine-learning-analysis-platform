@@ -55,14 +55,19 @@ All hit The Odds API (`ODDS_API_KEY` in `.env`) and upsert into `odds_events`/
 - `POST /odds/sync/historical_events?date=...` — historical events snapshot for a date.
 - `POST /odds/sync/historical_player_props?date=...` — historical player props for a date.
 
-## The gap: no `prop_edges` route
+## Edges (`services/api/app/routes/edges.py`)
 
-`services/training/build_prop_edges.py` computes real edges (projection vs. sportsbook
-line, win probability, recommended side, tier) and writes them to `prop_edges` — but no
-route in `services/api` reads that table. This is the concrete next piece of work: add
-(for example) `GET /edges?market_code=&min_tier=&event_id=` following the same patterns as
-the routes above, and update `apps/web/src/api.ts` + a new frontend view to actually show
-line-vs-projection-vs-edge to a user. See `docs/FRONTEND.md`.
+The route that connects the edge pipeline to consumers (`build_prop_edges.py` writes
+`prop_edges`; these routes read it):
+
+- `GET /edges?market_code=&min_tier=&side=&search=&sort=&order=&limit=&offset=`
+  Filterable/sortable/paginated list of computed edges. `min_tier` is inclusive-upward
+  (`strong` returns strong + elite). Sort keys: `edge` (|raw_edge|, default), `win_prob`,
+  `line`, `projection`, `commence_time`, `player_name`.
+  -> `{ "ok": true, "total": n, "limit": n, "offset": n, "edges": [...] }`
+
+- `GET /edges/summary` — per-market counts/avg edge, per-tier counts, last run timestamp.
+  Used by the frontend dashboard header.
 
 ## Error handling
 

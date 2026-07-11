@@ -24,14 +24,15 @@ Historical NFL data (nflverse)
   markets with live odds data (pass_att, pass_completions, rush_att, recs, rec_yds, rush_yds;
   pass_yds/pass_td/rush_td/rec_td have working models but no odds coverage in the current
   sample data).
-- **The API does not yet expose `prop_edges`.** There is no endpoint that serves the edge
-  table, and the frontend has no concept of a sportsbook line, an edge, or a recommendation.
-  The only projection path the frontend actually calls
-  (`GET /players/{id}/projection_ml`) is a separate, simpler code path that returns a raw
-  model number with no odds comparison at all. **Closing this gap is the current top
-  priority** — see `docs/API.md` and `docs/FRONTEND.md`.
-- The frontend (`apps/web`) is a 2-page skeleton (player search + player detail) built
-  before most of the current feature/model work; it needs a dedicated pass.
+- **The edge pipeline is connected end-to-end.** `GET /api/v1/edges` (+ `/edges/summary`)
+  serves `prop_edges`, and the frontend's home screen is a PropSignal-branded edges
+  dashboard: line vs. model projection vs. edge vs. win probability, filterable by
+  market/tier/side, sortable, paginated, mobile-responsive, WCAG-AA accessible. See
+  `docs/FRONTEND.md`.
+- Note the two projection code paths: the dashboard consumes `build_prop_edges.py` output,
+  while `GET /players/{id}/projection_ml` remains a separate simpler path (raw model
+  number, no odds comparison) used by the player detail page — see
+  `docs/specs/ml-design.md` "Inference contract".
 
 ## Architecture
 
