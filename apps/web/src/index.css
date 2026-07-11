@@ -38,9 +38,10 @@
   --tier-medium-bg: #3d3113;  --tier-medium-fg: #f0d27c;
   --tier-small-bg: #2a2f33;   --tier-small-fg: #b7c4cc;
 
-  --radius: 10px;
-  --radius-sm: 6px;
-  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --radius: 12px;
+  --radius-sm: 7px;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, Menlo, monospace;
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
 
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.5;
@@ -63,7 +64,13 @@ body {
     var(--bg);
 }
 
-h1, h2, h3 { line-height: 1.15; margin: 0; }
+h1, h2, h3 {
+  line-height: 1.15;
+  margin: 0;
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+h1 { font-size: 2rem; font-weight: 700; }
 
 a { color: var(--green); text-decoration: none; }
 a:hover { color: var(--green-bright); text-decoration: underline; }
@@ -283,6 +290,134 @@ table.ps-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
+}
+
+/* ---------- Hero / polish ---------- */
+
+.ps-hero { margin-bottom: 4px; }
+.ps-hero .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--green);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.ps-hero .tag::before {
+  content: "";
+  width: 22px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--green), transparent);
+  border-radius: 2px;
+}
+
+.ps-nav-brand { font-family: var(--font-display); }
+
+.ps-stat {
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.ps-stat::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(52, 210, 123, 0.45), transparent);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.ps-stat:hover { border-color: var(--border-strong); }
+.ps-stat:hover::after { opacity: 1; }
+.ps-stat .value { font-family: var(--font-display); }
+
+.ps-table td .date { color: var(--text-faint); font-size: 0.78rem; }
+
+tr.clickable { cursor: pointer; }
+
+/* ---------- Players grid ---------- */
+
+.ps-playergrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.ps-playercard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  color: var(--text);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.ps-playercard:hover {
+  border-color: var(--green-dim);
+  text-decoration: none;
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.ps-playercard .meta { color: var(--text-dim); font-size: 0.8rem; }
+
+.ps-avatar {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--green-bright);
+  background: radial-gradient(circle at 30% 30%, #1d5c3c, #123f28);
+  border: 1px solid var(--border-strong);
+}
+.ps-avatar.lg { width: 72px; height: 72px; font-size: 1.5rem; }
+
+.pos-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+/* filter chip row (positions) */
+.ps-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ps-chips button { border-radius: 999px; padding: 0.3em 0.95em; font-size: 0.88rem; }
+
+/* ---------- Player profile ---------- */
+
+.ps-profilehead {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background:
+    radial-gradient(400px 120px at 15% 0%, rgba(52, 210, 123, 0.1), transparent 70%),
+    var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin: 16px 0 20px;
+}
+.ps-profilehead .sub { color: var(--text-dim); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+
+.ps-section { margin-top: 26px; }
+.ps-section > h2 { font-size: 1.15rem; margin-bottom: 10px; }
+
+@media (max-width: 760px) {
+  h1 { font-size: 1.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -71,17 +71,23 @@ def _get_player_row(db: Session, player_id: int):
 @router.get("/players")
 def list_players(
     search: str | None = Query(default=None),
+    positions: str | None = Query(
+        default=None,
+        description="Comma-separated position whitelist, e.g. QB,RB,WR,TE,FB. "
+        "The public site passes offensive positions only; defensive/K/P players "
+        "stay in the DB for future markets but are hidden from browsing.",
+    ),
     include_total: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    where_sql = ""
+    clauses = []
     params = {"limit": limit, "offset": offset}
 
     if search and search.strip():
-        where_sql = """
-            WHERE
+        clauses.append(
+            """(
               COALESCE(first_name || ' ' || last_name, '') ILIKE :q
               OR COALESCE(first_name, '') ILIKE :q
               OR COALESCE(last_name, '') ILIKE :q
@@ -89,8 +95,17 @@ def list_players(
               OR COALESCE(team, '') ILIKE :q
               OR COALESCE(position, '') ILIKE :q
               OR COALESCE(external_id, '') ILIKE :q
-        """
+            )"""
+        )
         params["q"] = f"%{search.strip()}%"
+
+    if positions and positions.strip():
+        pos_list = [p.strip().upper() for p in positions.split(",") if p.strip()]
+        if pos_list:
+            clauses.append("position = ANY(:positions)")
+            params["positions"] = pos_list
+
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
     rows = db.execute(
         text(
@@ -115,13 +130,65 @@ def list_players(
     resp = {"ok": True, "players": list(rows)}
 
     if include_total:
+        count_params = {k: v for k, v in params.items() if k in ("q", "positions")}
         total_row = db.execute(
             text(f"SELECT COUNT(*) AS total FROM players {where_sql}"),
-            ({"q": params["q"]} if params.get("q") else {}),
+            count_params,
         ).mappings().first()
         resp["total"] = int(total_row["total"]) if total_row else 0
 
     return resp
+
+
+@router.get("/players/{player_id}/games")
+def player_games(
+    player_id: int,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Recent game log for a player (most recent first), from player_game_stats_app."""
+    player = _get_player_row(db, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    if not player["external_id"]:
+        raise HTTPException(status_code=400, detail="Player missing external_id")
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              game_date,
+              season,
+              week,
+              team,
+              opponent,
+              COALESCE(targets, 0) AS targets,
+              COALESCE(receptions, 0) AS receptions,
+              COALESCE(receiving_yards, 0) AS receiving_yards,
+              COALESCE(receiving_tds, 0) AS receiving_tds,
+              COALESCE(carries, 0) AS carries,
+              COALESCE(rushing_yards, 0) AS rushing_yards,
+              COALESCE(rushing_tds, 0) AS rushing_tds,
+              COALESCE(attempts, 0) AS pass_attempts,
+              COALESCE(completions, 0) AS completions,
+              COALESCE(passing_yards, 0) AS passing_yards,
+              COALESCE(passing_tds, 0) AS passing_tds
+            FROM player_game_stats_app
+            WHERE player_id = :external_id
+              AND game_date IS NOT NULL
+            ORDER BY game_date DESC
+            LIMIT :limit
+            """
+        ),
+        {"external_id": player["external_id"], "limit": limit},
+    ).mappings().all()
+
+    return {
+        "ok": True,
+        "player_id": player_id,
+        "position": player["position"],
+        "games": [dict(r) for r in rows],
+    }
 
 
 @router.get("/players/{player_id}")

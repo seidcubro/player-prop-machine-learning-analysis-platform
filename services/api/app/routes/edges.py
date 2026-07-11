@@ -18,7 +18,9 @@ router = APIRouter()
 # Whitelisted sort keys -> SQL expressions. Never interpolate raw user input
 # into ORDER BY.
 _SORTS = {
-    "edge": "ABS(raw_edge)",
+    # raw_edge is stored as a positive magnitude for both sides; sign it by
+    # recommended side so desc runs +35 (over) ... 0 ... -35 (under).
+    "edge": "(CASE WHEN recommended_side = 'under' THEN -raw_edge ELSE raw_edge END)",
     "win_prob": "win_prob",
     "line": "line",
     "projection": "projection",
