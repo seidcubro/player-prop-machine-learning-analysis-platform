@@ -48,6 +48,32 @@ def _season_range(start: int, end: int) -> list[int]:
     return list(range(start, end + 1))
 
 
+def _load_by_season(loader, seasons: Iterable[int], **kwargs) -> pd.DataFrame:
+    """Load an nflverse dataset one season at a time, skipping unavailable seasons.
+
+    nflverse publishes one file per season. A season that has not started yet (or
+    whose file for this dataset has not been published) returns a 404. Passing the
+    whole range to a loader in a single call means one missing season raises and
+    aborts the entire ingestion run, so load per season and warn on the gaps
+    instead. Returns an empty DataFrame if no season could be loaded.
+    """
+    name = getattr(loader, "__name__", str(loader))
+    frames = []
+    for season in seasons:
+        try:
+            df = _as_pandas(loader([season], **kwargs))
+        except Exception as exc:
+            print(f"    skip {name} {season}: {type(exc).__name__}: {str(exc)[:120]}")
+            continue
+        if df is None or len(df) == 0:
+            print(f"    skip {name} {season}: 0 rows")
+            continue
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
 def ensure_tables():
     """Create all staging tables."""
     statements = [
@@ -606,12 +632,26 @@ def ensure_tables():
 
 def ingest_players():
     df = _as_pandas(nflreadpy.load_players())
+    # `team` is not a column in this feed -- it is `latest_team`. Selecting the
+    # missing name produced an all-null team for every player, which is why the
+    # UI showed "-" for everyone.
     out = pd.DataFrame({
         "player_id": df["player_id"] if "player_id" in df.columns else df["gsis_id"],
         "full_name": df["player_display_name"] if "player_display_name" in df.columns else _col(df, "display_name"),
         "position":  _col(df, "position"),
-        "team":      _col(df, "team"),
+        "team":      _col(df, "latest_team"),
+        "headshot":  _col(df, "headshot"),
+        "jersey_number": _col(df, "jersey_number"),
+        "height":    pd.to_numeric(_col(df, "height"), errors="coerce"),
+        "weight":    pd.to_numeric(_col(df, "weight"), errors="coerce"),
+        "college":   _col(df, "college_name"),
+        "years_exp": pd.to_numeric(_col(df, "years_of_experience"), errors="coerce"),
+        "status":    _col(df, "status"),
+        "rookie_year": pd.to_numeric(_col(df, "rookie_year"), errors="coerce"),
     }).dropna(subset=["player_id"]).drop_duplicates(subset=["player_id"])
+    out["jersey_number"] = out["jersey_number"].astype("string")
+    for c in ("years_exp", "rookie_year"):
+        out[c] = out[c].astype("Int64")
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE nfl_players"))
         out.to_sql("nfl_players", conn, if_exists="append", index=False)
@@ -625,7 +665,9 @@ def sync_players_dimension():
     - fills real names from nfl_players.full_name
     """
     sql = """
-    INSERT INTO players (external_id, first_name, last_name, name, position, team)
+    INSERT INTO players (external_id, first_name, last_name, name, position, team,
+                         headshot, jersey_number, height, weight, college, years_exp,
+                         status, rookie_year)
     SELECT
         np.player_id AS external_id,
         CASE
@@ -640,7 +682,15 @@ def sync_players_dimension():
         END AS last_name,
         trim(np.full_name) AS name,
         np.position,
-        np.team
+        np.team,
+        np.headshot,
+        np.jersey_number,
+        np.height,
+        np.weight,
+        np.college,
+        np.years_exp,
+        np.status,
+        np.rookie_year
     FROM nfl_players np
     WHERE np.player_id IS NOT NULL
     ON CONFLICT (external_id) DO UPDATE SET
@@ -648,7 +698,15 @@ def sync_players_dimension():
         last_name  = EXCLUDED.last_name,
         name       = EXCLUDED.name,
         position   = EXCLUDED.position,
-        team       = EXCLUDED.team;
+        team       = EXCLUDED.team,
+        headshot   = EXCLUDED.headshot,
+        jersey_number = EXCLUDED.jersey_number,
+        height     = EXCLUDED.height,
+        weight     = EXCLUDED.weight,
+        college    = EXCLUDED.college,
+        years_exp  = EXCLUDED.years_exp,
+        status     = EXCLUDED.status,
+        rookie_year = EXCLUDED.rookie_year;
     """
     with _engine().begin() as conn:
         conn.execute(text(sql))
@@ -662,7 +720,10 @@ def sync_players_dimension():
 
 
 def ingest_schedules(seasons: Iterable[int]):
-    df = _as_pandas(nflreadpy.load_schedules(list(seasons)))
+    df = _load_by_season(nflreadpy.load_schedules, list(seasons))
+    if len(df) == 0:
+        print("  schedules: nothing loaded, leaving existing rows")
+        return
 
     def fc(name):
         return _col(df, name)
@@ -702,7 +763,7 @@ def ingest_schedules(seasons: Iterable[int]):
 
 
 def ingest_player_game_stats(seasons: Iterable[int]):
-    stats = _as_pandas(nflreadpy.load_player_stats(list(seasons), summary_level="week"))
+    stats = _load_by_season(nflreadpy.load_player_stats, list(seasons), summary_level="week")
     if len(stats) == 0:
         raise RuntimeError("load_player_stats returned 0 rows")
     print(f"  stats rows: {len(stats)}")
@@ -865,8 +926,11 @@ def ingest_player_game_stats(seasons: Iterable[int]):
 
 def ingest_snap_counts(seasons: Iterable[int]):
     """Snap counts use pfr_player_id. We join to crosswalk to get gsis_id."""
-    df = _as_pandas(nflreadpy.load_snap_counts(list(seasons)))
+    df = _load_by_season(nflreadpy.load_snap_counts, list(seasons))
     print(f"  snap_counts raw: {len(df)} rows")
+    if len(df) == 0:
+        print("  snap_counts: nothing loaded, leaving existing rows")
+        return
 
     with _engine().begin() as conn:
         xwalk = pd.read_sql("SELECT gsis_id, pfr_id FROM player_id_crosswalk WHERE pfr_id IS NOT NULL", conn)
@@ -903,8 +967,11 @@ def ingest_ngs(seasons: Iterable[int]):
     seasons_list = list(seasons)
 
     for stat_type, table in [("passing", "ngs_passing"), ("receiving", "ngs_receiving"), ("rushing", "ngs_rushing")]:
-        df = _as_pandas(nflreadpy.load_nextgen_stats(seasons_list, stat_type=stat_type))
+        df = _load_by_season(nflreadpy.load_nextgen_stats, seasons_list, stat_type=stat_type)
         print(f"  ngs_{stat_type} raw: {len(df)} rows")
+        if len(df) == 0:
+            print(f"  ngs_{stat_type}: nothing loaded, leaving existing rows")
+            continue
 
         df = df.rename(columns={"player_gsis_id": "player_id", "team_abbr": "team"})
 
@@ -987,8 +1054,11 @@ def ingest_pfr_advstats(seasons: Iterable[int]):
 
     for stat_type, table in [("pass", "pfr_adv_passing"), ("rush", "pfr_adv_rushing"), ("rec", "pfr_adv_receiving"), ("def", "pfr_adv_defense")]:
         try:
-            df = _as_pandas(nflreadpy.load_pfr_advstats(seasons_list, stat_type=stat_type))
+            df = _load_by_season(nflreadpy.load_pfr_advstats, seasons_list, stat_type=stat_type)
             print(f"  pfr_adv_{stat_type} raw: {len(df)} rows")
+            if len(df) == 0:
+                print(f"  pfr_adv_{stat_type}: nothing loaded, leaving existing rows")
+                continue
         except Exception as e:
             print(f"  pfr_adv_{stat_type} FAILED: {e}")
             continue
@@ -1100,10 +1170,16 @@ def ingest_ftn_charting(seasons: Iterable[int]):
     """Aggregate FTN play-level charting to player-game level via PBP join."""
     seasons_list = list(seasons)
 
-    ftn = _as_pandas(nflreadpy.load_ftn_charting(seasons_list))
+    ftn = _load_by_season(nflreadpy.load_ftn_charting, seasons_list)
     print(f"  ftn_charting raw: {len(ftn)} rows")
+    if len(ftn) == 0:
+        print("  ftn_charting: nothing loaded, leaving existing rows")
+        return
 
-    pbp = _as_pandas(nflreadpy.load_pbp(seasons_list))
+    pbp = _load_by_season(nflreadpy.load_pbp, seasons_list)
+    if len(pbp) == 0:
+        print("  pbp: nothing loaded, leaving existing rows")
+        return
     print(f"  pbp raw: {len(pbp)} rows")
     pbp_pass = pbp[pbp["pass_attempt"] == 1][["game_id", "play_id", "receiver_player_id", "season", "week"]].copy()
     # season and week come from PBP since FTN only has season/week at file level
@@ -1167,10 +1243,16 @@ def ingest_participation(seasons: Iterable[int]):
     """Aggregate participation play-level data to player-game level."""
     seasons_list = list(seasons)
 
-    df = _as_pandas(nflreadpy.load_participation(seasons_list))
+    df = _load_by_season(nflreadpy.load_participation, seasons_list)
     print(f"  participation raw: {len(df)} rows")
+    if len(df) == 0:
+        print("  participation: nothing loaded, leaving existing rows")
+        return
 
-    pbp = _as_pandas(nflreadpy.load_pbp(seasons_list))
+    pbp = _load_by_season(nflreadpy.load_pbp, seasons_list)
+    if len(pbp) == 0:
+        print("  pbp: nothing loaded, leaving existing rows")
+        return
     pbp = pbp[pbp["play_type"].isin(["pass", "run"])].copy()
 
     df = df.rename(columns={"nflverse_game_id": "game_id"})
@@ -1265,7 +1347,10 @@ def ingest_pbp_aggregated(seasons: Iterable[int]):
     """Aggregate PBP to player-game level for targeted metrics."""
     seasons_list = list(seasons)
 
-    pbp = _as_pandas(nflreadpy.load_pbp(seasons_list))
+    pbp = _load_by_season(nflreadpy.load_pbp, seasons_list)
+    if len(pbp) == 0:
+        print("  pbp: nothing loaded, leaving existing rows")
+        return
     pbp = pbp[pbp["play_type"].isin(["pass", "run"])].copy()
     print(f"  pbp pass+run rows: {len(pbp)}")
 
@@ -1414,8 +1499,11 @@ def sync_targets_from_pbp():
 
 def ingest_ff_opportunity(seasons: Iterable[int]):
     seasons_list = list(seasons)
-    df = _as_pandas(nflreadpy.load_ff_opportunity(seasons_list))
+    df = _load_by_season(nflreadpy.load_ff_opportunity, seasons_list)
     print(f"  ff_opportunity raw: {len(df)} rows")
+    if len(df) == 0:
+        print("  ff_opportunity: nothing loaded, leaving existing rows")
+        return
 
     def c(name):
         return _col(df, name)
@@ -1457,20 +1545,114 @@ def ingest_ff_opportunity(seasons: Iterable[int]):
     print(f"  ingest_ff_opportunity: {len(out)} rows")
 
 
-def ingest_depth_charts(seasons: Iterable[int]):
-    df = _as_pandas(nflreadpy.load_depth_charts(list(seasons)))
-    print(f"  depth_charts raw: {len(df)} rows")
+def _week_starts(conn, season: int) -> pd.DataFrame:
+    """First scheduled game date per week for a season, used to date-stamp snapshots."""
+    return pd.read_sql(
+        text(
+            "SELECT week, MIN(game_date) AS week_start FROM nfl_games "
+            "WHERE season = :s AND game_date IS NOT NULL GROUP BY week ORDER BY week"
+        ),
+        conn,
+        params={"s": season},
+    )
 
-    out = pd.DataFrame({
-        "player_id":        df["gsis_id"],
-        "season":           df["season"],
-        "week":             df["week"],
-        "team":             df["club_code"],
-        "position":         df["position"],
-        "depth_position":   df["depth_position"],
-        "depth_team":       df["depth_team"],
-        "game_type":        _col(df, "game_type"),
-    }).dropna(subset=["player_id", "season", "week", "depth_position"])
+
+def _normalize_depth_charts(df: pd.DataFrame, season: int, conn) -> pd.DataFrame:
+    """Map one season of depth chart data onto the pre-2025 weekly schema.
+
+    From 2025 onward nflverse replaced the weekly depth chart file (season, week,
+    club_code, depth_team, depth_position) with a timestamped snapshot feed
+    (dt, team, pos_abb, pos_rank) that carries no season or week at all. Loading
+    both formats together silently produced all-NaN season/week for the new rows,
+    which were then dropped -- leaving the table empty from 2025 on.
+
+    Snapshots are published in the run-up to a game, so each one is assigned to the
+    first week with a game scheduled on or after its timestamp, and only the latest
+    snapshot per player and depth position within a week is kept.
+    """
+    if "depth_team" in df.columns and "week" in df.columns:
+        return pd.DataFrame({
+            "player_id":      df["gsis_id"],
+            "season":         df["season"],
+            "week":           df["week"],
+            "team":           df["club_code"],
+            "position":       df["position"],
+            "depth_position": df["depth_position"],
+            "depth_team":     df["depth_team"],
+            "game_type":      _col(df, "game_type"),
+        })
+
+    if "dt" not in df.columns or "pos_rank" not in df.columns:
+        print(f"    depth_charts {season}: unrecognized schema {sorted(df.columns)[:12]}, skipping")
+        return pd.DataFrame()
+
+    weeks = _week_starts(conn, season)
+    if weeks.empty:
+        print(f"    depth_charts {season}: no scheduled games to map snapshots onto, skipping")
+        return pd.DataFrame()
+
+    snap = df.dropna(subset=["gsis_id", "dt", "pos_abb"]).copy()
+    snap["dt"] = (
+        pd.to_datetime(snap["dt"], errors="coerce", utc=True)
+        .dt.tz_localize(None)
+        .astype("datetime64[ns]")
+    )
+    snap = snap.dropna(subset=["dt"]).sort_values("dt")
+
+    weeks["week_start"] = pd.to_datetime(weeks["week_start"], errors="coerce").astype("datetime64[ns]")
+    weeks = weeks.dropna(subset=["week_start"]).sort_values("week_start")
+
+    # each snapshot belongs to the next week that still has a game to be played
+    snap = pd.merge_asof(
+        snap,
+        weeks.rename(columns={"week_start": "dt"}),
+        on="dt",
+        direction="forward",
+    )
+    # snapshots after the final game of the season fall to the last week
+    snap["week"] = snap["week"].fillna(weeks["week"].max())
+
+    # keep the freshest snapshot per player/week/position
+    snap = snap.drop_duplicates(
+        subset=["gsis_id", "week", "pos_abb"], keep="last"
+    )
+
+    return pd.DataFrame({
+        "player_id":      snap["gsis_id"],
+        "season":         season,
+        "week":           snap["week"],
+        "team":           snap["team"],
+        "position":       _col(snap, "pos_abb"),
+        "depth_position": snap["pos_abb"],
+        "depth_team":     pd.to_numeric(snap["pos_rank"], errors="coerce"),
+        "game_type":      _col(snap, "game_type"),
+    })
+
+
+def ingest_depth_charts(seasons: Iterable[int]):
+    frames = []
+    with _engine().begin() as conn:
+        for season in seasons:
+            try:
+                raw = _as_pandas(nflreadpy.load_depth_charts([season]))
+            except Exception as exc:
+                print(f"    skip load_depth_charts {season}: {type(exc).__name__}: {str(exc)[:120]}")
+                continue
+            if raw is None or len(raw) == 0:
+                print(f"    skip load_depth_charts {season}: 0 rows")
+                continue
+            norm = _normalize_depth_charts(raw, season, conn)
+            print(f"    depth_charts {season}: {len(raw)} raw -> {len(norm)} normalized")
+            if len(norm):
+                frames.append(norm)
+
+    if not frames:
+        print("  depth_charts: nothing loaded, leaving existing rows")
+        return
+
+    out = pd.concat(frames, ignore_index=True).dropna(
+        subset=["player_id", "season", "week", "depth_position"]
+    )
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE depth_charts"))
@@ -1482,8 +1664,11 @@ def ingest_depth_charts(seasons: Iterable[int]):
 
 
 def ingest_rosters_weekly(seasons: Iterable[int]):
-    df = _as_pandas(nflreadpy.load_rosters_weekly(list(seasons)))
+    df = _load_by_season(nflreadpy.load_rosters_weekly, list(seasons))
     print(f"  rosters_weekly raw: {len(df)} rows")
+    if len(df) == 0:
+        print("  rosters_weekly: nothing loaded, leaving existing rows")
+        return
 
     out = pd.DataFrame({
         "player_id":            df["gsis_id"],
@@ -1510,8 +1695,11 @@ def ingest_rosters_weekly(seasons: Iterable[int]):
 
 
 def ingest_injuries(seasons: Iterable[int]):
-    df = _as_pandas(nflreadpy.load_injuries(list(seasons)))
+    df = _load_by_season(nflreadpy.load_injuries, list(seasons))
     print(f"  injuries raw: {len(df)} rows")
+    if len(df) == 0:
+        print("  injuries: nothing loaded, leaving existing rows")
+        return
 
     out = pd.DataFrame({
         "player_id":                df["gsis_id"],

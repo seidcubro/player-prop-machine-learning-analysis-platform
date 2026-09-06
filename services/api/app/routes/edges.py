@@ -37,6 +37,12 @@ def list_edges(
     min_tier: str | None = Query(None, description="Minimum edge tier: small|medium|strong|elite"),
     side: str | None = Query(None, description="Filter by recommended side: over|under"),
     search: str | None = Query(None, description="Case-insensitive player name search"),
+    upcoming_only: bool = Query(
+        True,
+        description="Only games that have not kicked off yet. The dashboard is "
+        "for deciding what to bet, so past slates are hidden by default; pass "
+        "false to browse historical edges.",
+    ),
     sort: str = Query("edge", description=f"Sort key: {'|'.join(_SORTS)}"),
     order: str = Query("desc", description="asc|desc"),
     limit: int = Query(50, ge=1, le=500),
@@ -75,6 +81,9 @@ def list_edges(
         where.append("player_name ILIKE :search")
         params["search"] = f"%{search.strip()}%"
 
+    if upcoming_only:
+        where.append("commence_time >= NOW()")
+
     where_sql = " AND ".join(where)
     order_sql = f"{_SORTS[sort]} {'ASC' if order == 'asc' else 'DESC'}"
 
@@ -86,26 +95,51 @@ def list_edges(
         text(
             f"""
             SELECT
-              id,
-              event_id,
-              commence_time,
-              home_team,
-              away_team,
-              player_name,
-              market_code,
-              bookmaker_key,
-              bookmaker_title,
-              line,
-              price_american,
-              model_name,
-              model_r2,
-              projection,
-              raw_edge,
-              win_prob,
-              recommended_side,
-              edge_tier,
-              created_at
+              -- Qualified because the lateral join below also exposes an "id".
+              prop_edges.id,
+              prop_edges.event_id,
+              prop_edges.commence_time,
+              prop_edges.home_team,
+              prop_edges.away_team,
+              prop_edges.player_name,
+              prop_edges.market_code,
+              prop_edges.bookmaker_key,
+              prop_edges.bookmaker_title,
+              prop_edges.line,
+              prop_edges.price_american,
+              prop_edges.model_name,
+              prop_edges.model_r2,
+              prop_edges.projection,
+              prop_edges.raw_edge,
+              prop_edges.win_prob,
+              prop_edges.recommended_side,
+              prop_edges.edge_tier,
+              prop_edges.created_at,
+              -- kickoff date for display; the UI shows when the game is, not
+              -- just when the edge row happened to be generated
+              (prop_edges.commence_time AT TIME ZONE 'UTC')::date AS game_date,
+              -- Names are not unique: there is a Josh Allen at QB for Buffalo
+              -- and a Josh Allen at C for Tampa Bay. A bare LIMIT 1 picked
+              -- whichever row came first, so a prop could link to a completely
+              -- different player's profile. Resolve to someone whose position
+              -- can actually produce this market's stat, preferring the one
+              -- with recent game activity.
+              resolved.headshot AS headshot,
+              resolved.id AS player_id
             FROM prop_edges
+            LEFT JOIN LATERAL (
+                SELECT p.id, p.headshot
+                FROM players p
+                JOIN prop_markets m ON m.code = prop_edges.market_code
+                WHERE lower(replace(replace(p.name, '.', ''), '-', ' ')) =
+                      lower(replace(replace(prop_edges.player_name, '.', ''), '-', ' '))
+                  AND (p.position IS NULL OR p.position = ANY(m.eligible_positions))
+                ORDER BY (
+                    SELECT count(*) FROM player_game_stats_app g
+                    WHERE g.player_id = p.external_id
+                ) DESC, p.id
+                LIMIT 1
+            ) resolved ON TRUE
             WHERE {where_sql}
             ORDER BY {order_sql}
             LIMIT :limit OFFSET :offset
@@ -132,6 +166,7 @@ def edges_summary(db: Session = Depends(get_db)):
             SELECT market_code, COUNT(*) AS count,
                    ROUND(AVG(ABS(raw_edge))::numeric, 1) AS avg_abs_edge
             FROM prop_edges
+            WHERE commence_time >= NOW()
             GROUP BY market_code
             ORDER BY market_code
             """
@@ -143,6 +178,7 @@ def edges_summary(db: Session = Depends(get_db)):
             """
             SELECT edge_tier, COUNT(*) AS count
             FROM prop_edges
+            WHERE commence_time >= NOW()
             GROUP BY edge_tier
             """
         )

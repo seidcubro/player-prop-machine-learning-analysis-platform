@@ -39,6 +39,27 @@ def _weighted_mean_recent(vals):
     return sum(v * w for v, w in zip(vals, weights)) / sum(weights)
 
 
+def _median(vals):
+    ordered = sorted(vals)
+    n = len(ordered)
+    mid = n // 2
+    return ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _trimmed_mean(vals):
+    """Mean of the window with its single highest value dropped.
+
+    At lookback=5 one blow-up game moves `mean` and `weighted_mean` far more
+    than the player's true level -- the T.J. Hockenson case, where a 134-yard
+    game pulled a 43.5-line player's window mean to ~73. This gives the model
+    an outlier-free view of the same window alongside the untrimmed stats, so
+    it can learn when a spike is signal and when it is noise.
+    """
+    if len(vals) <= 1:
+        return _mean(vals)
+    return _mean(sorted(vals)[:-1])
+
+
 def _trend_slope(vals):
     n = len(vals)
     xs = list(range(1, n + 1))
@@ -247,7 +268,68 @@ def build_features(
     # create_rolling_defense.sql). Easy to miss since every other join target
     # here is a local WITH-clause CTE.
     sql = f"""
-        WITH team_rush_offense AS (
+        WITH pos_season_prior AS (
+            -- Position-level mean from *earlier seasons only*, used as the
+            -- shrinkage prior for players without much history. Restricting it
+            -- to prior seasons keeps the prior independent of the season being
+            -- predicted, which a pooled all-time mean would not be.
+            SELECT position, season,
+                   AVG(avg_stat) OVER (
+                       PARTITION BY position ORDER BY season
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                   ) AS prior_pos_mean
+            FROM (
+                SELECT position, season,
+                       AVG(COALESCE({stat_field}, 0)::float8) AS avg_stat
+                FROM player_game_stats_app
+                WHERE position IS NOT NULL AND season IS NOT NULL
+                GROUP BY position, season
+            ) t
+        ),
+        opp_pos_defense AS (
+            -- What a defense concedes *to a given position group*, not in total.
+            -- A team can allow few yards overall while being soft against
+            -- receiving backs, and a generic team total hides exactly the
+            -- matchup a prop is priced on ("their run defense is terrible").
+            SELECT
+                opponent AS defense_team,
+                game_date,
+                position,
+                SUM(COALESCE(rushing_yards, 0))::float8   AS pos_rush_yds_allowed,
+                SUM(COALESCE(carries, 0))::float8         AS pos_carries_allowed,
+                SUM(COALESCE(receiving_yards, 0))::float8 AS pos_rec_yds_allowed,
+                SUM(COALESCE(receptions, 0))::float8      AS pos_recs_allowed,
+                SUM(COALESCE(targets, 0))::float8         AS pos_targets_allowed,
+                SUM(COALESCE(rushing_tds, 0) + COALESCE(receiving_tds, 0))::float8
+                    AS pos_tds_allowed
+            FROM player_game_stats_app
+            WHERE game_date IS NOT NULL
+              AND opponent IS NOT NULL
+              AND position IS NOT NULL
+            GROUP BY opponent, game_date, position
+        ),
+        opp_pos_form AS (
+            -- A defense's recent form, as of each game date, against each
+            -- position group. Averaged over its OWN previous games and shifted
+            -- one row back so the game being predicted never contributes to it.
+            SELECT
+                defense_team,
+                game_date,
+                position,
+                AVG(pos_rush_yds_allowed) OVER w AS form_pos_rush_yds,
+                AVG(pos_carries_allowed)  OVER w AS form_pos_carries,
+                AVG(pos_rec_yds_allowed)  OVER w AS form_pos_rec_yds,
+                AVG(pos_recs_allowed)     OVER w AS form_pos_recs,
+                AVG(pos_targets_allowed)  OVER w AS form_pos_targets,
+                AVG(pos_tds_allowed)      OVER w AS form_pos_tds
+            FROM opp_pos_defense
+            WINDOW w AS (
+                PARTITION BY defense_team, position
+                ORDER BY game_date
+                ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING
+            )
+        ),
+        team_rush_offense AS (
             SELECT
                 team,
                 game_date,
@@ -288,6 +370,22 @@ def build_features(
             WHERE game_date IS NOT NULL
               AND opponent IS NOT NULL
             GROUP BY opponent, game_date
+        ),
+        team_pass_defense_form AS (
+            SELECT defense_team, game_date,
+                   AVG(opp_pass_attempts_allowed) OVER w AS form_pass_att_allowed,
+                   AVG(opp_pass_yards_allowed)    OVER w AS form_pass_yds_allowed
+            FROM team_pass_defense
+            WINDOW w AS (PARTITION BY defense_team ORDER BY game_date
+                         ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING)
+        ),
+        team_rush_defense_form AS (
+            SELECT defense_team, game_date,
+                   AVG(opp_carries_allowed)    OVER w AS form_carries_allowed,
+                   AVG(opp_rush_yards_allowed) OVER w AS form_rush_yards_allowed
+            FROM team_rush_defense
+            WINDOW w AS (PARTITION BY defense_team ORDER BY game_date
+                         ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING)
         )
         SELECT
             pgs.player_id,
@@ -295,8 +393,10 @@ def build_features(
             pgs.position,
             pgs.game_date,
             pgs.opponent,
+            pgs.season,
 
             COALESCE(pgs.{stat_field}, 0)::float8 AS y,
+            psp.prior_pos_mean AS prior_pos_mean,
             COALESCE(pgs.targets, 0)::float8 AS targets,
             COALESCE(pgs.receptions, 0)::float8 AS receptions,
             COALESCE(pgs.receiving_yards, 0)::float8 AS receiving_yards,
@@ -336,7 +436,43 @@ def build_features(
             ng.temp AS game_temp,
             ng.wind AS game_wind,
             COALESCE(ng.div_game, 0)::float8 AS game_div_game,
-            inj.report_status AS game_injury_status
+            inj.report_status AS game_injury_status,
+            -- Venue and situation, all known before kickoff.
+            ng.roof            AS game_roof,
+            ng.surface         AS game_surface,
+            ng.home_rest       AS game_home_rest,
+            ng.away_rest       AS game_away_rest,
+            -- Play-context usage from pbp_player_game (previously unused).
+            COALESCE(pbp.red_zone_targets, 0)::float8      AS rz_targets,
+            COALESCE(pbp.red_zone_carries, 0)::float8      AS rz_carries,
+            COALESCE(pbp.red_zone_target_rate, 0)::float8  AS rz_target_rate,
+            COALESCE(pbp.third_down_targets, 0)::float8    AS third_down_targets,
+            COALESCE(pbp.shotgun_pct, 0)::float8           AS shotgun_pct,
+            COALESCE(pbp.avg_air_yards_target, 0)::float8  AS air_yards,
+            COALESCE(pbp.avg_yac, 0)::float8               AS yac,
+            COALESCE(pbp.avg_epa_per_play, 0)::float8      AS epa_per_play,
+            COALESCE(pbp.avg_vegas_wp, 0)::float8          AS vegas_wp,
+            COALESCE(pbp.total_plays, 0)::float8           AS player_plays,
+            -- Opponent defense against this player's own position group.
+            COALESCE(opd.pos_rush_yds_allowed, 0)::float8  AS opp_pos_rush_yds,
+            COALESCE(opd.pos_carries_allowed, 0)::float8   AS opp_pos_carries,
+            COALESCE(opd.pos_rec_yds_allowed, 0)::float8   AS opp_pos_rec_yds,
+            COALESCE(opd.pos_recs_allowed, 0)::float8      AS opp_pos_recs,
+            COALESCE(opd.pos_targets_allowed, 0)::float8   AS opp_pos_targets,
+            COALESCE(opd.pos_tds_allowed, 0)::float8       AS opp_pos_tds,
+            -- The upcoming opponent's own recent form (see opp_pos_form). Opf.form_pos_rush_yds  AS form_pos_rush_yds,
+            opf.form_pos_carries   AS form_pos_carries,
+            opf.form_pos_rec_yds   AS form_pos_rec_yds,
+            opf.form_pos_recs      AS form_pos_recs,
+            opf.form_pos_targets   AS form_pos_targets,
+            opf.form_pos_tds       AS form_pos_tds,
+            trdf.form_carries_allowed    AS form_carries_allowed,
+            trdf.form_rush_yards_allowed AS form_rush_yards_allowed,
+            tpdf.form_pass_att_allowed   AS form_pass_att_allowed,
+            tpdf.form_pass_yds_allowed   AS form_pass_yds_allowed,
+            dc.depth_rank AS depth_rank,
+            COALESCE(tinj.pos_teammates_out, 0)::float8 AS pos_teammates_out,
+            COALESCE(tinj.pos_teammates_questionable, 0)::float8 AS pos_teammates_questionable
 
             {select_upstream_sql}
         FROM player_game_stats_app pgs
@@ -369,10 +505,58 @@ def build_features(
            AND fo.game_id = pgs.game_id
         LEFT JOIN nfl_games ng
             ON ng.game_id = pgs.game_id
+        LEFT JOIN pos_season_prior psp
+            ON psp.position = pgs.position
+           AND psp.season = pgs.season
+        LEFT JOIN opp_pos_form opf
+            ON opf.defense_team = pgs.opponent
+           AND opf.game_date = pgs.game_date
+           AND opf.position = pgs.position
+        LEFT JOIN team_rush_defense_form trdf
+            ON trdf.defense_team = pgs.opponent
+           AND trdf.game_date = pgs.game_date
+        LEFT JOIN team_pass_defense_form tpdf
+            ON tpdf.defense_team = pgs.opponent
+           AND tpdf.game_date = pgs.game_date
+        LEFT JOIN pbp_player_game pbp
+            ON pbp.player_id = pgs.player_id
+           AND pbp.game_id = pgs.game_id
+        LEFT JOIN opp_pos_defense opd
+            ON opd.defense_team = pgs.opponent
+           AND opd.game_date = pgs.game_date
+           AND opd.position = pgs.position
         LEFT JOIN injuries inj
             ON inj.player_id = pgs.player_id
            AND inj.season = pgs.season
            AND inj.week = pgs.week
+        -- Depth chart rank for the game being predicted. A player's listed
+        -- starter/backup rank is known before kickoff and captures role changes
+        -- (promotion to WR1, RB committee shakeup) faster than rolling production.
+        LEFT JOIN (
+            SELECT player_id, season, week, MIN(depth_team) AS depth_rank
+            FROM depth_charts
+            WHERE depth_team IS NOT NULL
+            GROUP BY player_id, season, week
+        ) dc
+            ON dc.player_id = pgs.player_id
+           AND dc.season = pgs.season
+           AND dc.week = pgs.week
+        -- Teammates at the same position listed on this week's injury report.
+        -- When the man ahead of you is out, your opportunity spikes in a way no
+        -- rolling average of your own past production can anticipate.
+        LEFT JOIN (
+            SELECT team, season, week, position,
+                   COUNT(*) FILTER (WHERE report_status IN ('Out', 'Doubtful'))
+                       AS pos_teammates_out,
+                   COUNT(*) FILTER (WHERE report_status = 'Questionable')
+                       AS pos_teammates_questionable
+            FROM injuries
+            GROUP BY team, season, week, position
+        ) tinj
+            ON tinj.team = pgs.team
+           AND tinj.season = pgs.season
+           AND tinj.week = pgs.week
+           AND tinj.position = pgs.position
         WHERE pgs.game_date IS NOT NULL
           AND pgs.opponent IS NOT NULL
         ORDER BY pgs.player_id, pgs.game_date
@@ -441,6 +625,10 @@ def build_features(
 
             window_games = games[i - lookback:i]
             window = ys[i - lookback:i]
+            # The game being predicted. Defined up front because several feature
+            # families read the opponent's own context from it, not just the
+            # Vegas block further down.
+            target_game = games[i]
 
             mu = _mean(window)
             sd = _stddev_pop(window)
@@ -478,6 +666,65 @@ def build_features(
                     aux_trend = _trend_slope(aux_window)
 
             extra_features = {}
+
+            # Outlier-resistant views of the same lookback window. `mean` and
+            # `weighted_mean` are both dominated by a single big game at
+            # lookback=5, which is the main source of the model overshooting a
+            # line after one spike. Offering a robust centre (median, trimmed
+            # mean) plus the raw spread lets the model decide how much of a hot
+            # window to believe rather than baking in a fixed shrinkage rule.
+            # Panel time-series view of the player's level.
+            #
+            # `weighted_mean` is a fixed 5-game window with linear weights --
+            # both the length and the weights were guessed. A local-level model
+            # says the true level drifts and each game observes it with noise,
+            # which makes the decay a parameter to estimate. Fitted on held-out
+            # folds (`eval_timeseries.py`), the best decay is alpha ~= 0.25, a
+            # half-life of about 2.4 games -- markedly faster than the shipped
+            # window implies. On the same folds this lifts R2 on the level
+            # estimate alone: rec_yds 0.327 -> 0.381, recs 0.387 -> 0.433.
+            #
+            # It also uses the player's whole history rather than truncating at
+            # five games, so a long track record is not thrown away.
+            prior = ys[:i]
+            if prior:
+                alpha = 0.35 if market_code == "rush_att" else 0.25
+                level = prior[0]
+                for v in prior[1:]:
+                    level = alpha * v + (1 - alpha) * level
+                extra_features["ewma_level"] = level
+
+                # Empirical-Bayes shrinkage toward the position's prior-season
+                # mean, weighted by how much of the player we have actually
+                # seen. Three games of history get pulled hard toward the
+                # position; sixty games barely move. This is the standard answer
+                # to a panel of many short, noisy series.
+                pos_prior = target_game.get("prior_pos_mean")
+                if pos_prior is not None:
+                    n_seen = float(len(prior))
+                    w = n_seen / (n_seen + 2.0)
+                    extra_features["ewma_shrunk"] = (
+                        w * level + (1.0 - w) * float(pos_prior)
+                    )
+                    extra_features["career_n"] = n_seen
+
+            if window:
+                extra_features["y_median"] = _median(window)
+                extra_features["y_trimmed_mean"] = _trimmed_mean(window)
+                extra_features["y_max"] = max(window)
+                extra_features["y_min"] = min(window)
+
+            # Season-to-date baseline over every prior game this season, not
+            # just the last `lookback`. A slower anchor to revert toward, with
+            # its own sample size so the model can learn how far to trust it.
+            season_prior = [
+                float(g["y"] or 0.0)
+                for g in games[:i]
+                if g.get("season") == games[i].get("season")
+            ]
+            if season_prior:
+                extra_features["y_season_mean"] = _mean(season_prior)
+                extra_features["y_season_n"] = float(len(season_prior))
 
             for code, _col in upstream_cols:
                 vals = [float(g.get(code, 0.0) or 0.0) for g in window_games]
@@ -586,37 +833,18 @@ def build_features(
                     if td_rate_vals:
                         extra_features["rush_td_rate_mean"] = _mean(td_rate_vals)
                         extra_features["rush_td_rate_trend"] = _trend_slope(td_rate_vals)
-                opp_rush_vals = [
-                    float(g.get("opp_rush_yards_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-                opp_carry_vals = [
-                    float(g.get("opp_carries_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-
-                opp_rush_vals_nonzero = [v for v in opp_rush_vals if v > 0]
-                opp_carry_vals_nonzero = [v for v in opp_carry_vals if v > 0]
-
-                if opp_rush_vals_nonzero:
-                    extra_features["opp_rush_yards_allowed"] = _mean(
-                        opp_rush_vals_nonzero)
-
-                if opp_carry_vals_nonzero:
-                    extra_features["opp_carries_allowed"] = _mean(
-                        opp_carry_vals_nonzero)
-
-                if opp_rush_vals and opp_carry_vals:
-                    opp_ypc_vals = []
-                    for oy, oc in zip(opp_rush_vals, opp_carry_vals):
-                        if oc > 0:
-                            opp_ypc_vals.append(oy / oc)
-
-                    if opp_ypc_vals:
-                        extra_features["opp_yards_per_carry_allowed"] = _mean(
-                            opp_ypc_vals)
-                        extra_features["opp_yards_per_carry_trend"] = _trend_slope(
-                            opp_ypc_vals)
+                # Defensive form of the opponent in THIS game (see opp_pos_form).
+                # Previously averaged over the lookback window, which described
+                # the defenses the player had just faced rather than the one he
+                # was about to face.
+                v = target_game.get("form_rush_yards_allowed")
+                if v is not None:
+                    extra_features["opp_rush_yards_allowed"] = float(v)
+                c = target_game.get("form_carries_allowed")
+                if c is not None:
+                    extra_features["opp_carries_allowed"] = float(c)
+                if v is not None and c is not None and float(c) > 0:
+                    extra_features["opp_yards_per_carry_allowed"] = float(v) / float(c)
 
             if feature_family == "passing":
                 pass_window = [float(g.get("pass_attempts", 0.0) or 0.0) for g in window_games]
@@ -674,34 +902,16 @@ def build_features(
                         extra_features["pass_td_rate_mean"] = _mean(td_rate_vals)
                         extra_features["pass_td_rate_trend"] = _trend_slope(td_rate_vals)
 
-                opp_pass_vals = [
-                    float(g.get("opp_pass_attempts_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-                opp_pass_nonzero = [v for v in opp_pass_vals if v > 0]
-
-                if opp_pass_nonzero:
-                    extra_features["opp_pass_attempts_allowed"] = _mean(opp_pass_nonzero)
-                    extra_features["opp_pass_attempts_trend"] = _trend_slope(opp_pass_nonzero)
-
-                opp_pass_yds_vals = [
-                    float(g.get("opp_pass_yards_allowed", 0.0) or 0.0)
-                    for g in window_games
-                ]
-                opp_pass_yds_nonzero = [v for v in opp_pass_yds_vals if v > 0]
-
-                if opp_pass_yds_nonzero:
-                    extra_features["opp_pass_yards_allowed"] = _mean(opp_pass_yds_nonzero)
-
-                if opp_pass_vals and opp_pass_yds_vals:
-                    opp_ypa_vals = []
-                    for oy, oa in zip(opp_pass_yds_vals, opp_pass_vals):
-                        if oa > 0:
-                            opp_ypa_vals.append(oy / oa)
-
-                    if opp_ypa_vals:
-                        extra_features["opp_yards_per_attempt_allowed"] = _mean(opp_ypa_vals)
-                        extra_features["opp_yards_per_attempt_trend"] = _trend_slope(opp_ypa_vals)
+                # Passing defense of the opponent in THIS game, not an average
+                # over the defenses already played (see opp_pos_form).
+                pa = target_game.get("form_pass_att_allowed")
+                py = target_game.get("form_pass_yds_allowed")
+                if pa is not None:
+                    extra_features["opp_pass_attempts_allowed"] = float(pa)
+                if py is not None:
+                    extra_features["opp_pass_yards_allowed"] = float(py)
+                if pa is not None and py is not None and float(pa) > 0:
+                    extra_features["opp_yards_per_attempt_allowed"] = float(py) / float(pa)
 
             if feature_family == "receiving":
                 targets_window = [float(g.get("targets", 0.0) or 0.0)
@@ -758,30 +968,21 @@ def build_features(
                     opp_targets_vals.append(
                         opp_targets_roll if opp_targets_roll > 0 else opp_targets_base)
 
-                opp_adj = []
-                for opp_y, team_pass in zip(opp_rec_vals, team_pass_window):
-                    if team_pass > 0:
-                        opp_adj.append(opp_y / team_pass)
-                    else:
-                        opp_adj.append(0.0)
-
-                if opp_adj:
-                    extra_features["opp_rec_yds_per_attempt"] = _mean(opp_adj)
-                    extra_features["opp_rec_yds_per_attempt_trend"] = _trend_slope(
-                        opp_adj)
-
-                opp_tgt_adj = []
-                for opp_t, team_pass in zip(opp_targets_vals, team_pass_window):
-                    if team_pass > 0:
-                        opp_tgt_adj.append(opp_t / team_pass)
-                    else:
-                        opp_tgt_adj.append(0.0)
-
-                if opp_tgt_adj:
-                    extra_features["opp_target_rate_allowed"] = _mean(
-                        opp_tgt_adj)
-                    extra_features["opp_target_rate_trend"] = _trend_slope(
-                        opp_tgt_adj)
+                # Receiving defense of the opponent in THIS game, normalised by
+                # the pass volume they face so a team is not flattered simply for
+                # playing run-heavy opponents. Previously averaged over the
+                # window, which described the wrong defenses entirely.
+                opp_rec_form = target_game.get("form_pos_rec_yds")
+                opp_tgt_form = target_game.get("form_pos_targets")
+                team_pass_ref = _mean(team_pass_window) if team_pass_window else 0.0
+                if opp_rec_form is not None and team_pass_ref > 0:
+                    extra_features["opp_rec_yds_per_attempt"] = (
+                        float(opp_rec_form) / team_pass_ref
+                    )
+                if opp_tgt_form is not None and team_pass_ref > 0:
+                    extra_features["opp_target_rate_allowed"] = (
+                        float(opp_tgt_form) / team_pass_ref
+                    )
 
                 if market_code == "rec_td":
                     recs_window = [float(g.get("receptions", 0.0) or 0.0) for g in window_games]
@@ -802,7 +1003,6 @@ def build_features(
             # so it's not leakage, and it carries far more signal about this
             # specific game's likely script/volume than any rolling average
             # of past games can.
-            target_game = games[i]
             spread_line = target_game.get("game_spread_line")
             total_line = target_game.get("game_total_line")
             home_team = target_game.get("game_home_team")
@@ -831,6 +1031,59 @@ def build_features(
                 extra_features["game_temp"] = float(game_temp)
             extra_features["game_div_game"] = float(target_game.get("game_div_game", 0.0) or 0.0)
 
+            # Venue and situation for the game being predicted. Indoor removes
+            # weather entirely, surface affects pace, and rest days separate a
+            # short-week Thursday game from a bye-week return -- all known well
+            # before kickoff and none of it previously used.
+            roof = (target_game.get("game_roof") or "").strip().lower()
+            if roof:
+                # "closed" is a retractable roof shut for the game, so it plays
+                # as a dome; "open" is a retractable roof left open.
+                extra_features["is_indoor"] = 1.0 if roof in ("dome", "closed") else 0.0
+            surface = (target_game.get("game_surface") or "").strip().lower()
+            if surface:
+                extra_features["is_turf"] = 0.0 if "grass" in surface else 1.0
+
+            is_home = 1.0 if target_game.get("team") == home_team else 0.0
+            extra_features["is_home"] = is_home
+            rest = target_game.get("game_home_rest" if is_home else "game_away_rest")
+            if rest is not None:
+                extra_features["rest_days"] = float(rest)
+
+            # Rolling play-context usage. Red-zone volume is the single most
+            # direct predictor of touchdowns, which plain box-score rates miss
+            # entirely: a back with 4 red-zone carries a game is a different
+            # proposition from one with the same yardage and none.
+            for col in (
+                "rz_targets", "rz_carries", "rz_target_rate", "third_down_targets",
+                "shotgun_pct", "air_yards", "yac", "epa_per_play", "vegas_wp",
+                "player_plays",
+            ):
+                vals = [float(g.get(col, 0.0) or 0.0) for g in window_games]
+                if any(vals):
+                    extra_features[f"{col}_mean"] = _mean(vals)
+                    extra_features[f"{col}_trend"] = _trend_slope(vals)
+
+            # How the opponent *being faced in this game* has defended this
+            # player's position group lately.
+            #
+            # This must come from the target game's own row, not from an average
+            # over the lookback window: the window's opponents are the teams the
+            # player just played, which have nothing to do with the one he is
+            # about to play. Averaging them measured strength of schedule while
+            # being named, and used, as a matchup signal.
+            for src, dest in (
+                ("form_pos_rush_yds", "opp_pos_rush_yds_allowed"),
+                ("form_pos_carries", "opp_pos_carries_allowed"),
+                ("form_pos_rec_yds", "opp_pos_rec_yds_allowed"),
+                ("form_pos_recs", "opp_pos_recs_allowed"),
+                ("form_pos_targets", "opp_pos_targets_allowed"),
+                ("form_pos_tds", "opp_pos_tds_allowed"),
+            ):
+                v = target_game.get(src)
+                if v is not None:
+                    extra_features[dest] = float(v)
+
             # Player's own current-week injury report (pre-game known). Rows
             # with no injury report entry are healthy by construction (only
             # injured players get listed), so absence -> all flags 0.
@@ -838,6 +1091,81 @@ def build_features(
             extra_features["injury_questionable"] = 1.0 if injury_status == "Questionable" else 0.0
             extra_features["injury_doubtful"] = 1.0 if injury_status == "Doubtful" else 0.0
             extra_features["injury_out"] = 1.0 if injury_status == "Out" else 0.0
+
+            # Depth chart rank for this game (1 = starter). Left unset when the
+            # player is not on that week's depth chart so the model sees a
+            # missing value rather than a fake rank.
+            depth_rank = target_game.get("depth_rank")
+            if depth_rank is not None:
+                extra_features["depth_rank"] = float(depth_rank)
+
+            # How the player's role has *changed* relative to the games the
+            # rolling stats were built from.
+            #
+            # This matters because depth rank on its own is nearly worthless to
+            # the model (importance 0.002 for rush_yds): in training, rank and
+            # production always agree, so the trees just split on carries and
+            # ignore the rank. The one case where they disagree is exactly the
+            # case that matters -- a back whose window says workhorse but who has
+            # since been moved down the chart behind a new signing. Encoding the
+            # delta gives the model something the production features cannot say.
+            depth_window = [
+                float(g["depth_rank"])
+                for g in window_games
+                if g.get("depth_rank") is not None
+            ]
+            if depth_window:
+                window_rank = _mean(depth_window)
+                extra_features["depth_rank_window_mean"] = window_rank
+                if depth_rank is not None:
+                    # positive = demoted since the window, negative = promoted
+                    extra_features["depth_rank_delta"] = float(depth_rank) - window_rank
+
+            # How stale the window is. A Week 1 projection is built from games
+            # played the previous January; the model should be able to discount
+            # a window that is months rather than days old.
+            prev_date = window_games[-1].get("game_date") if window_games else None
+            cur_date = target_game.get("game_date")
+            if prev_date is not None and cur_date is not None:
+                extra_features["days_since_last_game"] = float(
+                    (cur_date - prev_date).days
+                )
+
+                # Role change and window staleness interact, and the interaction
+                # is far stronger than either term alone. Measured on the
+                # training rows (rush_yds, window mean > 10), actual output as a
+                # fraction of the rolling weighted mean:
+                #
+                #   demoted,  in-season window     0.88   (n=108)
+                #   demoted,  window > 60 days     0.44   (n=46)
+                #   promoted, window > 60 days     1.50   (n=24)
+                #   same rank, in-season           1.01   (n=3811)
+                #
+                # A back who was the workhorse in January and is second on the
+                # chart in September produces well under half his old numbers.
+                # That bucket is 0.3% of rows, so a tree ensemble will not
+                # discover the three-way interaction on its own -- handing it the
+                # term directly costs nothing and gives it a single split. The
+                # magnitude is still learned from data, not asserted here.
+                stale_days = extra_features["days_since_last_game"]
+                delta = extra_features.get("depth_rank_delta")
+                extra_features["is_stale_window"] = 1.0 if stale_days > 60 else 0.0
+                if delta is not None:
+                    extra_features["stale_role_change"] = (
+                        float(delta) if stale_days > 60 else 0.0
+                    )
+
+            # Teammates at the same position on the injury report this week.
+            # The player's own listing is subtracted so this counts only the
+            # competition for touches that is banged up, not the player.
+            teammates_out = float(target_game.get("pos_teammates_out", 0.0) or 0.0)
+            teammates_q = float(target_game.get("pos_teammates_questionable", 0.0) or 0.0)
+            if injury_status in ("Out", "Doubtful"):
+                teammates_out = max(0.0, teammates_out - 1.0)
+            elif injury_status == "Questionable":
+                teammates_q = max(0.0, teammates_q - 1.0)
+            extra_features["pos_teammates_out"] = teammates_out
+            extra_features["pos_teammates_questionable"] = teammates_q
 
             db.execute(
                 upsert_sql,

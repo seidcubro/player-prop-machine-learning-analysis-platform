@@ -1,4 +1,4 @@
-﻿name: player-prop-platform
+name: player-prop-platform
 
 services:
   postgres:
@@ -55,6 +55,12 @@ services:
       context: ./services/training
     environment:
       ARTIFACT_DIR: /artifacts
+      # Needed by backfill_historical_odds.py; unused by the model scripts.
+      ODDS_API_KEY: ${ODDS_API_KEY}
+      ODDS_API_BASE_URL: ${ODDS_API_BASE_URL}
+      ODDS_API_SPORT: ${ODDS_API_SPORT}
+      ODDS_API_REGIONS: ${ODDS_API_REGIONS}
+      ODDS_API_BOOKMAKERS: ${ODDS_API_BOOKMAKERS}
       LOOKBACK: "5"
       POSTGRES_DB: app
       POSTGRES_HOST: postgres
