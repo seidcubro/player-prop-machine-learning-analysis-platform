@@ -7,18 +7,18 @@ Location: `apps/web`
 
 Three routed pages under a shared shell (`App.tsx`: sticky navbar + `<Outlet/>`):
 
-- **`EdgesDashboard.tsx` (`/`, the core screen)** — sportsbook line vs. model projection
+- **`EdgesDashboard.tsx` (`/`, the core screen)**. Sportsbook line vs. model projection
   vs. edge vs. win probability, per row. Summary stat cards (`GET /edges/summary`),
   debounced player search, market/tier/side filters, sortable columns, pagination
   (`GET /edges`). Desktop renders a dense table; below 760px the same table collapses
   into stacked labeled cards via CSS only (`data-label` attributes).
-- `PlayersSearch.tsx` (`/players`) and `PlayerDetail.tsx` (`/players/:id`) — the original
+- `PlayersSearch.tsx` (`/players`) and `PlayerDetail.tsx` (`/players/:id`). The original
   player browse/projection pages, now living under the shared shell.
 
 ## Brand / design system
 
 PropSignal is dark-mode-native ("trading terminal for props"). All theming lives in
-`:root` custom properties in `src/index.css` — surfaces, text tiers, the signal palette
+`:root` custom properties in `src/index.css`, surfaces, text tiers, the signal palette
 (green = value/over, red = avoid/under), and edge-tier badge colors. A future mobile app
 or theme pass should only touch tokens, not components.
 

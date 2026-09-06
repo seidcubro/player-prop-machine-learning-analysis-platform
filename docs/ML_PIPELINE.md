@@ -1,131 +1,185 @@
 # ML Pipeline
 
-## Goals
+## Rules I hold myself to
 
-- Generate market-specific projections that can be compared against sportsbook lines.
-- Train reproducible model artifacts with honest, held-out evaluation.
-- Ground every change in real data — don't add clamps/magic constants to paper over a
-  symptom without first confirming the actual cause (see "History" below).
+Ground every change in real data. Don't add clamps or magic constants to paper
+over a symptom before confirming the cause. The receiving yards problem that
+blocked this project for months turned out to be plumbing bugs, not the model,
+after thirteen model versions spent chasing it.
+
+Validate forward only. Every split is time-ordered. A model that trains on games
+that happened after its test set will look excellent and be worthless.
+
+Don't adopt a change that's inside the noise. If a challenger beats the incumbent
+by less than one standard error of the fold-to-fold difference, keep the
+incumbent.
 
 ## Stages
 
-### 1) Ingestion
+### 1. Ingestion
 
-`jobs/ingestion/app/etl/nflverse_ingest.py` populates `player_game_stats_app`, `nfl_games`,
-`snap_counts`, `ff_opportunity`, `injuries`, `depth_charts`, NGS tables, etc. from nflverse.
+`jobs/ingestion/app/etl/nflverse_ingest.py` populates `player_game_stats_app`,
+`nfl_games`, `snap_counts`, `ff_opportunity`, `injuries`, `depth_charts`,
+`pbp_player_game`, NGS and PFR tables.
 
-### 2) Feature engineering
+It loads one season at a time. Loading the whole range in one call meant a single
+unavailable season killed the run, and nflverse 404s any season it hasn't
+published. Every ingest function also refuses to write when nothing loaded,
+because they all TRUNCATE before inserting and an empty load would wipe good data.
+
+### 2. Feature engineering
 
 `POST /api/v1/jobs/build_features?market_code=X&lookback=N`
-(`services/api/app/routes/jobs.py`) computes, per player and per game, features from a
-strictly-prior lookback window (never the target game itself):
 
-**Base features** (every market): `mean`, `stddev`, `weighted_mean` (weights `1..n`, most
-recent game weighted highest), `trend` (OLS slope over the window), `aux_mean`/`aux_trend`
-(a market-specific secondary stat, e.g. receptions for `rec_yds`).
+Computes per player, per game, from a strictly prior window. The target game
+never contributes to its own features.
 
-**Market-specific engineered features** (flattened into `extra_features` JSONB): target
-share, yards per target/carry/attempt, opponent defensive rates (rolling allowed
-yards/targets/attempts), team pass/rush volume.
+**Rolling production.** `mean`, `stddev`, `weighted_mean` (linear weights, most
+recent game heaviest), `trend` (OLS slope), plus `y_median`, `y_trimmed_mean`,
+`y_max`, `y_min` so a single blowup game doesn't drag the whole window, and
+`y_season_mean` / `y_season_n` as a slower anchor.
 
-**Cross-cutting features added after the original overprojection investigation**:
-- `snap_share_mean`/`trend` — rolling `snap_counts.offense_pct`, a role/opportunity signal
-  that shows up before it fully shows up in a box-score sample.
-- `exp_{rec,rush,pass}_yards`/`exp_receptions` (`mean`/`trend`) — nflverse's own
-  `ff_opportunity` expected-usage model (expected production from play context — air yards,
-  red zone role — not realized production). ~85-99% coverage for skill positions.
-- `team_implied_total`, `team_spread`, `game_total_line`, `game_wind`, `game_temp`,
-  `game_div_game` — the **current game's** pre-game Vegas spread/total/weather from
-  `nfl_games` (100% coverage 2022-2025), computed for the target game itself, not averaged
-  over the lookback window. This is known before kickoff — the same information a
-  sportsbook line is priced from — so it is not leakage, and it's a far more direct signal
-  of a specific game's likely script/volume than any historical rolling average.
-- `injury_questionable`/`doubtful`/`out` — player's own current-week injury report flags.
-  Sparse coverage (~15%, since only injured players get listed); contributed very little on
-  its own.
+**Panel time-series estimates.** `ewma_level` is exponentially weighted over the
+player's whole history with a decay fitted on held-out folds (alpha 0.25, a
+half-life of about 2.4 games, which is faster than the fixed five-game window
+implied). `ewma_shrunk` pulls that toward the position's prior-season mean by
+sample size, so a player with three games gets pulled hard and one with sixty
+barely moves.
 
-Positions are filtered per-market via `prop_markets.eligible_positions` (e.g. `{QB}` for
-passing markets, `{QB,RB,WR,FB}` for rushing, `{WR,TE,RB,FB}` for receiving) — see History.
+**Role and opportunity.** Snap share, depth chart rank, `depth_rank_delta` (how
+the rank has changed since the window), `days_since_last_game`, teammate injury
+counts at the same position, target share, carry share, and nflverse's
+`ff_opportunity` expected-usage model.
 
-`POST /api/v1/jobs/attach_labels` fills `label_actual` once a game's actual result is known.
+**Play context** from `pbp_player_game`: red zone targets and carries and their
+rates, third down targets, shotgun rate, air yards, YAC, EPA per play, in-game
+win probability, total plays.
 
-### 3) Training (`services/training/train.py`)
+**Opponent defense by position group.** What the opponent gives up to the
+player's own position, taken from that opponent's trailing form and shifted one
+game back so the game being predicted never feeds it. This used to be averaged
+over the lookback window, which measured the defenses the player had just faced
+rather than the one he was about to play.
 
-For each `(market_code, model_name, lookback)`:
-- load `player_market_features` joined to `players` (for position filtering)
-- flatten `extra_features` JSON into the feature matrix (`_build_feature_dataframe`)
-- time-ordered train/test split (never shuffled — this is a forecasting problem)
-- train `RandomForestRegressor` (default) or `GradientBoostingRegressor` (if `MODEL_NAME`
-  starts with `gb`) — hyperparameters are env-configurable (`N_ESTIMATORS`, `MAX_DEPTH`,
-  `MIN_SAMPLES_LEAF`, `MIN_SAMPLES_SPLIT`, `MAX_FEATURES`, `LEARNING_RATE`, `SUBSAMPLE`) for
-  tuning experiments
-- optional `TARGET_TRANSFORM=log1p` (see History — currently unused; it made things worse)
-- write `{model_name}_{market_code}_lb{lookback}.joblib`/`.json`, update
-  `trained_models`/`active_models`
+**Game and venue.** Spread, total, implied team total, temperature, wind,
+`is_indoor`, `is_turf`, `is_home`, rest days, divisional game. All computed for
+the target game, all known before kickoff, so none of it is leakage.
 
-### 4) Evaluation (`services/training/eval.py`)
+Positions are filtered per market by `prop_markets.eligible_positions`.
 
-Independent of training's own internal split — rebuilds the exact same feature matrix
-(`build_feature_matrix`, mirrors `train.py`), applies `target_transform` if the model's
-metadata calls for it, and reports MAE/RMSE/R²/**bias** (mean of prediction - actual) against
-a naive `weighted_mean` baseline, broken down by position and label-magnitude bucket. This is
-the tool that caught two real bugs (see History) — always trust `eval.py`'s numbers over
-training's own printed metrics or anecdotal spot-checks.
+`POST /api/v1/jobs/attach_labels` fills `label_actual` once results are known.
 
-### 5) Edge calculation (`services/training/build_prop_edges.py`)
+### 3. Model selection
 
-Loads sportsbook player props, matches each to the single most-recent
-`player_market_features` row as of the event date, predicts, blends 30% model / 70%
-`weighted_mean`, clamps to within one stddev of `weighted_mean`, compares to the line,
-computes win probability (normal approximation) and edge tier, writes `prop_edges`.
+`bakeoff.py` scores every candidate on the same expanding-window folds and
+applies the one-standard-error rule. Candidates include ridge and elasticnet as
+sanity checks, not because I expected them to win. They won three markets.
 
-## Current model performance
+It reports the train-minus-test R² gap for every candidate and flags anything
+over 0.35. That's what caught LightGBM memorizing.
 
-See the table in the root `README.md` — kept in one place to avoid drift.
+### 4. Training
 
-## History — real bugs found and fixed, in order
+`train.py`. Prefix picks the family. Linear models get wrapped in a
+StandardScaler pipeline, since a penalized linear model on unscaled features just
+regularizes whichever columns happen to have big units.
 
-The "rec_yds massively overprojects" problem blocked this project for months across 13+
-model versions before these were found (all confirmed against live data, not just code
-reading):
+Writes a `.joblib` plus a metadata `.json` recording feature columns, and updates
+`trained_models` and `active_models`.
 
-1. **Stale opponent-based row selection** (`build_prop_edges.py`) — searched a player's
-   entire history for any row matching the upcoming opponent, with no recency bound, and
-   excluded the correct same-day row via strict `<` instead of `<=`. Whenever a player faced
-   a repeat opponent, this could grab a feature snapshot from a different season/team/hot
-   streak. Fixed by always taking the single most-recent row `<= event_date`.
-2. **`player_market_features.team` was NULL for every market except `rec_yds`** — silently
-   zeroed out edge generation for every other market via the team sanity-check.
-   `db/backfills/fix_team_final.sql` already had the correct general fix (joining
-   `player_game_stats_app`, the table the live pipeline actually uses, on
-   `player_id`+`as_of_game_date`, no market restriction); it had only ever been run
-   once, before other markets' rows existed.
-3. **`eval.py` itself was broken** — joined `players p ON p.id = pmf.player_id` instead of
-   `p.external_id` (a hard SQL type error), and never expanded `extra_features` JSON, so it
-   could never have evaluated any current model correctly even once the join was fixed.
-4. **The `log1p` target transform was actively harmful**, not just insufficient — once
-   `eval.py` worked, an apples-to-apples comparison (identical features/hyperparameters,
-   only the transform differs) showed R² 0.26 and bias -8.86 (log1p) vs. R² 0.36 and bias
-   +0.42 (no transform). Averaging in log-space then inverse-transforming is a biased
-   estimator for a right-skewed, zero-inflated stat like receiving yards.
-5. **`prop_markets.eligible_positions` was empty for every market**, and `train.py` had no
-   position filtering at all — every model trained on rows from all 25 positions, including
-   ones that trivially never produce the stat (a defensive lineman always rushing for 0
-   yards). `eval.py` separately hardcoded a skill-position filter but only for `rec_yds`,
-   which is why rec_yds looked uniquely bad next to other markets whose R² was inflated by a
-   flood of trivially-correct zero rows. Fixed by populating `eligible_positions` from real
-   nonzero-stat counts and wiring the filter into both scripts.
+### 5. Quantiles
 
-**Net effect**: rec_yds was never uniquely broken. It was, for most of this project's
-history, the only market being evaluated honestly.
+`train_quantiles.py` fits q10/q25/q50/q75/q90 per market. The fitted quantiles
+are CDF points, so P(over) is read straight off them. Uncertainty comes out
+per-row from the features instead of one capped sigma applied to everyone.
 
-## Untried ideas for further R² improvement
+Resolves the feature space from `active_models`, not from an env var. An unset
+`MODEL_NAME` used to fall back to a legacy model with a much smaller feature set,
+and the mismatch only surfaced later at inference.
 
-- Teammate-injury-driven target-share reallocation (WR1 out -> WR2 usage spikes) — needs
-  joining `injuries` + `depth_charts` across a team's roster, not just a player's own status.
-- `depth_charts.depth_team` (starter/backup rank) as a feature.
-- A real hyperparameter search (grid/Optuna) instead of a handful of manual configs.
-- NGS tracking tables (`avg_separation`, `avg_cushion`, `rush_yards_over_expected`, CPOE)
-  have very low coverage (~3-7% of rows) — likely only usable for a recent-seasons-only
-  model, not the full historical training set.
-- Poisson/count regression for TD markets instead of plain regression.
+### 6. Evaluation
+
+`eval.py`. Time-ordered split, position filter from the database, bias check,
+lift against a rolling weighted-mean baseline. `SPLIT_MODE=season` holds out the
+most recent full season, which is the only split that actually tests September.
+The default trailing-fraction split always lands mid-season, so early-season
+behavior went unevaluated for a long time.
+
+For TD markets it also reports Brier score and log loss on P(at least one),
+because R² on a rare count is a bad guide to whether the probability is right.
+
+### 7. Backtest
+
+`backtest_season.py` is the real test. Trains on seasons strictly before the
+target season, predicts the whole season, grades every pick against lines
+captured from the archive, and reports hit rate against the break-even implied by
+the actual price.
+
+Result for 2025: 6,736 picks, 51.5% hit rate, 53.9% break-even, -4.3% ROI.
+
+Three bugs I had to fix in that script before the number meant anything, each of
+which manufactured fake profit:
+
+Grading under bets at the over's price. On passing TDs the over can be +150 while
+the under is -180. Using one price for both turned a losing model into +23% ROI.
+
+Averaging American odds. They're two scales spliced at plus/minus 100 with a
+discontinuity between them. The mean of -130 and +100 is -15, which implies a
+6.7x payout no book ever offered. Convert to decimal first.
+
+Using the rolling weighted mean as "our projection" instead of the model. That
+measured the baseline, not the product.
+
+## Model performance
+
+Evaluated with `eval.py`, positions filtered, bias is mean(prediction - actual).
+
+| Market | Model | R² | Bias |
+|---|---|---|---|
+| rush_att | ridge | 0.75 | -0.02 |
+| rush_yds | elasticnet | 0.60 | -0.14 |
+| recs | elasticnet | 0.44 | +0.09 |
+| pass_att | random forest | 0.42 | +0.89 |
+| rec_yds | extra trees | 0.40 | +0.65 |
+| pass_yds | random forest | 0.39 | +9.50 |
+| pass_completions | random forest | 0.38 | +1.07 |
+| rush_td | random forest | 0.17 | 0.00 |
+| pass_td | poisson | 0.16 | +0.04 |
+| rec_td | random forest | 0.11 | 0.00 |
+
+All beat a rolling five-game weighted average, which is the bar I set.
+
+TD markets sit low on R² and always will. Touchdowns are rare and close to
+binary, so R² is the wrong lens. What matters there is whether the probability is
+calibrated.
+
+## History
+
+Things that were wrong, and what they actually were.
+
+**The receiving yards overprojection** was five separate bugs, none of them the
+model: stale opponent-based row selection in the edge builder, a NULL `team`
+column that silently zeroed out every market except `rec_yds`, a broken join in
+`eval.py` that meant the evaluation tool had never once run, a log1p target
+transform that made things worse (Jensen's inequality on a right-skewed
+zero-inflated stat), and empty `eligible_positions` so every model trained on all
+25 positions including linemen.
+
+**The blend and clamp.** The edge builder served `0.3 * model + 0.7 *
+weighted_mean`, clamped into `weighted_mean +/- stddev`. Never measured.
+`eval_blend.py` showed it threw away more than half the model's edge over the
+naive baseline.
+
+**Overconfidence.** Win probability came from a Gaussian with a hand-capped
+sigma. Grading showed every bucket 14 to 29 points overconfident, and two tiers
+were losing money while being advertised at 62% and 57%.
+
+**Stale context.** Every pre-kickoff feature was read off a stored row that could
+be eight months old. Covered in ARCHITECTURE.md.
+
+**Opponent features described the wrong teams.** Averaged over the window, so
+they measured strength of schedule while being named and used as a matchup
+signal.
+
+**Traded players dropped silently.** The team sanity check keyed on the player's
+historical team, which inverted its purpose.

@@ -12,7 +12,7 @@ docker compose up -d postgres redis
 
 `db/init.sql` runs automatically on first container creation (mounted into
 `docker-entrypoint-initdb.d`). If the Postgres volume already exists, `init.sql` will not
-re-run — apply new migrations/backfills manually (see `db/migrations/`, `db/backfills/`).
+re-run - apply new migrations/backfills manually (see `db/migrations/`, `db/backfills/`).
 
 ## 2. (If the DB is empty) run ingestion
 
@@ -48,15 +48,15 @@ Repeat per market (`recs`, `rec_td`, `rush_att`, `rush_yds`, `rush_td`, `pass_at
 ```bash
 docker compose build training
 
-docker compose run --rm -e MARKET_CODE=rec_yds -e MODEL_NAME=rf_posfilt_v4 -e LOOKBACK=5 \
+docker compose run --rm -e MARKET_CODE=rec_yds -e MODEL_NAME=rf_v10 -e LOOKBACK=5 \
   training python train.py
 
-docker compose run --rm -e MARKET_CODE=rec_yds -e MODEL_NAME=rf_posfilt_v4 -e LOOKBACK=5 \
+docker compose run --rm -e MARKET_CODE=rec_yds -e MODEL_NAME=rf_v10 -e LOOKBACK=5 \
   training python eval.py
 ```
 
 `eval.py`'s report (`services/training/artifacts/evals/*.json`) is the source of truth for
-model quality — trust it over training's own printed metrics (see `docs/ML_PIPELINE.md`
+model quality - trust it over training's own printed metrics (see `docs/ML_PIPELINE.md`
 History for why).
 
 ## 6. Build edges
@@ -88,5 +88,5 @@ Expects the API at `http://localhost:8000` (`VITE_API_BASE` override available, 
 - **Windows path handling with `docker compose run`**: if a bind-mounted path gets mangled
   by Git Bash's automatic path conversion, prefix the command with `MSYS_NO_PATHCONV=1`.
 - **`player_market_features.player_id` joins to `players.external_id`, never `players.id`**
-  — this has been a recurring bug source (see `docs/ML_PIPELINE.md`/`docs/specs/data-model.md`).
+  - this has been a recurring bug source (see `docs/ML_PIPELINE.md`/`docs/specs/data-model.md`).
 - **`prop_markets` joins on `.code`, never a nonexistent `market_code` column.**

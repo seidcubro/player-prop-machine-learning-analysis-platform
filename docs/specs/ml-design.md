@@ -1,87 +1,109 @@
 # ML Design Spec
 
-Last updated: 2026-07-05
+Last updated: 2026-09-06
 
-This replaces an earlier version of this doc describing a Ridge-regression, per-market
-`features_{market}` table design — that was never built. The real system is described
-below and in `docs/ML_PIPELINE.md` (which also has the full bug-history — read that first
-if you're touching this pipeline).
+Read `docs/ML_PIPELINE.md` first if you're touching this. It has the bug history,
+and most of what's wrong with a change you're about to make has probably already
+been wrong once.
 
----
+## Architecture
 
-## 1. Architecture
+Market-scoped, keyed by `(market_code, model_name, lookback)`.
 
-Market-scoped ML, keyed by `(market_code, model_name, lookback)`. Current production model
-family: `rf_posfilt_v4` (RandomForestRegressor, one per market, position-filtered).
+There's no single production model family. Each market gets whichever family won
+the bakeoff on expanding-window folds:
 
-## 2. Feature engineering
+| market | family |
+|---|---|
+| rush_att | ridge |
+| rush_yds, recs | elasticnet |
+| rec_yds | extra trees |
+| pass_att, pass_yds, pass_completions, rush_td, rec_td | random forest |
+| pass_td | poisson |
 
-See `docs/ML_PIPELINE.md` for the full feature list. Summary: rolling
-mean/stddev/weighted_mean/trend (lookback=5) + market-specific engineered ratios/rates +
-rolling snap share + `ff_opportunity` expected usage + current-game Vegas context + injury
-flags. All features are reproducible from `player_game_stats_app` + the supporting nflverse
-tables via `POST /jobs/build_features`.
+Three markets are linear. That wasn't the plan, it's what won.
 
-Position eligibility (`prop_markets.eligible_positions`) is enforced in both `train.py` and
-`eval.py` — this was missing for most of the project's history (see ML_PIPELINE.md History)
-and caused misleading cross-market R² comparisons.
+`active_models` is the source of truth for which model serves a market.
+`build_prop_edges.py` reads it. It used to have filenames hardcoded, which meant
+retraining had no effect on anything the site showed.
 
-## 3. Labels
+## Features
 
-`y` = realized value of `prop_markets.stat_field` for the target game (e.g. `rec_yds` ->
-`receiving_yards`). Filled by `attach_labels` once the game has been played.
+Full list in `docs/ML_PIPELINE.md`. Everything is reproducible from
+`player_game_stats_app` plus the supporting nflverse tables via
+`POST /jobs/build_features`.
 
-## 4. Training contract
+Position eligibility comes from `prop_markets.eligible_positions` and is enforced
+in `train.py` and `eval.py`. It was missing for most of this project's history,
+which made cross-market R² comparisons meaningless (a rushing model looked great
+because it correctly predicted zero for offensive linemen).
 
-Input: `player_market_features` (joined to `players` for position filtering) for one
-`(market_code, lookback)`, `label_actual IS NOT NULL`.
+## Labels
 
-Output: artifact bundle —
-- `{model_name}_{market_code}_lb{lookback}.joblib` — serialized estimator
-- `{model_name}_{market_code}_lb{lookback}.json` — metadata:
-  - `market_code`, `market_id`, `lookback`, `model_type`, `target_transform`
-  - `feature_cols` (exact column order the model expects — must be reproduced identically
-    at inference time; `eval.py`'s `build_feature_matrix` and `build_prop_edges.py`'s
-    per-row feature dict construction both do this)
-  - `eligible_positions`, `train_rows`, `test_rows`, `train_date_min/max`, `test_date_min/max`
-  - `mae`, `rmse`, `r2`, `feature_importances`
+`label_actual` on `player_market_features`, filled by
+`POST /jobs/attach_labels` once the game has been played. NULL for future games.
 
-`target_transform` support: `"none"` (default) or `"log1p"` (train in `log1p(y)` space,
-`expm1` at inference). **Currently unused in production** — see History in ML_PIPELINE.md
-for why it was tried and reverted (it introduced a systematic underprediction bias).
+## Inference
 
-## 5. Inference contract
+One path. `build_prop_edges.py` loads the active model, builds a feature vector
+from the player's most recent feature row, **refreshes everything known before
+kickoff** for the actual upcoming game, predicts, reads P(over) off the quantile
+models, compares to the line, writes `prop_edges`.
 
-Two separate paths exist today — this is a known architectural gap, not a design choice:
+That refresh step is the part to be careful with. Depth chart, injuries, Vegas
+line, weather, venue and opponent all describe the game being predicted, not
+whatever game the stored row was about. `audit_freshness.py` fails the build if
+any of them stops being refreshed.
 
-- **`build_prop_edges.py`** — full pipeline: load artifact, build feature vector from the
-  most recent `player_market_features` row, predict, un-transform if needed, blend with
-  `weighted_mean`, compare to a sportsbook line, compute edge/win probability. Writes
-  `prop_edges`. Not exposed via any API route yet.
-- **`services/api/app/routes/players.py` `projection_ml`** — loads the artifact from
-  `active_models`, builds a feature vector from the single most recent
-  `player_market_features` row, returns the raw prediction. No sportsbook comparison, no
-  edge, no odds concept, and **no `target_transform` handling** (would silently return a
-  log-space value if a `log1p` model were ever made active again — currently moot since no
-  active model uses it, but worth fixing if that changes).
+There used to be a second path, `projection_ml`, which built its own projection
+with no freshness correction and disagreed with what the site served. It's
+removed.
 
-Failure modes handled: `unsupported_market` (market not found/inactive), `insufficient_data`
-(no matching feature row), `artifact_missing`.
+Failure modes handled: market not found, no matching feature row, artifact
+missing, active model metadata missing. All of them skip the prop rather than
+guessing.
 
-## 6. Evaluation
+## Uncertainty
 
-`eval.py` reports, per model: MAE, RMSE, R², bias (mean of prediction - actual, positive =
-overprediction), broken down by position and by label-magnitude bucket, plus lift vs. a
-naive `weighted_mean` baseline. Reports are written to
-`services/training/artifacts/evals/{model_name}_{market_code}_lb{lookback}_eval.json`.
+`train_quantiles.py` fits q10 through q90 per market. The fitted quantiles are
+CDF points, so P(over line) is interpolated straight off them and clipped away
+from 0 and 1. No prop is a certainty.
 
-**Always trust `eval.py` over training's own printed metrics** — training's split can differ
-subtly, and `eval.py` was specifically built to catch bias/leakage issues that a plain R²
-number won't surface (see ML_PIPELINE.md History for how this caught a real, material bug).
+Quantile bundles must share the point model's exact feature space. Building them
+from a different model throws at inference, and `audit_freshness.py` checks it.
 
-## 7. Roadmap / untried ideas
+## Evaluation
 
-See `docs/ML_PIPELINE.md` "Untried ideas for further R² improvement". The most concrete next
-step for this pipeline specifically, though, is closing the two-inference-paths gap above:
-either give `build_prop_edges.py`'s output a real API route, or fold its blend/edge logic
-into `projection_ml` (and add `target_transform` handling there either way).
+`eval.py` reports MAE, RMSE, R², bias (positive means overprediction), broken
+down by position and by label magnitude, plus lift over a naive weighted-mean
+baseline. Reports land in
+`services/training/artifacts/evals/{model}_{market}_lb{lookback}_eval.json`.
+
+For TD markets it also reports Brier and log loss on P(at least one), because R²
+on a rare count says almost nothing about whether the probability is right.
+
+`SPLIT_MODE=season` holds out the most recent full season. Use it. The default
+trailing-fraction split always lands mid-season, so September never gets tested,
+and September is when every rolling window is built from last season's games.
+
+Trust `eval.py` over whatever `train.py` prints. Training's split can differ
+subtly, and `eval.py` exists specifically to catch bias and leakage that a plain
+R² won't surface.
+
+## What the numbers actually mean
+
+R² against actuals is not the goal. The goal is beating a sportsbook line, and
+those are different problems.
+
+`backtest_season.py` is the honest test: train on prior seasons, predict a whole
+season, grade against real captured lines. 2025 came out at 51.5% against a 53.9%
+break-even, which is a losing model. See the README.
+
+Two things to keep in mind when reading any R² in this repo:
+
+Break-even on these props is roughly 53.9%, not the 52.4% that -110 implies.
+Prop vig is heavier than standard.
+
+The largest disagreements with the line are the worst bets. Three separate tests
+found this. Don't rank picks by disagreement size and call the top of that list
+high confidence.
