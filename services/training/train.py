@@ -32,15 +32,102 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import (
+    RandomForestRegressor,
+    GradientBoostingRegressor,
+    HistGradientBoostingRegressor,
+    ExtraTreesRegressor,
+)
+from sklearn.linear_model import ElasticNet, Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+def _env_max_depth(default: str):
+    """MAX_DEPTH accepts an int or "none" for unlimited-depth trees."""
+    raw = os.getenv("MAX_DEPTH", default).strip()
+    return None if raw.lower() in ("none", "") else int(raw)
+
+
+def _env_max_features(default: str = "sqrt"):
+    """MAX_FEATURES accepts "sqrt"/"log2"/"none" or a fraction like 0.5.
+
+    sklearn rejects the string "0.5", so a numeric value has to be converted
+    before it reaches the estimator or every fractional config fails.
+    """
+    raw = os.getenv("MAX_FEATURES", default).strip()
+    if raw.lower() in ("sqrt", "log2"):
+        return raw.lower()
+    if raw.lower() in ("none", ""):
+        return None
+    try:
+        return float(raw) if "." in raw else int(raw)
+    except ValueError:
+        return default
+
+
 def build_model(model_name: str):
+    """Build the estimator for a model name.
+
+    The prefix selects the family, chosen per market by `bakeoff.py` rather than
+    assumed. Three markets are served by *linear* models: on expanding-window
+    folds, ridge beats every tree for rush_att (R2 0.747) and elasticnet wins
+    rush_yds and recs. Rushing volume is close to linear in carry share and
+    opponent form, and the extra capacity of a forest only adds variance there.
+    LightGBM was evaluated and rejected everywhere -- it scored worse with
+    train-test gaps of 0.34-0.51, i.e. it was memorising.
+    """
+    if model_name.startswith("ridge"):
+        # Scaled, because a penalised linear model with unscaled features
+        # regularises whichever columns happen to have large units.
+        return make_pipeline(
+            StandardScaler(),
+            Ridge(alpha=float(os.getenv("ALPHA", "10.0")), random_state=42),
+        )
+
+    if model_name.startswith("enet") or model_name.startswith("elasticnet"):
+        return make_pipeline(
+            StandardScaler(),
+            ElasticNet(
+                alpha=float(os.getenv("ALPHA", "0.05")),
+                l1_ratio=float(os.getenv("L1_RATIO", "0.3")),
+                random_state=42,
+                max_iter=5000,
+            ),
+        )
+
+    if model_name.startswith("xtrees") or model_name.startswith("extra"):
+        return ExtraTreesRegressor(
+            n_estimators=int(os.getenv("N_ESTIMATORS", "400")),
+            max_depth=_env_max_depth("12"),
+            min_samples_leaf=int(os.getenv("MIN_SAMPLES_LEAF", "5")),
+            max_features=_env_max_features("sqrt"),
+            random_state=42,
+            n_jobs=-1,
+        )
+
+    if model_name.startswith("pois"):
+        # Touchdowns are rare, non-negative counts: squared-error regression
+        # assumes constant variance and a symmetric error cost, neither of which
+        # holds for a stat that is 0 in most rows and almost never above 2.
+        # Poisson deviance matches that shape, and the fitted mean doubles as a
+        # rate -- P(scores at least one) = 1 - exp(-mu) -- which is the quantity
+        # an anytime-TD prop is actually priced on.
+        return HistGradientBoostingRegressor(
+            loss="poisson",
+            max_iter=int(os.getenv("N_ESTIMATORS", "300")),
+            learning_rate=float(os.getenv("LEARNING_RATE", "0.05")),
+            max_depth=_env_max_depth("6"),
+            min_samples_leaf=int(os.getenv("MIN_SAMPLES_LEAF", "20")),
+            l2_regularization=float(os.getenv("L2_REG", "0.0")),
+            random_state=42,
+        )
+
     if model_name.startswith("gb"):
         return GradientBoostingRegressor(
             n_estimators=int(os.getenv("N_ESTIMATORS", "300")),
             learning_rate=float(os.getenv("LEARNING_RATE", "0.05")),
-            max_depth=int(os.getenv("MAX_DEPTH", "3")),
+            max_depth=_env_max_depth("3"),
             min_samples_leaf=int(os.getenv("MIN_SAMPLES_LEAF", "1")),
             subsample=float(os.getenv("SUBSAMPLE", "1.0")),
             random_state=42,
@@ -48,10 +135,10 @@ def build_model(model_name: str):
 
     return RandomForestRegressor(
         n_estimators=int(os.getenv("N_ESTIMATORS", "300")),
-        max_depth=int(os.getenv("MAX_DEPTH", "8")),
+        max_depth=_env_max_depth("8"),
         min_samples_split=int(os.getenv("MIN_SAMPLES_SPLIT", "10")),
         min_samples_leaf=int(os.getenv("MIN_SAMPLES_LEAF", "5")),
-        max_features=os.getenv("MAX_FEATURES", "sqrt"),
+        max_features=_env_max_features("sqrt"),
         random_state=42,
         n_jobs=-1,
     )
@@ -65,6 +152,7 @@ DB_PASS = os.getenv("POSTGRES_PASSWORD", "app")
 MARKET_CODE = os.getenv("MARKET_CODE", "rec_yds")
 LOOKBACK = int(os.getenv("LOOKBACK", "5"))
 model_name = os.getenv("MODEL_NAME", "rf_default")
+ACTIVATE_MODEL = os.getenv("ACTIVATE_MODEL", "1").strip().lower() not in ("0", "false", "no")
 MODEL_NAME = model_name
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 
@@ -389,6 +477,17 @@ def main():
                     r2,
                 ),
             )
+
+            # Any training run used to repoint the market's live model, so a
+            # throwaway hyperparameter sweep would silently take over what the
+            # dashboard serves. Experiments should set ACTIVATE_MODEL=0.
+            if not ACTIVATE_MODEL:
+                print(
+                    f"ACTIVATE_MODEL=0: left active model for {MARKET_CODE} unchanged "
+                    f"(trained {MODEL_NAME}, artifact written)"
+                )
+                conn.commit()
+                return
 
             cur.execute(
                 """

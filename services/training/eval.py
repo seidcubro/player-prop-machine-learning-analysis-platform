@@ -1,4 +1,4 @@
-﻿"""Evaluation script for market-specific projection models.
+"""Evaluation script for market-specific projection models.
 
 This module evaluates an already-trained model artifact against labeled feature
 rows in Postgres and writes a structured JSON evaluation report.
@@ -50,6 +50,7 @@ LOOKBACK = int(os.getenv("LOOKBACK", "5"))
 MODEL_NAME = os.getenv("MODEL_NAME", "ridge_v1")
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 TEST_FRAC = float(os.getenv("TEST_FRAC", "0.20"))
+SPLIT_MODE = os.getenv("SPLIT_MODE", "frac").strip().lower()
 
 DEFAULT_FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend"]
 BASE_FEATURE_COLS = ["mean", "stddev", "weighted_mean", "trend", "aux_mean", "aux_trend"]
@@ -226,6 +227,36 @@ def load_labeled_rows(feature_cols: list[str]) -> pd.DataFrame:
 
     return df
 
+def season_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Hold out the most recent full NFL season.
+
+    A plain trailing-fraction split always lands mid-season, so September never
+    appears in the test set -- and September is precisely when every rolling
+    window is built from *last* season's games and an offseason change of team
+    or role is invisible. Holding out a whole season is the only split that
+    evaluates the weeks the product actually launches on.
+
+    NFL seasons straddle the new year, so a game is attributed to the season it
+    kicked off in: months Jan-Feb belong to the previous year's season.
+    """
+    d = df.copy()
+    dates = pd.to_datetime(d["as_of_game_date"])
+    d["_season"] = dates.dt.year.where(dates.dt.month >= 3, dates.dt.year - 1)
+
+    seasons = sorted(d["_season"].unique())
+    if len(seasons) < 2:
+        raise SystemExit("season split needs at least two seasons of features")
+
+    holdout = seasons[-1]
+    train_df = d[d["_season"] < holdout].drop(columns=["_season"])
+    test_df = d[d["_season"] == holdout].drop(columns=["_season"])
+    print(
+        f"season split: train seasons {seasons[:-1]} ({len(train_df)} rows), "
+        f"holdout season {holdout} ({len(test_df)} rows)"
+    )
+    return train_df, test_df
+
+
 def time_split(df: pd.DataFrame, test_frac: float) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split rows by time order: earlier rows train, later rows test."""
     if test_frac <= 0.0 or test_frac >= 0.8:
@@ -252,6 +283,31 @@ def compute_metrics(y_true, y_pred) -> dict:
     err = (y_pred - y_true)
     bias = float(err.mean())  # >0 = tends to overpredict, <0 = underpredict
     return {"mae": mae, "rmse": rmse, "r2": r2, "bias": bias}
+
+
+def anytime_metrics(y_true, y_pred) -> dict:
+    """Calibration of P(at least one) for count markets.
+
+    A touchdown prop is not really a regression problem -- the bet offered is
+    "anytime TD", i.e. P(count >= 1). R2 on the raw count is a poor guide to
+    whether those probabilities are any good, so score the probability directly
+    with Brier and log loss. Treating the predicted value as a Poisson rate,
+    P(>=1) = 1 - exp(-mu), which lets a plain regressor and a Poisson model be
+    compared on exactly the same footing.
+    """
+    import numpy as np
+
+    mu = np.clip(np.asarray(y_pred, dtype=float), 0.0, None)
+    prob = 1.0 - np.exp(-mu)
+    hit = (np.asarray(y_true, dtype=float) >= 1.0).astype(float)
+    eps = 1e-15
+    p = np.clip(prob, eps, 1.0 - eps)
+    return {
+        "brier": float(((p - hit) ** 2).mean()),
+        "log_loss": float(-(hit * np.log(p) + (1.0 - hit) * np.log(1.0 - p)).mean()),
+        "predicted_rate": float(p.mean()),
+        "actual_rate": float(hit.mean()),
+    }
 
 
 def bucket_metrics(df: pd.DataFrame, y_col: str, pred_col: str) -> list[dict]:
@@ -305,7 +361,10 @@ def main():
     model = joblib.load(artifact_path)
 
     df = load_labeled_rows(feature_cols)
-    train_df, test_df = time_split(df, TEST_FRAC)
+    if SPLIT_MODE == "season":
+        train_df, test_df = season_split(df)
+    else:
+        train_df, test_df = time_split(df, TEST_FRAC)
 
     X_test = build_feature_matrix(test_df, feature_cols)
     y_test = test_df[LABEL_COL].astype(float)
@@ -362,6 +421,10 @@ def main():
             "rmse_improvement_pct": lift_rmse_pct,
         },
         "metrics_test_by_position": by_pos,
+        "metrics_anytime_prob": (
+            anytime_metrics(test_df[LABEL_COL], test_df["prediction"])
+            if MARKET_CODE.endswith("_td") else None
+        ),
         "metrics_test_by_label_bucket": by_bucket,
         "notes": [
             "Evaluation uses time-ordered split (no shuffle).",
@@ -383,6 +446,8 @@ def main():
     print(json.dumps(report["metrics_test_overall"], indent=2))
     print("Baseline:", json.dumps(baseline_overall, indent=2))
     print("Lift (%):", json.dumps(report["lift_vs_baseline_pct"], indent=2))
+    if report.get("metrics_anytime_prob"):
+        print("Anytime P(>=1):", json.dumps(report["metrics_anytime_prob"], indent=2))
     print("Wrote:", out_path)
 
 

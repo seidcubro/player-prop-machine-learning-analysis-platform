@@ -7,3 +7,9 @@ psycopg2-binary
 pandas
 scikit-learn
 joblib
+# Gradient boosting with native categorical + monotonic constraint support;
+# consistently the strongest tabular learner in the market bakeoff.
+lightgbm==4.5.0
+scipy
+# Historical odds backfill talks to The Odds API directly.
+requests
