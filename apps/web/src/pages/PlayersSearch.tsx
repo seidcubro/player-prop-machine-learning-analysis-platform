@@ -1,216 +1,166 @@
-﻿/**
- * Player directory page (server-side search + pagination).
+/**
+ * Player browse.
  *
- * This page calls:
- *   GET /api/v1/players?search=...&limit=...&offset=...&include_total=true
- *
- * Why:
- * - The player table is league-scale now; client-side filtering is no longer viable.
- * - Pagination and server-side search keep the UI fast and bandwidth-light.
+ * Defaults to offensive players with recent game activity, the ~600 people
+ * who actually have prop markets, rather than the full 25k-row historical
+ * table, which stretches back decades and opened on long-retired nose tackles.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchPlayersPaged } from "../api";
-import type { Player } from "../api";
+import Avatar from "../components/Avatar";
+import { fetchPlayersPaged, type Player } from "../api";
 
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
+const PAGE_SIZE = 48;
+const OFFENSE = "QB,RB,WR,TE,FB";
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(t);
-  }, [value, delayMs]);
-
-  return debounced;
-}
+const POSITION_FILTERS = [
+  { label: "All", value: OFFENSE },
+  { label: "QB", value: "QB" },
+  { label: "RB", value: "RB,FB" },
+  { label: "WR", value: "WR" },
+  { label: "TE", value: "TE" },
+];
 
 export default function PlayersSearch() {
-  const [query, setQuery] = useState("");
-  const debouncedQuery = useDebouncedValue(query, 300);
-
   const [players, setPlayers] = useState<Player[]>([]);
-  const [total, setTotal] = useState<number | null>(null);
-
-  const [limit, setLimit] = useState(50);
-  const [offset, setOffset] = useState(0);
-
-  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState<number | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  const q = useMemo(() => debouncedQuery.trim(), [debouncedQuery]);
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [positions, setPositions] = useState(OFFENSE);
+  const [page, setPage] = useState(0);
 
-  // Reset to first page when search changes
+  // Debounce so typing does not fire a request per keystroke.
   useEffect(() => {
-    setOffset(0);
-  }, [q]);
+    const t = setTimeout(() => setDebounced(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
+  useEffect(() => setPage(0), [debounced, positions]);
+
+  const reqId = useRef(0);
   useEffect(() => {
-    let cancelled = false;
+    const mine = ++reqId.current;
+    setLoading(true);
+    setErr(null);
 
-    async function run() {
-      setLoading(true);
-      setErr(null);
-      try {
-        const resp = await fetchPlayersPaged({
-          search: q || null,
-          limit,
-          offset,
-          include_total: true,
-        });
-        if (cancelled) return;
-        setPlayers(resp.players);
-        setTotal(typeof resp.total === "number" ? resp.total : null);
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message ?? "Error");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
+    fetchPlayersPaged({
+      search: debounced || undefined,
+      positions,
+      active_only: true,
+      include_total: true,
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+    })
+      .then((res) => {
+        // Ignore a slow response that a newer query has already superseded.
+        if (mine !== reqId.current) return;
+        setPlayers(res.players);
+        setTotal(res.total);
+      })
+      .catch((e) => {
+        if (mine !== reqId.current) return;
+        setErr(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (mine === reqId.current) setLoading(false);
+      });
+  }, [debounced, positions, page]);
 
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [q, limit, offset]);
+  const shown = useMemo(
+    () => ({
+      from: total === 0 ? 0 : page * PAGE_SIZE + 1,
+      to: Math.min((page + 1) * PAGE_SIZE, total ?? 0),
+    }),
+    [page, total],
+  );
 
-  const canPrev = offset > 0;
-  const canNext = total !== null ? offset + limit < total : players.length === limit;
-
-  const start = total === null ? null : Math.min(offset + 1, total);
-  const end = total === null ? null : Math.min(offset + players.length, total);
+  const lastPage = total ? Math.max(0, Math.ceil(total / PAGE_SIZE) - 1) : 0;
 
   return (
-    <div style={{ maxWidth: 900, margin: "40px auto", padding: 16 }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>Player Search</h1>
-      <p style={{ marginTop: 0, opacity: 0.8 }}>
-        Server-side search + pagination. (API: /players?search=...&limit=...&offset=...)
-      </p>
+    <div>
+      <div className="ps-hero">
+        <h1>Players</h1>
+        <p>
+          Every skill-position player with an active role. Open one for live
+          props, projections, and how our picks have actually done.
+        </p>
+      </div>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10 }}>
+      <div className="ps-filters">
         <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="e.g., warren, jefferson, allen, WR, MIN"
-          style={{
-            flex: 1,
-            padding: "12px 14px",
-            fontSize: 16,
-            borderRadius: 10,
-            border: "1px solid #333",
-          }}
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or team..."
+          aria-label="Search players"
         />
-
         <select
-          value={limit}
-          onChange={(e) => setLimit(parseInt(e.target.value, 10))}
-          style={{
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #333",
-            background: "transparent",
-            color: "inherit",
-          }}
+          value={positions}
+          onChange={(e) => setPositions(e.target.value)}
+          aria-label="Filter by position"
         >
-          <option value={25}>25</option>
-          <option value={50}>50</option>
-          <option value={100}>100</option>
+          {POSITION_FILTERS.map((p) => (
+            <option key={p.label} value={p.value}>
+              {p.label === "All" ? "All positions" : p.label}
+            </option>
+          ))}
         </select>
       </div>
 
-      <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ opacity: 0.85 }}>
-          {total !== null ? (
-            <span>
-              Showing {start}–{end} of {total}
-            </span>
-          ) : (
-            <span>Showing {players.length}</span>
-          )}
+      {err && <div className="ps-empty">Could not load players: {err}</div>}
+
+      {loading && players.length === 0 && (
+        <div className="ps-empty">Loading players...</div>
+      )}
+
+      {!loading && !err && players.length === 0 && (
+        <div className="ps-empty">
+          No players match “{search}”.
         </div>
+      )}
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={() => setOffset((o) => Math.max(0, o - limit))}
-            disabled={!canPrev || loading}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid #333",
-              background: "transparent",
-              color: "inherit",
-              opacity: !canPrev || loading ? 0.5 : 1,
-              cursor: !canPrev || loading ? "not-allowed" : "pointer",
-            }}
-          >
-            Prev
-          </button>
-          <button
-            onClick={() => setOffset((o) => o + limit)}
-            disabled={!canNext || loading}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid #333",
-              background: "transparent",
-              color: "inherit",
-              opacity: !canNext || loading ? 0.5 : 1,
-              cursor: !canNext || loading ? "not-allowed" : "pointer",
-            }}
-          >
-            Next
-          </button>
-        </div>
-      </div>
-
-      {loading && <div style={{ marginTop: 12 }}>Loading...</div>}
-      {err && <div style={{ marginTop: 12, color: "crimson" }}>{err}</div>}
-
-      <div style={{ border: "1px solid #333", borderRadius: 12, overflow: "hidden", marginTop: 14 }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "2fr 1fr 1fr 120px",
-            padding: 12,
-            fontWeight: 700,
-            borderBottom: "1px solid #333",
-          }}
-        >
-          <div>Name</div>
-          <div>Team</div>
-          <div>Pos</div>
-          <div></div>
-        </div>
-
-        {players.map((p) => (
-          <div
-            key={p.id}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "2fr 1fr 1fr 120px",
-              padding: 12,
-              borderBottom: "1px solid #222",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              {p.first_name} {p.last_name}
-            </div>
-            <div>{p.team ?? "-"}</div>
-            <div>{p.position ?? "-"}</div>
-            <div>
-              <Link to={`/players/${p.id}`}>View</Link>
-            </div>
+      {players.length > 0 && (
+        <>
+          <div className="ps-playergrid">
+            {players.map((p) => {
+              const name = p.name ?? p.display_name ?? "Unknown";
+              return (
+                <Link key={p.id} to={`/players/${p.id}`} className="ps-playercard">
+                  <Avatar name={name} src={p.headshot} />
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{name}</div>
+                    <div className="meta">
+                      {p.position ?? "-"}
+                      {p.team ? ` · ${p.team}` : ""}
+                      {p.jersey_number ? ` · #${p.jersey_number}` : ""}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
-        ))}
 
-        {!loading && !err && players.length === 0 && (
-          <div style={{ padding: 12, opacity: 0.8 }}>No results.</div>
-        )}
-      </div>
+          <div className="ps-pager">
+            <span>
+              {shown.from}–{shown.to}
+              {total !== undefined ? ` of ${total}` : ""}
+            </span>
+            <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+              Prev
+            </button>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={total !== undefined && page >= lastPage}
+            >
+              Next
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
-
-
-

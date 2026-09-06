@@ -18,10 +18,10 @@
   --border: #253029;        /* hairlines */
   --border-strong: #35443b;
 
-  /* Text — contrast vs --bg / --bg-raised: */
+  /* Text, contrast vs --bg / --bg-raised: */
   --text: #e8f0ec;          /* ~15:1 */
   --text-dim: #9fb3a8;      /* ~7:1  */
-  --text-faint: #6e8177;    /* ~4.6:1 — smallest text only */
+  --text-faint: #6e8177;    /* ~4.6:1, smallest text only */
 
   /* Signal palette */
   --green: #34d27b;         /* primary signal green, 7.9:1 on --bg */
@@ -75,7 +75,7 @@ h1 { font-size: 2rem; font-weight: 700; }
 a { color: var(--green); text-decoration: none; }
 a:hover { color: var(--green-bright); text-decoration: underline; }
 
-/* Visible focus for keyboard users — never remove, only restyle. */
+/* Visible focus for keyboard users, never remove, only restyle. */
 :focus-visible {
   outline: 2px solid var(--green);
   outline-offset: 2px;
@@ -423,3 +423,324 @@ tr.clickable { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------------------------------------------------------------
+   Prop cards, the per-player answer to "should I bet this?"
+   One card per market: line vs model, the edge between them, and
+   how confident the model is. Used on the player detail page.
+   --------------------------------------------------------------- */
+.ps-propgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.ps-propcard {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.ps-propcard.over  { border-left-color: var(--green); }
+.ps-propcard.under { border-left-color: var(--red); }
+
+.ps-propcard .market {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.ps-propcard .market h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.ps-propcard .nums {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  text-align: center;
+}
+.ps-propcard .nums .label {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.ps-propcard .nums .value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.ps-propcard .nums .value.green { color: var(--green); }
+.ps-propcard .nums .value.red   { color: var(--red); }
+
+.ps-propcard .rec {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+@media (max-width: 520px) {
+  .ps-propgrid { grid-template-columns: 1fr; }
+}
+
+/* ---------------------------------------------------------------
+   Player headshots
+   Photos come from the NFL CDN and occasionally 404, so the avatar
+   keeps its initials underneath and the image sits on top; if the
+   image fails the JS clears it and the initials show through.
+   --------------------------------------------------------------- */
+.ps-avatar { position: relative; overflow: hidden; background: var(--bg-hover); }
+.ps-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+.ps-avatar.xl {
+  width: 104px;
+  height: 104px;
+  font-size: 2rem;
+  border-radius: 14px;
+}
+
+/* Track record ------------------------------------------------- */
+.ps-record {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ps-record .big {
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ps-record .wl { color: var(--text-dim); font-size: 0.9rem; }
+
+.hit-yes { color: var(--green); font-weight: 700; }
+.hit-no  { color: var(--red); font-weight: 700; }
+.hit-push { color: var(--text-faint); font-weight: 600; }
+
+.ps-gamedate {
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Book chips for multi-book line shopping ---------------------- */
+.book-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  margin-right: 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Profile meta row --------------------------------------------- */
+.ps-profilemeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-top: 6px;
+}
+.ps-profilemeta b { color: var(--text); font-weight: 600; }
+
+@media (max-width: 560px) {
+  .ps-avatar.xl { width: 72px; height: 72px; font-size: 1.4rem; }
+}
+
+/* Visually hidden but available to screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The book offering the strongest edge is the one to actually bet. */
+.book-chip { margin-bottom: 3px; }
+.book-chip.best {
+  border-color: var(--green-dim);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ===============================================================
+   Motion
+   Everything here is decorative and sits behind the reduced-motion
+   guard further up: no state is communicated by animation alone.
+   Durations stay under 400ms, long enough to read as intentional,
+   short enough that a power user tabbing through never waits.
+   =============================================================== */
+
+@keyframes ps-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ps-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes ps-sweep {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+@keyframes ps-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(52, 210, 123, 0.35); }
+  70%  { box-shadow: 0 0 0 10px rgba(52, 210, 123, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 210, 123, 0); }
+}
+
+/* Page content settles in rather than snapping. */
+.ps-main > * { animation: ps-rise 0.34s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Stat tiles land in sequence, the eye follows left to right. */
+.ps-statgrid .ps-stat {
+  animation: ps-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ps-statgrid .ps-stat:nth-child(1) { animation-delay: 0.02s; }
+.ps-statgrid .ps-stat:nth-child(2) { animation-delay: 0.06s; }
+.ps-statgrid .ps-stat:nth-child(3) { animation-delay: 0.10s; }
+.ps-statgrid .ps-stat:nth-child(4) { animation-delay: 0.14s; }
+
+/* Table rows stagger only across the first screenful; past that the delay
+   would be noticeable scrolling rather than pleasant. */
+.ps-table tbody tr { animation: ps-fade 0.3s ease both; }
+.ps-table tbody tr:nth-child(1)  { animation-delay: 0.01s; }
+.ps-table tbody tr:nth-child(2)  { animation-delay: 0.02s; }
+.ps-table tbody tr:nth-child(3)  { animation-delay: 0.03s; }
+.ps-table tbody tr:nth-child(4)  { animation-delay: 0.04s; }
+.ps-table tbody tr:nth-child(5)  { animation-delay: 0.05s; }
+.ps-table tbody tr:nth-child(6)  { animation-delay: 0.06s; }
+.ps-table tbody tr:nth-child(7)  { animation-delay: 0.07s; }
+.ps-table tbody tr:nth-child(8)  { animation-delay: 0.08s; }
+.ps-table tbody tr:nth-child(n+9) { animation-delay: 0.09s; }
+
+.ps-table tbody tr {
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ps-table tbody tr:hover {
+  background: var(--bg-hover);
+  box-shadow: inset 3px 0 0 var(--green-dim);
+}
+
+/* Prop cards lift toward the cursor. */
+.ps-propcard,
+.ps-playercard {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.18s ease,
+              box-shadow 0.18s ease;
+  will-change: transform;
+}
+.ps-propcard:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.85);
+  border-color: var(--border-strong);
+}
+.ps-playercard:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.8);
+}
+
+/* The win-probability meter fills instead of appearing full. */
+.prob-bar > span {
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  background: linear-gradient(90deg, var(--green-dim), var(--green-bright));
+}
+
+/* An elite edge earns one quiet pulse on arrival, not a loop. */
+.tier-elite { animation: ps-pulse-ring 1.6s ease-out 1; }
+
+/* Skeleton shimmer for loading states, a grey block that breathes reads as
+   "working" where a spinner reads as "stuck". */
+.ps-skeleton {
+  border-radius: var(--radius);
+  background: linear-gradient(
+    90deg,
+    var(--bg-raised) 25%,
+    var(--bg-hover) 37%,
+    var(--bg-raised) 63%
+  );
+  background-size: 200% 100%;
+  animation: ps-sweep 1.3s ease-in-out infinite;
+}
+.ps-skeleton-row { height: 56px; margin-bottom: 8px; }
+.ps-skeleton-card { height: 152px; }
+
+/* Nav underline that travels rather than blinks. */
+.ps-nav-links a {
+  position: relative;
+  transition: color 0.15s ease;
+}
+.ps-nav-links a::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--green-bright);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ps-nav-links a:hover::after,
+.ps-nav-links a.active::after { transform: scaleX(1); }
+
+/* Focus ring that is obvious without being ugly, keyboard users get the same
+   quality of feedback as the hover states above. */
+:where(a, button, input, select):focus-visible {
+  outline: 2px solid var(--green-bright);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Sparkline, recent form, inline. */
+.ps-spark { display: block; overflow: visible; }
+.ps-propcard .form {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ps-propcard .form .caption {
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.ps-propcard .form .hits {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ps-propcard .form .hits b { color: var(--text); }

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Frontend API client for the Player Prop ML platform.
  *
  * This file is the single source of truth for browser -> API calls.
@@ -64,12 +64,21 @@ console.log("[api.ts] API CLIENT MODULE LOADED", { API_BASE });
 
 export type Player = {
   id: number;
-  external_id?: string | null;
-  first_name: string;
-  last_name: string;
-  name?: string;
-  position?: string | null;
-  team?: string | null;
+  external_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  name: string | null;
+  display_name?: string | null;
+  position: string | null;
+  team: string | null;
+  headshot: string | null;
+  jersey_number: string | null;
+  height: number | null;
+  weight: number | null;
+  college: string | null;
+  years_exp: number | null;
+  status: string | null;
+  rookie_year: number | null;
 };
 
 export type PlayerGame = {
@@ -85,51 +94,8 @@ export type PlayerGame = {
   touchdowns?: number | null;
 };
 
-export type Projection = {
-  ok: boolean;
-  player_id: number;
-  market_code: string;
-  market_name?: string;
-  model_name?: string; // baseline
-  model?: string; // some endpoints return "model"
-  game_date: string;
-  opponent: string;
-  lookback?: number;
-  line?: number;
-  mean: number;
-  stddev: number;
-  p_over: number;
-  created_at?: string;
-};
 
-export type MLProjection = {
-  ok: boolean;
-  player_id: number;
-  market_code: string;
-  model_name: string;
-  lookback: number;
-  as_of_game_date: string;
-  opponent: string;
-  prediction: number;
-  features: {
-    mean: number;
-    stddev: number;
-    weighted_mean: number;
-    trend: number;
-  };
-  artifact_path?: string;
-};
 
-export type MLProjectionRow = {
-  player_id: number;
-  market_code: string;
-  model_name: string;
-  lookback: number;
-  as_of_game_date: string;
-  prediction: number;
-  features: any;
-  created_at: string;
-};
 
 export type EdgeTier = "small" | "medium" | "strong" | "elite";
 
@@ -153,6 +119,9 @@ export type PropEdge = {
   recommended_side: string;
   edge_tier: EdgeTier;
   created_at: string;
+  game_date: string | null;
+  headshot: string | null;
+  player_id: number | null;
 };
 
 export type EdgesResponse = {
@@ -218,12 +187,18 @@ export async function fetchPlayersPaged(args?: {
   limit?: number;
   offset?: number;
   include_total?: boolean;
+  /** Offensive positions only, defensive/K/P players have no prop markets. */
+  positions?: string | null;
+  /** Hide the ~24k historical players who have not played recently. */
+  active_only?: boolean;
 }): Promise<{ players: Player[]; total?: number }> {
   const url = `${getApiBase()}/players?${qs({
     search: args?.search ?? undefined,
     limit: args?.limit ?? 50,
     offset: args?.offset ?? 0,
     include_total: args?.include_total ?? false,
+    positions: args?.positions ?? undefined,
+    active_only: args?.active_only ?? undefined,
   })}`;
 
   const data = await http<{ ok: boolean; players: Player[]; total?: number }>(url);
@@ -270,63 +245,8 @@ export async function fetchPlayerGames(
   return data.games;
 }
 
-/**
- * Fetch the latest stored baseline projection for a player and market.
- *
- * Backend: GET /players/{player_id}/projection_baseline?market_code=...&model_name=...
- */
-export async function fetchProjectionBaseline(args: {
-  playerId: number;
-  market_code: string;
-  model_name?: string;
-}): Promise<Projection> {
-  const model_name = args.model_name ?? "baseline_v1";
-  const url = `${getApiBase()}/players/${args.playerId}/projection_baseline?${qs({
-    market_code: args.market_code,
-    model_name,
-  })}`;
-  return http<Projection>(url);
-}
 
-/**
- * Generate and persist an ML projection using the active model for the market.
- *
- * Backend: GET /players/{player_id}/projection_ml?market_code=...&lookback=...
- */
-export async function fetchProjectionML(args: {
-  playerId: number;
-  market_code: string;
-  lookback?: number;
-}): Promise<MLProjection> {
-  const lookback = args.lookback ?? 5;
-  const url = `${getApiBase()}/players/${args.playerId}/projection_ml?${qs({
-    market_code: args.market_code,
-    lookback,
-  })}`;
-  return http<MLProjection>(url);
-}
 
-/**
- * Fetch previously generated ML projections for a player (history).
- *
- * Backend: GET /players/{player_id}/ml_projections?market_code=...&model_name=...&lookback=...&limit=...
- */
-export async function fetchMLProjectionHistory(args: {
-  playerId: number;
-  market_code: string;
-  model_name?: string;
-  lookback?: number;
-  limit?: number;
-}): Promise<MLProjectionRow[]> {
-  const url = `${getApiBase()}/players/${args.playerId}/ml_projections?${qs({
-    market_code: args.market_code,
-    model_name: args.model_name ?? "ridge_v1",
-    lookback: args.lookback ?? 5,
-    limit: args.limit ?? 20,
-  })}`;
-  const data = await http<{ ok: boolean; rows: MLProjectionRow[] }>(url);
-  return data.rows;
-}
 
 /**
  * Fetch computed betting edges (sportsbook line vs. model projection).
@@ -363,4 +283,51 @@ export async function fetchEdges(args?: {
  */
 export async function fetchEdgesSummary(): Promise<EdgesSummary> {
   return http<EdgesSummary>(`${getApiBase()}/edges/summary`);
+}
+
+/** One graded historical pick: what we said, and what actually happened. */
+export type EdgeHistoryRow = {
+  edge_id: number;
+  game_date: string | null;
+  market_code: string;
+  line: number | null;
+  projection: number;
+  recommended_side: string;
+  win_prob: number | null;
+  edge_tier: EdgeTier;
+  actual: number | null;
+  /** true = pick won, false = lost, null = push (excluded from hit rate). */
+  hit: boolean | null;
+  home_team: string | null;
+  away_team: string | null;
+  bookmaker_title: string | null;
+  price_american: number | null;
+};
+
+export type EdgeHistory = {
+  ok: boolean;
+  player_id: number;
+  summary: {
+    graded: number;
+    wins: number;
+    losses: number;
+    pushes: number;
+    hit_rate: number | null;
+    avg_predicted: number | null;
+  };
+  history: EdgeHistoryRow[];
+};
+
+/**
+ * Fetch a player's graded pick history.
+ *
+ * Backend: GET /players/{id}/edge_history
+ */
+export async function fetchEdgeHistory(
+  playerId: number,
+  limit = 50,
+): Promise<EdgeHistory> {
+  return http<EdgeHistory>(
+    `${getApiBase()}/players/${playerId}/edge_history?limit=${limit}`,
+  );
 }

@@ -1,5 +1,5 @@
 /**
- * PropSignal logo — vector recreation of the final brand mark:
+ * PropSignal logo, vector recreation of the final brand mark:
  * a thin circular ring, an ECG/"W" waveform piercing through it,
  * and a directional signal beam emitting from the upper right.
  *

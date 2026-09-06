@@ -1,5 +1,5 @@
 /**
- * Edges dashboard — the core PropSignal screen.
+ * Edges dashboard, the core PropSignal screen.
  *
  * Answers one question per row: "should I bet this or not?"
  * Line vs. model projection vs. edge vs. win probability, color-coded,
@@ -10,6 +10,8 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import Avatar from "../components/Avatar";
 import {
   fetchEdges,
   fetchEdgesSummary,
@@ -35,8 +37,56 @@ const TIERS: EdgeTier[] = ["elite", "strong", "medium", "small"];
 const PAGE_SIZE = 50;
 
 function fmtPrice(p: number | null): string {
-  if (p === null || p === undefined) return "—";
+  if (p === null || p === undefined) return "-";
   return p > 0 ? `+${p}` : String(p);
+}
+
+function fmtGameDate(e: PropEdge): string {
+  // Prefer the full kickoff timestamp so the date renders in the viewer's own
+  // timezone. `game_date` is the UTC calendar date, which pushes any night game
+  // to the following day, Monday Night Football displayed as Tuesday.
+  const raw = e.commence_time ?? e.game_date;
+  if (!raw) return "";
+  const d = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Collapse the same player+market across bookmakers into one row.
+ *
+ * The books all price the same prop, so listing each separately showed the
+ * identical pick two or three times and pushed genuinely different edges off
+ * the first page. The strongest edge leads; the rest are kept so the row can
+ * still show where the best number is.
+ */
+function normName(n: string): string {
+  // Sportsbooks spell the same player differently ("TJ Hockenson" vs
+  // "T.J. Hockenson"), which would otherwise leave the identical pick on two
+  // rows. Matches the backend's normalisation.
+  return n.toLowerCase().replace(/[.\-]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function dedupeByBook(rows: PropEdge[]): Array<PropEdge & { alts: PropEdge[] }> {
+  const groups = new Map<string, PropEdge[]>();
+  for (const e of rows) {
+    const key = `${normName(e.player_name)}|${e.market_code}|${e.game_date ?? e.commence_time ?? ""}`;
+    const list = groups.get(key) ?? [];
+    list.push(e);
+    groups.set(key, list);
+  }
+  return [...groups.values()].map((list) => {
+    const sorted = [...list].sort(
+      (a, b) => Math.abs(b.raw_edge) - Math.abs(a.raw_edge),
+    );
+    return { ...sorted[0], alts: sorted.slice(1) };
+  });
 }
 
 function fmtMatchup(e: PropEdge): string {
@@ -141,19 +191,19 @@ export default function EdgesDashboard() {
       <section className="ps-statgrid" aria-label="Edge summary">
         <div className="ps-stat">
           <div className="label">Total Edges</div>
-          <div className="value">{summary ? total || "…" : "…"}</div>
+          <div className="value">{summary ? total || "..." : "..."}</div>
         </div>
         <div className="ps-stat">
           <div className="label">Elite</div>
-          <div className="value green">{summary?.by_tier.elite ?? "…"}</div>
+          <div className="value green">{summary?.by_tier.elite ?? "..."}</div>
         </div>
         <div className="ps-stat">
           <div className="label">Strong</div>
-          <div className="value">{summary?.by_tier.strong ?? "…"}</div>
+          <div className="value">{summary?.by_tier.strong ?? "..."}</div>
         </div>
         <div className="ps-stat">
           <div className="label">Markets</div>
-          <div className="value">{summary?.by_market.length ?? "…"}</div>
+          <div className="value">{summary?.by_market.length ?? "..."}</div>
         </div>
       </section>
 
@@ -161,7 +211,7 @@ export default function EdgesDashboard() {
         <input
           className="grow"
           type="search"
-          placeholder="Search player…"
+          placeholder="Search player..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search player"
@@ -222,17 +272,29 @@ export default function EdgesDashboard() {
             </tr>
           </thead>
           <tbody>
-            {edges.map((e) => {
+            {dedupeByBook(edges).map((e) => {
               const over = e.recommended_side === "over";
               return (
                 <tr key={e.id}>
                   <td data-label="Player">
-                    <strong>{e.player_name}</strong>
-                    <div className="matchup">{fmtMatchup(e)}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <Avatar name={e.player_name} src={e.headshot} />
+                      <div>
+                        {e.player_id ? (
+                          <Link to={`/players/${e.player_id}`}>
+                            <strong>{e.player_name}</strong>
+                          </Link>
+                        ) : (
+                          <strong>{e.player_name}</strong>
+                        )}
+                        <div className="matchup">{fmtMatchup(e)}</div>
+                        <div className="ps-gamedate">{fmtGameDate(e)}</div>
+                      </div>
+                    </div>
                   </td>
                   <td data-label="Market">{MARKET_LABELS[e.market_code] ?? e.market_code}</td>
                   <td data-label="Line" className="num">
-                    {e.line ?? "—"}{" "}
+                    {e.line ?? "-"}{" "}
                     <span className="matchup">({fmtPrice(e.price_american)})</span>
                   </td>
                   <td data-label="Model" className="num">
@@ -258,8 +320,15 @@ export default function EdgesDashboard() {
                   <td data-label="Tier">
                     <span className={`tier tier-${e.edge_tier}`}>{e.edge_tier}</span>
                   </td>
-                  <td data-label="Book" className="matchup">
-                    {e.bookmaker_title ?? e.bookmaker_key}
+                  <td data-label="Book">
+                    <span className="book-chip best">
+                      {e.bookmaker_title ?? e.bookmaker_key} {e.line ?? "-"}
+                    </span>
+                    {e.alts.map((a) => (
+                      <span className="book-chip" key={a.id}>
+                        {a.bookmaker_title ?? a.bookmaker_key} {a.line ?? "-"}
+                      </span>
+                    ))}
                   </td>
                 </tr>
               );
@@ -269,7 +338,7 @@ export default function EdgesDashboard() {
         {!loading && edges.length === 0 && !err && (
           <div className="ps-empty">No edges match these filters.</div>
         )}
-        {loading && <div className="ps-empty">Loading…</div>}
+        {loading && <div className="ps-empty">Loading...</div>}
       </div>
 
       <div className="ps-pager">
