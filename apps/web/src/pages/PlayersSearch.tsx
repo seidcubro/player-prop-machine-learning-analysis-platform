@@ -6,9 +6,12 @@
  * table, which stretches back decades and opened on long-retired nose tackles.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Avatar from "../components/Avatar";
+import Select from "../components/Select";
+import Pager from "../components/Pager";
+import PageTitle from "../components/PageTitle";
 import { fetchPlayersPaged, type Player } from "../api";
 
 const PAGE_SIZE = 48;
@@ -70,20 +73,10 @@ export default function PlayersSearch() {
       });
   }, [debounced, positions, page]);
 
-  const shown = useMemo(
-    () => ({
-      from: total === 0 ? 0 : page * PAGE_SIZE + 1,
-      to: Math.min((page + 1) * PAGE_SIZE, total ?? 0),
-    }),
-    [page, total],
-  );
-
-  const lastPage = total ? Math.max(0, Math.ceil(total / PAGE_SIZE) - 1) : 0;
-
   return (
     <div>
       <div className="ps-hero">
-        <h1>Players</h1>
+        <PageTitle lead="All" accent="Players" />
         <p>
           Every skill-position player with an active role. Open one for live
           props, projections, and how our picks have actually done.
@@ -98,17 +91,16 @@ export default function PlayersSearch() {
           placeholder="Search by name or team..."
           aria-label="Search players"
         />
-        <select
+        <Select
+          label="Filter by position"
           value={positions}
-          onChange={(e) => setPositions(e.target.value)}
-          aria-label="Filter by position"
-        >
-          {POSITION_FILTERS.map((p) => (
-            <option key={p.label} value={p.value}>
-              {p.label === "All" ? "All positions" : p.label}
-            </option>
-          ))}
-        </select>
+          onChange={setPositions}
+          minWidth={168}
+          options={POSITION_FILTERS.map((p) => ({
+            value: p.value,
+            label: p.label === "All" ? "All positions" : p.label,
+          }))}
+        />
       </div>
 
       {err && <div className="ps-empty">Could not load players: {err}</div>}
@@ -126,13 +118,21 @@ export default function PlayersSearch() {
       {players.length > 0 && (
         <>
           <div className="ps-playergrid">
-            {players.map((p) => {
+            {players.map((p, i) => {
               const name = p.name ?? p.display_name ?? "Unknown";
               return (
-                <Link key={p.id} to={`/players/${p.id}`} className="ps-playercard">
-                  <Avatar name={name} src={p.headshot} />
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{name}</div>
+                <Link
+                  key={p.id}
+                  to={`/players/${p.id}`}
+                  className="ps-playercard ps-row-in"
+                  style={{ animationDelay: `${Math.min(i, 14) * 22}ms` }}
+                >
+                  <Avatar name={name} src={p.headshot} size="lg" />
+                  <div style={{ minWidth: 0 }}>
+                    {/* Clamped to two lines. A long name used to make its card
+                        taller than every other card in the row and pull the
+                        whole grid out of line. */}
+                    <div className="name" title={name}>{name}</div>
                     <div className="meta">
                       {p.position ?? "-"}
                       {p.team ? ` · ${p.team}` : ""}
@@ -144,21 +144,13 @@ export default function PlayersSearch() {
             })}
           </div>
 
-          <div className="ps-pager">
-            <span>
-              {shown.from}–{shown.to}
-              {total !== undefined ? ` of ${total}` : ""}
-            </span>
-            <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
-              Prev
-            </button>
-            <button
-              onClick={() => setPage((p) => p + 1)}
-              disabled={total !== undefined && page >= lastPage}
-            >
-              Next
-            </button>
-          </div>
+          <Pager
+            total={total ?? players.length}
+            page={page}
+            pageSize={PAGE_SIZE}
+            noun="player"
+            onPage={setPage}
+          />
         </>
       )}
     </div>

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import PropCards from "../components/PropCards";
+import WeekProjections from "../components/WeekProjections";
 import TrackRecord from "../components/TrackRecord";
 import {
   fetchPlayer,
@@ -127,7 +128,7 @@ export default function PlayerDetail() {
 
   return (
     <div>
-      <Link to="/players">← All players</Link>
+      <Link to="/players" className="ps-back">All Players</Link>
 
       <div className="ps-profilehead" style={{ marginTop: 12 }}>
         <Avatar name={name} src={player.headshot} size="xl" />
@@ -151,6 +152,8 @@ export default function PlayerDetail() {
 
       <PropCards playerName={name} playerId={playerId} />
 
+      <WeekProjections playerId={playerId} />
+
       <TrackRecord playerId={playerId} />
 
       <div className="ps-section">
@@ -160,7 +163,7 @@ export default function PlayerDetail() {
         ) : (
           <div className="ps-tablewrap">
             <table className="ps-table">
-              <caption className="sr-only">Recent game log</caption>
+              <caption className="sr-only">Recent Game Log</caption>
               <thead>
                 <tr>
                   <th scope="col">Date</th>
