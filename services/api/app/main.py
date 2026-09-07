@@ -13,6 +13,8 @@ Operational notes:
 - Database connectivity is provided via `services/api/app/db.py`.
 """
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,13 +23,29 @@ from app.routes.odds import router as odds_router
 
 app = FastAPI(title="Player Prop API", version="0.1.0")
 
-# DEV CORS (browser fetch from Vite)
+# Browser origins allowed to call this API.
+#
+# This was a hardcoded pair of localhost entries, which is correct for a laptop
+# and fatal for a deployment: the browser blocks every call from the hosted
+# frontend and the site comes up empty with no server-side error to find. The
+# deployed origin goes in WEB_ORIGINS as a comma-separated list.
+#
+# Wildcards are deliberately not supported. `allow_credentials=True` with
+# `allow_origins=["*"]` is rejected by browsers anyway, and an API that can
+# spend money on the Odds account should not be callable from any page on the
+# internet.
+_DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+_EXTRA_ORIGINS = [
+    o.strip() for o in os.getenv("WEB_ORIGINS", "").split(",") if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_DEV_ORIGINS + _EXTRA_ORIGINS,
+    # Vercel gives every deployment its own subdomain, so preview builds would
+    # each need adding by hand. This matches them by pattern instead, while
+    # still refusing arbitrary origins.
+    allow_origin_regex=os.getenv("WEB_ORIGIN_REGEX") or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
