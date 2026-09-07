@@ -33,6 +33,7 @@ from scipy.stats import norm
 from sqlalchemy import create_engine, text
 
 import math
+from odds_markets import ALL_ODDS_TO_MARKET
 
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
@@ -46,18 +47,9 @@ DATABASE_URL = (
     f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 )
 
-ODDS_TO_MARKET = {
-    "player_pass_attempts": "pass_att",
-    "player_pass_yds": "pass_yds",
-    "player_pass_tds": "pass_td",
-    "player_pass_completions": "pass_completions",
-    "player_rush_attempts": "rush_att",
-    "player_rush_yds": "rush_yds",
-    "player_rush_tds": "rush_td",
-    "player_receptions": "recs",
-    "player_reception_yds": "rec_yds",
-    "player_reception_tds": "rec_td",
-}
+# Historical snapshots still carry the two dead touchdown keys, so this uses
+# the map that includes them. One definition, in odds_markets.py.
+ODDS_TO_MARKET = ALL_ODDS_TO_MARKET
 
 TEAM_MAP = {
     "ari": "arizona cardinals",
@@ -103,6 +95,12 @@ def normalize_name(name: str) -> str:
 
 def normalize_team(name: str) -> str:
     return " ".join((name or "").lower().replace(".", "").replace("-", " ").split())
+
+
+# Markets with no graded pick and no historical price, so no claim about them
+# has ever been checked against a book. Capped below the top tiers in the tier
+# assignment; see the comment there.
+UNVALIDATED_MARKETS = frozenset({"any_td"})
 
 
 def edge_tier(raw_edge: float) -> str:
@@ -694,9 +692,20 @@ def main():
               p.market_key,
               p.bookmaker_key,
               p.bookmaker_title,
-              p.line,
-              MAX(CASE WHEN LOWER(p.outcome_name) = 'over' THEN p.price_american END) AS over_price,
-              MAX(CASE WHEN LOWER(p.outcome_name) = 'under' THEN p.price_american END) AS under_price,
+              -- Anytime touchdown has no line and only a Yes side.
+              --
+              -- It is the most heavily bet prop in football and it does not
+              -- look like the others: the book posts "Yes" at a price with no
+              -- number attached, because the implicit threshold is always "at
+              -- least one". Treating Yes as the over at a 0.5 line makes it fit
+              -- the same pipeline without pretending an under exists, and the
+              -- filter below keeps it from being dropped for a null line.
+              COALESCE(p.line, CASE WHEN p.market_key = 'player_anytime_td'
+                                    THEN 0.5 END) AS line,
+              MAX(CASE WHEN LOWER(p.outcome_name) IN ('over', 'yes')
+                       THEN p.price_american END) AS over_price,
+              MAX(CASE WHEN LOWER(p.outcome_name) IN ('under', 'no')
+                       THEN p.price_american END) AS under_price,
               MAX(p.last_update) AS source_last_update
             FROM odds_player_props p
             -- An INNER join, not a LEFT one. A prop whose event row is missing
@@ -705,7 +714,7 @@ def main():
             -- commence_time.
             JOIN odds_events e
               ON p.provider_event_id = e.provider_event_id
-            WHERE p.line IS NOT NULL
+            WHERE (p.line IS NOT NULL OR p.market_key = 'player_anytime_td')
               -- Only games that have not kicked off.
               --
               -- This table is supposed to hold the upcoming slate, and it does
@@ -1053,7 +1062,18 @@ def main():
         ev_over = float(p_over) - implied_prob(o["over_price"])
         ev_under = float(p_under) - implied_prob(o["under_price"])
 
-        if ev_over >= ev_under:
+        # A market with only one side offered can only be bet that way.
+        #
+        # Anytime touchdown posts Yes and nothing else, so `ev_under` is NaN,
+        # and `NaN >= NaN` is False in Python. Without this the builder would
+        # fall through to the under branch and publish a bet at a price that
+        # does not exist.
+        only_over = not math.isfinite(ev_under)
+        only_under = not math.isfinite(ev_over)
+        if only_under and only_over:
+            continue
+
+        if only_over or (not only_under and ev_over >= ev_under):
             recommended_side = "over"
             win_prob = float(p_over)
             chosen_price = o["over_price"]
@@ -1129,6 +1149,28 @@ def main():
             tier = "small"
         else:
             tier = "none"
+
+        # A market nobody has ever graded does not get to call itself elite.
+        #
+        # Anytime touchdown is the only market on the board with no history at
+        # all: books post it as a Yes-only price, the snapshot table holds zero
+        # rows for it across three seasons, and no pick in it has ever been
+        # settled. The underlying rate is well calibrated out of sample, 0.190
+        # predicted against 0.187 actual on 5,827 held-out player-games, so the
+        # number itself is worth publishing.
+        #
+        # What cannot be checked is the only thing that decides profit: whether
+        # the rate beats the price. Its edges land almost entirely on longshots
+        # at +600 to +1100, which is where the favourite-longshot bias runs
+        # hardest against a bettor, and every market I could test showed the
+        # largest disagreements with the book were where the model was most
+        # wrong. Claiming a 14-point edge there on an untested market would be
+        # asserting exactly the thing that has failed every previous check.
+        #
+        # So it is shown, capped, and labelled, and it revisits this cap once a
+        # season of closing prices has been collected and graded.
+        if market_code in UNVALIDATED_MARKETS and tier in ("elite", "strong"):
+            tier = "medium"
 
         # A bet the price already covers is not an edge, so it is not shown.
         if tier == "none":

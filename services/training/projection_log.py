@@ -30,6 +30,7 @@ import os
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
+from odds_markets import ALL_ODDS_TO_MARKET
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -43,16 +44,9 @@ DATABASE_URL = os.getenv(
 )
 
 # Odds API market key -> our market code.
-MARKET_MAP = {
-    "player_reception_yds": "rec_yds",
-    "player_receptions": "recs",
-    "player_rush_yds": "rush_yds",
-    "player_rush_attempts": "rush_att",
-    "player_pass_yds": "pass_yds",
-    "player_pass_tds": "pass_td",
-    "player_pass_completions": "pass_completions",
-    "player_pass_attempts": "pass_att",
-}
+# Historical snapshots still carry the two dead touchdown keys, so this uses
+# the map that includes them. One definition, in odds_markets.py.
+MARKET_MAP = ALL_ODDS_TO_MARKET
 
 STAT_COL = {
     "rec_yds": "receiving_yards",

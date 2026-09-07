@@ -33,6 +33,7 @@ import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
 
 import eval as ev
+from odds_markets import MARKET_TO_ODDS as ODDS_MARKET_KEYS
 
 QUANTILES = [0.10, 0.25, 0.50, 0.75, 0.90]
 QUANT_MODEL_NAME = os.getenv("QUANT_MODEL_NAME", "quant_v1")
@@ -121,21 +122,6 @@ def cdf_level(qpreds: dict[float, np.ndarray], values: np.ndarray) -> np.ndarray
 
 
 PRICED_SNAP_SHARE = float(os.getenv("PRICED_SNAP_SHARE", "0.55"))
-
-# Odds market key per internal market code, for looking up who actually gets
-# priced. Mirrors services/api/app/odds_market_map.py, which lives in another
-# service and is not importable from here.
-ODDS_MARKET_KEYS = {
-    "pass_att": "player_pass_attempts",
-    "pass_completions": "player_pass_completions",
-    "pass_yds": "player_pass_yds",
-    "pass_td": "player_pass_tds",
-    "rush_att": "player_rush_attempts",
-    "rush_yds": "player_rush_yds",
-    "recs": "player_receptions",
-    "rec_yds": "player_reception_yds",
-    "any_td": "player_anytime_td",
-}
 
 
 def priced_player_ids(market_code: str) -> set[str]:

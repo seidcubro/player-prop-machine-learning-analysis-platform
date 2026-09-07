@@ -20,6 +20,7 @@ import os
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
+from odds_markets import ALL_ODDS_TO_MARKET
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -95,21 +96,7 @@ def main():
         print("\nNo graded picks yet, so CLV cannot be attributed to them.")
         return
 
-    # Every market the odds sync requests. A missing key here silently drops
-    # those picks from the CLV result rather than erroring, so it has to stay in
-    # step with services/api/app/odds_market_map.py.
-    MARKET_MAP = {
-        "player_reception_yds": "rec_yds",
-        "player_receptions": "recs",
-        "player_rush_yds": "rush_yds",
-        "player_rush_attempts": "rush_att",
-        "player_pass_yds": "pass_yds",
-        "player_pass_tds": "pass_td",
-        "player_pass_attempts": "pass_att",
-        "player_pass_completions": "pass_completions",
-        "player_anytime_td": "any_td",
-    }
-    df["market_code"] = df["market_key"].map(MARKET_MAP)
+    df["market_code"] = df["market_key"].map(ALL_ODDS_TO_MARKET)
     df["game_date"] = pd.to_datetime(df["commence_time"]).dt.date
 
     close = (
