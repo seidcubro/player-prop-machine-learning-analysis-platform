@@ -39,6 +39,7 @@ def norm_name(name: str) -> str:
 GRADE_SQL = """
 INSERT INTO prop_edge_results (
     edge_id, player_id, player_name, game_date, market_code, line, projection,
+    projection_median,
     recommended_side, win_prob, edge_tier, actual, hit,
     home_team, away_team, bookmaker_title, price_american
 )
@@ -53,6 +54,7 @@ SELECT DISTINCT ON (g.player_id, g.game_date, e.market_code)
     e.market_code,
     e.line,
     e.projection,
+    e.projection_median,
     e.recommended_side,
     e.win_prob,
     e.edge_tier,
@@ -102,6 +104,7 @@ ON CONFLICT (player_id, game_date, market_code) DO UPDATE SET
     edge_id   = EXCLUDED.edge_id,
     line      = EXCLUDED.line,
     projection = EXCLUDED.projection,
+    projection_median = EXCLUDED.projection_median,
     recommended_side = EXCLUDED.recommended_side,
     win_prob  = EXCLUDED.win_prob,
     edge_tier = EXCLUDED.edge_tier,
