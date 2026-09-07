@@ -1,7 +1,7 @@
 /**
  * PropSignal logo, vector recreation of the final brand mark:
- * a thin circular ring, an ECG/"W" waveform piercing through it,
- * and a directional signal beam emitting from the upper right.
+ * a broken circular ring with an ECG waveform running through it. The ring
+ * opens where the waveform crosses it, so the signal reads as passing through.
  *
  * Built as inline SVG (not the raster brand PNGs) so it stays crisp in the
  * navbar, at favicon sizes, and in a future mobile app. The raster originals
@@ -11,13 +11,11 @@
 type LogoProps = {
   /** Pixel size of the (square) icon. */
   size?: number;
-  /** Show the emitted beam (brand rule: keep it on primary + favicon). */
-  beam?: boolean;
   /** Accessible title; pass "" for decorative usage next to visible text. */
   title?: string;
 };
 
-export default function Logo({ size = 32, beam = true, title = "PropSignal" }: LogoProps) {
+export default function Logo({ size = 32, title = "PropSignal" }: LogoProps) {
   const decorative = title === "";
   return (
     <svg
@@ -31,35 +29,43 @@ export default function Logo({ size = 32, beam = true, title = "PropSignal" }: L
       {!decorative && <title>{title}</title>}
       <defs>
         <linearGradient id="ps-ring" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0%" stopColor="#1d7a4c" />
-          <stop offset="100%" stopColor="#6ef2a6" />
-        </linearGradient>
-        <linearGradient id="ps-beam" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0%" stopColor="#6ef2a6" stopOpacity="0.9" />
-          <stop offset="100%" stopColor="#6ef2a6" stopOpacity="0" />
+          <stop offset="0%" stopColor="#22d3ee" />
+          <stop offset="55%" stopColor="#4d7cfe" />
+          <stop offset="100%" stopColor="#a855f7" />
         </linearGradient>
         <linearGradient id="ps-wave" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#2aa866" />
-          <stop offset="50%" stopColor="#6ef2a6" />
-          <stop offset="100%" stopColor="#2aa866" />
+          <stop offset="0%" stopColor="#4d7cfe" />
+          <stop offset="50%" stopColor="#a855f7" />
+          <stop offset="100%" stopColor="#4d7cfe" />
         </linearGradient>
       </defs>
 
-      {beam && (
-        <polygon points="60,34 98,2 74,42" fill="url(#ps-beam)" />
-      )}
+      {/*
+        The ring, as two arcs rather than a dashed circle.
 
-      <circle
-        cx="50"
-        cy="56"
-        r="36"
+        It opens at exactly 0 and 180 degrees, where the horizontal waveform
+        crosses it, so the signal reads as passing through and the two gaps are
+        symmetric. The old version used strokeDasharray, which left a 24 degree
+        gap on one side and a 2 degree nick on the other and just looked broken.
+
+        The beam that used to sit at the upper right is gone: it was a
+        part-transparent triangle that the gradient rendered in dark violet
+        against a dark ground, so it read as a chip out of the mark at every
+        size.
+      */}
+      <path
+        d="M 84.93 64.71 A 36 36 0 0 1 15.07 64.71"
         fill="none"
         stroke="url(#ps-ring)"
         strokeWidth="5"
         strokeLinecap="round"
-        /* ring is broken where the waveform pierces it, like the brand mark */
-        strokeDasharray="150 16 40 16"
-        strokeDashoffset="118"
+      />
+      <path
+        d="M 15.07 47.29 A 36 36 0 0 1 84.93 47.29"
+        fill="none"
+        stroke="url(#ps-ring)"
+        strokeWidth="5"
+        strokeLinecap="round"
       />
 
       {/* ECG "W" waveform, flatline in -> pulse -> flatline out */}

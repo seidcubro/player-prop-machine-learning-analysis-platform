@@ -50,14 +50,6 @@ export function getApiBase(): string {
   return API_BASE;
 }
 
-/**
- * DEV DIAGNOSTIC
- *
- * Confirms the browser is actually executing THIS module.
- * You should see this in the browser console on page load.
- */
-console.log("[api.ts] API CLIENT MODULE LOADED", { API_BASE });
-
 /* =========================
    Types
    ========================= */
@@ -113,15 +105,55 @@ export type PropEdge = {
   price_american: number | null;
   model_name: string;
   model_r2: number | null;
+  /** The mean. Correct as a projection, wrong to compare against a line. */
   projection: number;
+  /**
+   * The median, calibrated the same way the probability is.
+   *
+   * This is the number to show beside a pick. The side is chosen from the
+   * predicted distribution, and on a right-skewed market the mean sits 25-35%
+   * above the median, so displaying the mean produced rows reading "model 75.6,
+   * line 66.5, pick UNDER" that looked like a straightforward bug.
+   */
+  projection_median: number | null;
   raw_edge: number;
   win_prob: number | null;
+  /** Last season's fantasy production. Display ordering only. */
+  star_score: number | null;
+  /**
+   * Model probability minus the break-even the price demands. This is the
+   * number that decides whether a pick is worth making; win_prob on its own
+   * says nothing without the price next to it.
+   */
+  expected_value: number | null;
   recommended_side: string;
   edge_tier: EdgeTier;
   created_at: string;
   game_date: string | null;
   headshot: string | null;
   player_id: number | null;
+  /** Matches the structural over-shade pattern. Needs no model. */
+  value_flag: boolean;
+  /**
+   * The one selection verified profitable on a season never used to choose it:
+   * top tier, under side, one pick per player-game. +7.1% per unit with a 95%
+   * interval of [+1.6%, +13.2%].
+   */
+  best_bet: boolean;
+  /**
+   * The other books pricing this same prop.
+   *
+   * Deduplication happens in the API so the counts match the rows, so the
+   * alternates arrive with the row rather than being reassembled in the
+   * browser.
+   */
+  alts: Array<{
+    id: number;
+    bookmaker_key: string;
+    bookmaker_title: string | null;
+    line: number | null;
+    price_american: number | null;
+  }>;
 };
 
 export type EdgesResponse = {
@@ -132,10 +164,20 @@ export type EdgesResponse = {
   edges: PropEdge[];
 };
 
+/** How much of the upcoming slate actually has posted prices. */
+export type EdgeCoverage = {
+  games_upcoming: number;
+  games_priced: number;
+  markets_priced: number;
+};
+
 export type EdgesSummary = {
   ok: boolean;
   by_market: { market_code: string; count: number; avg_abs_edge: number }[];
   by_tier: Partial<Record<EdgeTier, number>>;
+  /** Count of best bets across the whole board, not just the loaded page. */
+  best_bets: number;
+  coverage: EdgeCoverage | null;
   last_updated: string | null;
 };
 
@@ -260,6 +302,9 @@ export async function fetchEdges(args?: {
   search?: string | null;
   sort?: string;
   order?: "asc" | "desc";
+  best_bets_only?: boolean;
+  /** Exact tier, unlike min_tier which is "and up". */
+  tier?: EdgeTier | null;
   limit?: number;
   offset?: number;
 }): Promise<EdgesResponse> {
@@ -268,7 +313,9 @@ export async function fetchEdges(args?: {
     min_tier: args?.min_tier ?? undefined,
     side: args?.side ?? undefined,
     search: args?.search ?? undefined,
-    sort: args?.sort ?? "edge",
+    sort: args?.sort ?? "featured",
+    best_bets_only: args?.best_bets_only ? true : undefined,
+    tier: args?.tier ?? undefined,
     order: args?.order ?? "desc",
     limit: args?.limit ?? 50,
     offset: args?.offset ?? 0,
@@ -329,5 +376,194 @@ export async function fetchEdgeHistory(
 ): Promise<EdgeHistory> {
   return http<EdgeHistory>(
     `${getApiBase()}/players/${playerId}/edge_history?limit=${limit}`,
+  );
+}
+
+/** A projection for one player in one market for one upcoming game. */
+export type Projection = {
+  player_id: string;
+  player_name: string;
+  position: string | null;
+  team: string | null;
+  opponent: string | null;
+  game_date: string | null;
+  market_code: string;
+  projection: number;
+  p10: number | null;
+  p25: number | null;
+  p50: number | null;
+  p75: number | null;
+  p90: number | null;
+  model_name: string | null;
+  depth_rank: number | null;
+  is_starter: boolean | null;
+  app_player_id: number | null;
+  headshot: string | null;
+};
+
+export type ProjectionsResponse = {
+  ok: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  projections: Projection[];
+};
+
+/**
+ * Projections for every eligible player with an upcoming game.
+ *
+ * Backend: GET /projections. Unlike /edges this does not require a sportsbook
+ * line to exist, so it covers the whole slate rather than the handful of
+ * players a book happens to have priced.
+ */
+export async function fetchProjections(args?: {
+  market_code?: string | null;
+  position?: string | null;
+  team?: string | null;
+  search?: string | null;
+  starters_only?: boolean;
+  sort?: string;
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}): Promise<ProjectionsResponse> {
+  const url = `${getApiBase()}/projections?${qs({
+    market_code: args?.market_code ?? undefined,
+    position: args?.position ?? undefined,
+    team: args?.team ?? undefined,
+    search: args?.search ?? undefined,
+    starters_only: args?.starters_only ?? undefined,
+    sort: args?.sort ?? "projection",
+    order: args?.order ?? "desc",
+    limit: args?.limit ?? 100,
+    offset: args?.offset ?? 0,
+  })}`;
+  return http<ProjectionsResponse>(url);
+}
+
+/** Every upcoming projection for one player, across all markets. */
+export async function fetchPlayerProjections(
+  playerId: number,
+): Promise<{ ok: boolean; projections: Projection[] }> {
+  return http(`${getApiBase()}/players/${playerId}/projections`);
+}
+
+/* =========================
+   Track record
+   ========================= */
+
+/**
+ * Where a graded pick came from.
+ *
+ * `live` picks were published by the edge builder before kickoff. `backtest`
+ * picks were reconstructed by `backfill_track_record.py` using models refit on
+ * strictly earlier seasons. They are different claims, so the UI never merges
+ * them without saying which it is showing.
+ */
+export type RecordSource = "all" | "live" | "backtest";
+
+export type SeasonRecord = {
+  season: number;
+  source: string;
+  picks: number;
+  players: number;
+  hit_rate: number | null;
+  model_predicted: number | null;
+  avg_ev: number | null;
+  units: number | null;
+  roi: number | null;
+};
+
+export type MarketRecord = {
+  market_code: string;
+  picks: number;
+  hit_rate: number | null;
+  model_predicted: number | null;
+  units: number | null;
+  roi: number | null;
+};
+
+export type TierRecord = {
+  edge_tier: string;
+  picks: number;
+  hit_rate: number | null;
+  model_predicted: number | null;
+  units: number | null;
+  roi: number | null;
+};
+
+export type LeaderRow = {
+  player_id: string;
+  player_name: string;
+  app_player_id: number | null;
+  position: string | null;
+  team: string | null;
+  headshot: string | null;
+  picks: number;
+  hit_rate: number | null;
+  units: number | null;
+  roi: number | null;
+};
+
+export type CalibrationBucket = {
+  bucket: number;
+  picks: number;
+  predicted: number;
+  actual: number;
+};
+
+export async function fetchSeasonRecord(source: RecordSource = "all") {
+  return http<{ ok: boolean; seasons: SeasonRecord[] }>(
+    `${API_BASE}/record/seasons?${qs({ source })}`,
+  );
+}
+
+export async function fetchMarketRecord(
+  season?: number | null,
+  source: RecordSource = "all",
+) {
+  return http<{ ok: boolean; markets: MarketRecord[] }>(
+    `${API_BASE}/record/by_market?${qs({ season, source })}`,
+  );
+}
+
+export async function fetchTierRecord(
+  season?: number | null,
+  source: RecordSource = "all",
+) {
+  return http<{ ok: boolean; tiers: TierRecord[] }>(
+    `${API_BASE}/record/by_tier?${qs({ season, source })}`,
+  );
+}
+
+export async function fetchLeaders(args?: {
+  season?: number | null;
+  source?: RecordSource;
+  direction?: "best" | "worst";
+  min_picks?: number;
+  limit?: number;
+}) {
+  return http<{
+    ok: boolean;
+    direction: string;
+    min_picks: number;
+    leaders: LeaderRow[];
+  }>(
+    `${API_BASE}/record/leaders?${qs({
+      season: args?.season ?? null,
+      source: args?.source ?? "all",
+      direction: args?.direction ?? "best",
+      min_picks: args?.min_picks ?? 20,
+      limit: args?.limit ?? 10,
+    })}`,
+  );
+}
+
+export async function fetchCalibration(
+  season?: number | null,
+  source: RecordSource = "all",
+) {
+  return http<{ ok: boolean; buckets: CalibrationBucket[] }>(
+    `${API_BASE}/record/calibration?${qs({ season, source })}`,
   );
 }
