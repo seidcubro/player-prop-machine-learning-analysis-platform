@@ -1,15 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <!-- PropSignal favicon: dark rounded tile, waveform + beam, high contrast -->
+  <!--
+    PropSignal mark: a broken ring with an ECG waveform running through it.
+
+    The ring opens at exactly 0 and 180 degrees, which is where the horizontal
+    waveform crosses it, so the signal reads as passing through rather than
+    sitting on top, and the two gaps stay balanced. Two arcs, lower and upper,
+    each spanning 152 degrees.
+
+    Cyan to violet, never green: green means "over" or "won" in the product, and
+    a logo has no business borrowing a semantic colour.
+  -->
   <defs>
-    <linearGradient id="beam" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0%" stop-color="#6ef2a6" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#6ef2a6" stop-opacity="0"/>
+    <linearGradient id="ps" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="55%" stop-color="#4d7cfe"/>
+      <stop offset="100%" stop-color="#a855f7"/>
     </linearGradient>
   </defs>
-  <rect width="100" height="100" rx="22" fill="#0b0f0d"/>
-  <polygon points="60,36 96,6 74,44" fill="url(#beam)"/>
-  <circle cx="50" cy="58" r="32" fill="none" stroke="#2aa866" stroke-width="6"
-          stroke-linecap="round" stroke-dasharray="132 15 36 15" stroke-dashoffset="104"/>
-  <path d="M 8 58 L 30 58 L 38 38 L 46 74 L 54 30 L 62 72 L 68 50 L 72 58 L 92 58"
-        fill="none" stroke="#4ade80" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect width="100" height="100" rx="22" fill="#06080f"/>
+  <g transform="translate(50 54) scale(0.84) translate(-50 -56)"
+     fill="none" stroke="url(#ps)" stroke-linecap="round">
+    <path d="M 84.93 64.71 A 36 36 0 0 1 15.07 64.71" stroke-width="5"/>
+    <path d="M 15.07 47.29 A 36 36 0 0 1 84.93 47.29" stroke-width="5"/>
+    <path d="M 4 56 L 30 56 L 38 34 L 46 74 L 54 24 L 62 70 L 68 48 L 72 56 L 96 56"
+          stroke-width="5.5" stroke-linejoin="round"/>
+  </g>
 </svg>

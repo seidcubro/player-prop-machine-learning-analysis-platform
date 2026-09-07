@@ -3,8 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Windows and a few crawlers still reach for the .ico before the SVG. -->
+    <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b0f0d" />
+    <meta name="theme-color" content="#06080f" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,9 +16,28 @@
     />
     <meta
       name="description"
-      content="PropSignal — compare sportsbook player prop lines against machine-learning projections and find the edge."
+      content="Compare sportsbook player prop lines against machine-learning projections and find the edge."
     />
-    <title>PropSignal — Bet the signal, not the noise</title>
+    <title>PropSignal | Bet the signal, not the noise</title>
+
+    <!-- Link previews. Without these a shared link renders as a bare URL, which
+         is the difference between looking like a product and looking like a
+         localhost demo someone pasted into a chat. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PropSignal" />
+    <meta property="og:title" content="PropSignal" />
+    <meta
+      property="og:description"
+      content="NFL player prop projections from a machine-learning model, priced against real sportsbook lines."
+    />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PropSignal" />
+    <meta
+      name="twitter:description"
+      content="NFL player prop projections from a machine-learning model, priced against real sportsbook lines."
+    />
+    <meta name="twitter:image" content="/og-image.png" />
   </head>
   <body>
     <div id="root"></div>

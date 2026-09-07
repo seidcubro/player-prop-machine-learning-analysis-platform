@@ -1,73 +1,49 @@
-# React + TypeScript + Vite
+# PropSignal web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite. This is the frontend only. The projections, edges and
+player data all come from the FastAPI service in `services/api`.
 
-Currently, two official plugins are available:
+## Running it
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+The API has to be up first:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+docker compose up -d api postgres
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Then:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
+
+Vite proxies `/api` to `http://localhost:8000` in dev, so nothing needs
+configuring locally.
+
+## Pages
+
+| route | what it shows |
+|---|---|
+| `/` | Edges. Props where the model and the book disagree, ranked by expected value against the offered price. |
+| `/projections` | Every skill player and QB with a game this week, whether or not a book has posted a line. This is the actual output of the model. |
+| `/players` | Search. |
+| `/players/:id` | One player's history, form and projections. |
+
+## Talking to a deployed API
+
+`VITE_API_BASE` overrides the default. It's read at build time, not runtime, so
+changing it needs a rebuild:
+
+```bash
+VITE_API_BASE=https://api.example.com/api/v1 npm run build
+```
+
+The API also has to allow the browser origin, or every request is blocked by
+CORS and the page comes up empty. See `WEB_ORIGINS` in `docs/DEPLOYMENT.md`.
+
+## Conventions
+
+All HTTP goes through `src/api.ts`. Don't build URLs in components: the base URL,
+query strings and error handling live in one place so there's one thing to change
+when the API moves.
