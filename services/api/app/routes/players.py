@@ -337,3 +337,108 @@ def player_edge_history(
         },
         "history": [dict(r) for r in rows],
     }
+
+
+@router.get("/projections")
+def list_projections(
+    market_code: str | None = Query(None, description="Filter to one market"),
+    position: str | None = Query(None, description="QB, RB, WR, TE or FB"),
+    team: str | None = Query(None),
+    search: str | None = Query(None, description="Player name, case insensitive"),
+    starters_only: bool = Query(False, description="Depth chart rank 1 only"),
+    sort: str = Query("projection"),
+    order: str = Query("desc"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Projections for every eligible player with an upcoming game.
+
+    This is the core output of the platform. Unlike `/edges`, it does not depend
+    on a sportsbook having posted a line: every skill player and quarterback on a
+    current depth chart gets a number for every market their position can
+    produce, with the predicted distribution attached.
+    """
+    sorts = {
+        "projection": "projection",
+        "player_name": "player_name",
+        "game_date": "game_date",
+        "depth_rank": "depth_rank",
+    }
+    if sort not in sorts:
+        raise HTTPException(status_code=400, detail=f"Invalid sort key: {sort}")
+    if order not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail=f"Invalid order: {order}")
+
+    where = ["1=1"]
+    params: dict = {"limit": limit, "offset": offset}
+    if market_code:
+        where.append("market_code = :market_code")
+        params["market_code"] = market_code
+    if position:
+        where.append("position = :position")
+        params["position"] = position.upper()
+    if team:
+        where.append("team = :team")
+        params["team"] = team.upper()
+    if search and search.strip():
+        where.append("player_name ILIKE :search")
+        params["search"] = f"%{search.strip()}%"
+    if starters_only:
+        where.append("depth_rank <= 1")
+
+    where_sql = " AND ".join(where)
+    order_sql = f"{sorts[sort]} {'ASC' if order == 'asc' else 'DESC'} NULLS LAST"
+
+    total = db.execute(
+        text(f"SELECT COUNT(*) FROM player_projections WHERE {where_sql}"), params
+    ).scalar_one()
+
+    rows = db.execute(
+        text(
+            f"""
+            SELECT pr.player_id, pr.player_name, pr.position, pr.team, pr.opponent,
+                   pr.game_date, pr.market_code, pr.projection,
+                   pr.p10, pr.p25, pr.p50, pr.p75, pr.p90,
+                   pr.model_name, pr.depth_rank, pr.is_starter,
+                   p.id AS app_player_id, p.headshot
+            FROM player_projections pr
+            LEFT JOIN players p ON p.external_id = pr.player_id
+            WHERE {where_sql}
+            ORDER BY {order_sql}
+            LIMIT :limit OFFSET :offset
+            """
+        ),
+        params,
+    ).mappings().all()
+
+    return {
+        "ok": True,
+        "total": int(total),
+        "limit": limit,
+        "offset": offset,
+        "projections": [dict(r) for r in rows],
+    }
+
+
+@router.get("/players/{player_id}/projections")
+def player_projections(player_id: int, db: Session = Depends(get_db)):
+    """All upcoming projections for one player, across every market."""
+    player = _get_player_row(db, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="player not found")
+
+    rows = db.execute(
+        text(
+            """
+            SELECT market_code, game_date, opponent, projection,
+                   p10, p25, p50, p75, p90, model_name, depth_rank
+            FROM player_projections
+            WHERE player_id = :ext
+            ORDER BY game_date, market_code
+            """
+        ),
+        {"ext": player["external_id"]},
+    ).mappings().all()
+
+    return {"ok": True, "player_id": player_id, "projections": [dict(r) for r in rows]}
