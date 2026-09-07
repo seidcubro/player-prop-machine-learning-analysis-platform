@@ -471,7 +471,66 @@ def load_stale_role_factors(artifact_dir: Path) -> dict:
     return factors
 
 
-def prob_over_from_quantiles(qpreds: dict, line: float) -> float:
+def load_probability_calibrator(artifact_dir: Path):
+    """The final isotonic correction, fitted on graded results.
+
+    The quantile bundles already carry their own calibration, and it is not
+    enough: measured across 6,301 graded picks the site still claimed 65.6% and
+    hit 51.5%. That fourteen-point gap is not merely a wrong number on screen,
+    because the EV filter subtracts the break-even from this probability. An
+    inflated P inflates EV by the same amount, so "EV > 10%" was really
+    selecting bets at roughly -4% EV -- a losing filter built out of a model
+    that does rank correctly (AUC 0.547).
+
+    Fitted out of sample on 2023-24 and applied to 2025, this takes the mean
+    probability from 0.654 to 0.503 against an actual 0.516, and Brier from
+    0.2706 to 0.2511.
+    """
+    path = artifact_dir / "probability_calibrator.joblib"
+    if not path.exists():
+        print("  no probability calibrator found; probabilities ship uncorrected")
+        return None
+    bundle = joblib.load(path)
+    print(f"  probability calibrator from {path.name} "
+          f"({bundle.get('fitted_on', 0)} graded picks)")
+    return bundle
+
+
+def calibrate_probability(bundle, market_code: str, p: float) -> float:
+    """Apply the market's calibrator, falling back to the pooled one.
+
+    A market with too little graded history has no curve of its own, and the
+    pooled correction is far closer to right than no correction at all.
+    """
+    if not bundle:
+        return p
+    models = bundle.get("models") or {}
+    ir = models.get(market_code) or models.get("__pooled__")
+    if ir is None:
+        return p
+    out = float(ir.predict(np.asarray([p], dtype=float))[0])
+    return float(min(max(out, 0.01), 0.99))
+
+
+def implied_prob(price) -> float:
+    """Break-even win rate implied by an American price, vig included.
+
+    This is the number a probability has to beat before a bet is worth making.
+    Comparing against 0.5 instead treats a -130 line and a +130 line as the same
+    proposition, which they are emphatically not.
+    """
+    if price is None or (isinstance(price, float) and math.isnan(price)):
+        return float("nan")
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return float("nan")
+    if p == 0:
+        return float("nan")
+    return (-p) / ((-p) + 100.0) if p < 0 else 100.0 / (p + 100.0)
+
+
+def prob_over_from_quantiles(qpreds: dict, line: float, calibration=None) -> float:
     """P(outcome > line), interpolated from predicted quantiles.
 
     The fitted quantiles are CDF points, so interpolating the level at `line`
@@ -480,11 +539,86 @@ def prob_over_from_quantiles(qpreds: dict, line: float) -> float:
     non-monotonic. Clipped away from 0/1 -- no prop is ever a certainty, and a
     sportsbook line sitting outside the whole predicted range still should not
     read as 100%.
+
+    `calibration` is the probability-integral-transform map that
+    `train_quantiles.py` fits on the training rows. Without it the raw CDF is
+    biased the same way in every market: the low quantiles come out too high, so
+    too much mass sits below the line and P(over) reads low. Measured on the
+    2025 holdout the raw q10 covered 25-31% of outcomes instead of 10%. Applying
+    the map is what moved the held-out EV strategy from break-even to a 95%
+    interval clear of zero, so it is not optional when one is present.
     """
     levels = sorted(qpreds.keys())
     values = sorted(qpreds[q] for q in levels)
     p_under = float(np.interp(line, values, levels))
+    if calibration:
+        p_under = float(np.interp(p_under, calibration["grid"],
+                                  calibration["level"]))
     return float(min(max(1.0 - p_under, 0.02), 0.98))
+
+
+# Markets where the outcome is a small integer.
+#
+# Quantile regression is the wrong tool for these and the failure is not subtle.
+# Matthew Stafford, Week 1: last ten games 3, 0, 3, 4, 2, 3, 2, 3, 2, 3, and the
+# point model projects a rate of 2.61 which matches. The quantile CDF then put
+# P(under 1.5) at 0.53 and the board recommended the under. A Poisson using the
+# model's own 2.61 rate puts it at 0.265.
+#
+# That is not a question of which method scores better, it is a contradiction
+# inside our own output: no distribution over non-negative integers can have a
+# mean of 2.61 and a median of 1. Touchdowns run 0 to 4 or 5, the population
+# median is 1, and separately-fitted conditional quantiles mostly reproduce the
+# population shape instead of tracking a particular quarterback's rate.
+#
+# Honest caveat: on the graded picks the two methods are within noise of each
+# other, because the odds history contains no pick above a 2.0 projected rate
+# and so cannot adjudicate the case that prompted this. The argument for Poisson
+# is that it is guaranteed consistent with the point model, and the point model
+# is the validated one (pass_td holdout bias -1.5%, R2 0.167).
+COUNT_MARKETS = {"pass_td", "rush_td", "rec_td", "any_td"}
+
+
+def count_distribution(rate: float, line: float) -> tuple[float, dict]:
+    """P(over) and a quantile set from a Poisson with the given rate.
+
+    Book lines on these markets are half-integers, so `floor(line)` is the exact
+    integer threshold and the survival function answers directly. No continuity
+    correction, and no push case.
+    """
+    from scipy.stats import poisson as _poisson
+
+    mu = max(float(rate), 1e-6)
+    p_over = float(_poisson.sf(math.floor(float(line)), mu))
+    qs = {q: float(_poisson.ppf(q, mu)) for q in (0.10, 0.25, 0.50, 0.75, 0.90)}
+    return min(max(p_over, 0.02), 0.98), qs
+
+
+def calibrated_quantiles(qpreds: dict, calibration=None) -> dict:
+    """Re-read the fitted quantiles at the levels that make them honest.
+
+    The same bias that makes P(over) wrong makes the displayed range wrong, and
+    the range is the part a person actually looks at. If the raw q10 really
+    covers 30% of outcomes, showing it as a 10th percentile is a lie about how
+    wide the distribution is.
+
+    Inverts the calibration map: for a target level t, find the raw level r with
+    calib(r) = t, then read the fitted quantile function there. With no map
+    present the inputs are returned untouched.
+    """
+    if not calibration:
+        return dict(qpreds)
+    levels = sorted(qpreds.keys())
+    values = sorted(float(qpreds[q]) for q in levels)
+    grid = np.asarray(calibration["grid"], dtype=float)
+    mapped = np.asarray(calibration["level"], dtype=float)
+    out = {}
+    for t in levels:
+        # np.interp needs an increasing x, and `mapped` is non-decreasing by
+        # construction, so the inverse lookup is well defined.
+        raw_level = float(np.interp(t, mapped, grid))
+        out[t] = float(np.interp(raw_level, levels, values))
+    return out
 
 
 def load_quantile_bundle(artifact_dir: Path, market_code: str, lookback: int):
@@ -565,9 +699,25 @@ def main():
               MAX(CASE WHEN LOWER(p.outcome_name) = 'under' THEN p.price_american END) AS under_price,
               MAX(p.last_update) AS source_last_update
             FROM odds_player_props p
-            LEFT JOIN odds_events e
+            -- An INNER join, not a LEFT one. A prop whose event row is missing
+            -- has no kickoff time, so there is no way to know whether the game
+            -- has already been played, and it used to sail through with a NULL
+            -- commence_time.
+            JOIN odds_events e
               ON p.provider_event_id = e.provider_event_id
             WHERE p.line IS NOT NULL
+              -- Only games that have not kicked off.
+              --
+              -- This table is supposed to hold the upcoming slate, and it does
+              -- not: 1,581 of its rows are from December 2023, left behind by
+              -- historical-odds work that wrote into the live table. Without
+              -- this filter the dashboard published edges on games from two
+              -- seasons ago, including a 98% "under 11.5 rush attempts" on a
+              -- back whose 2023 role the model was reading from a stale window.
+              -- Cleaning the table is worth doing separately; the builder
+              -- should never have been able to price a finished game either
+              -- way.
+              AND e.commence_time > NOW()
             GROUP BY
               p.provider_event_id,
               e.commence_time,
@@ -637,6 +787,7 @@ def main():
     odds["away_team_norm"] = odds["away_team"].map(normalize_team)
 
 
+    prob_cal = load_probability_calibrator(artifact_dir)
     ctx = load_current_context(engine)
     stale_factors = load_stale_role_factors(artifact_dir)
 
@@ -831,8 +982,27 @@ def main():
                 q: max(0.0, float(qm.predict(x)[0])) * stale_factor
                 for q, qm in quant["models"].items()
             }
-            p_over = float(prob_over_from_quantiles(qp, line_value))
+            p_over = float(prob_over_from_quantiles(
+                qp, line_value, quant.get("calibration")))
             p_under = 1.0 - p_over
+            # The median, calibrated the same way the probability is.
+            #
+            # The side is chosen from the distribution, so the number shown
+            # beside it has to come from the same distribution or the two
+            # contradict each other. 59 of 283 graded picks read "model 75.6,
+            # line 66.5, pick UNDER", which looks like a bug and is really the
+            # mean of a right-skewed variable sitting well above its median.
+            # For receiving yards the mean runs 25-35% above the median, so
+            # showing the mean next to a median-based pick is just wrong.
+            if market_code in COUNT_MARKETS:
+                # Derive both the probability and the median from a
+                # distribution whose mean is the point projection by
+                # construction, so the two can never contradict each other.
+                p_over, cal_q = count_distribution(projection, line_value)
+                p_under = 1.0 - p_over
+            else:
+                cal_q = calibrated_quantiles(qp, quant.get("calibration"))
+            median_value = float(cal_q.get(0.50, projection))
         else:
             # Fallback for markets with no quantile bundle yet.
             std = float(frow.get("stddev", 0.0) or 0.0)
@@ -844,31 +1014,123 @@ def main():
             z = (line_value - projection) / std
             p_over = 1 - norm.cdf(z)
             p_under = norm.cdf(z)
+            # A Gaussian is symmetric, so its median is its mean. Nothing to
+            # correct, and nothing better available for this market.
+            median_value = projection
 
-        if p_over >= p_under:
+        # Pick the side by expected value against the actual price, not by
+        # which outcome is more likely.
+        #
+        # Taking the more likely side is not a strategy. On a -130 under the
+        # break-even is 56.5%, so a 52% under is the more likely outcome and
+        # still a losing bet, and roughly half the props on a slate are exactly
+        # that shape. Backtested on the held-out 2025 season with models refit
+        # on earlier seasons only, best of three books, bootstrapped by slate:
+        #
+        #   more-likely-side rule            -0.4% ROI
+        #   EV > 2%                          +1.1%
+        #   EV > 4%                          +2.0%
+        #   EV > 8%                          +2.7%  95% CI [+0.2%, +5.1%]
+        #   EV > 10%                         +4.1%  95% CI [+1.0%, +7.2%]
+        #
+        # Monotone all the way up, and the first result in this project whose
+        # interval clears zero. Tiers are cut on EV for that reason.
+        # Correct the probability before anything is decided from it. The side,
+        # the expected value and the tier all derive from this number, so
+        # calibrating afterwards would leave the filter selecting on the
+        # inflated value it was supposed to fix.
+        # Count markets skip this.
+        #
+        # The isotonic curve was fitted on probabilities that came off the
+        # quantile CDF. A Poisson survival probability is a different quantity
+        # produced a different way, and pushing it through a correction
+        # estimated for the other method would distort a number that is already
+        # consistent with the point model it came from.
+        if market_code not in COUNT_MARKETS:
+            p_over = calibrate_probability(prob_cal, market_code, float(p_over))
+            p_under = 1.0 - p_over
+
+        ev_over = float(p_over) - implied_prob(o["over_price"])
+        ev_under = float(p_under) - implied_prob(o["under_price"])
+
+        if ev_over >= ev_under:
             recommended_side = "over"
             win_prob = float(p_over)
             chosen_price = o["over_price"]
-            raw_edge = projection - line_value
+            expected_value = ev_over
+            # Measured from the median for the same reason it is displayed:
+            # an edge computed off the mean can point the opposite way to the
+            # pick it is sitting next to.
+            raw_edge = median_value - line_value
         else:
             recommended_side = "under"
             win_prob = float(p_under)
             chosen_price = o["under_price"]
-            raw_edge = line_value - projection
+            expected_value = ev_under
+            raw_edge = line_value - median_value
 
-        prob_edge = abs(win_prob - 0.5)
+        if not math.isfinite(expected_value):
+            continue
 
-        if prob_edge >= 0.20:
+        # Tiers re-cut for the calibrated probability.
+        #
+        # The old cuts (10/8/4/2) were chosen against the uninflated EV, so once
+        # the probability was corrected downward by roughly fourteen points they
+        # would have put almost nothing above "small". They were not working
+        # anyway: graded on 6,301 picks, elite returned +2.3% while strong lost
+        # 5.8% and medium lost 5.4%, which is not a ranking, it is noise wearing
+        # four labels.
+        #
+        # These come from the measured return by calibrated EV on the held-out
+        # 2025 season:
+        #
+        #   calibrated EV > 0%   n=1874   ROI +3.7%
+        #   calibrated EV > 2%   n=1221   ROI +5.6%
+        #   calibrated EV > 4%   n= 891   ROI +7.0%
+        #   calibrated EV > 6%   n= 325   ROI +6.0%
+        #
+        # The return stops improving past 4%, so "elite" starts there rather
+        # than chasing a higher cut on a thinner sample.
+        # The over side has to clear a much higher bar.
+        #
+        # Measured on graded picks with the seasons used to choose kept separate
+        # from the season used to verify, the under side is profitable and the
+        # over side is not:
+        #
+        #                       2023-24        2025 (verification)
+        #   unders only         +1.9%          +4.4%  CI [+1.8%, +7.2%]
+        #   overs only          -7.1%          -4.7%  CI [-10.3%, +1.4%]
+        #   board as published  -0.5%          +0.9%  CI [-1.7%, +4.0%]
+        #
+        # And no slice of the over side survives both periods. Elite overs lost
+        # 10.9% in 2023-24 and made 3.3% in 2025; strong overs did the reverse.
+        # Every market's overs are negative in 2025 except pass_td on 151 picks.
+        #
+        # This is the same asymmetry the whole project keeps running into: books
+        # shade props toward the over because that is what the public buys, so
+        # the over is where the price is worst and where our own errors cost the
+        # most.
+        #
+        # Overs are not hidden, because suppressing data is worse than labelling
+        # it. They are held to a threshold that reflects the fact that no
+        # profitable over configuration has been verified, so an over can only
+        # reach the top tiers when the model is far more emphatic than an under
+        # would need to be.
+        over = recommended_side == "over"
+        cuts = ((0.12, 0.09, 0.06, 0.03) if over else (0.06, 0.04, 0.02, 0.0))
+
+        if expected_value >= cuts[0]:
             tier = "elite"
-        elif prob_edge >= 0.15:
+        elif expected_value >= cuts[1]:
             tier = "strong"
-        elif prob_edge >= 0.10:
+        elif expected_value >= cuts[2]:
             tier = "medium"
-        elif prob_edge >= 0.05:
+        elif expected_value > cuts[3]:
             tier = "small"
         else:
             tier = "none"
 
+        # A bet the price already covers is not an edge, so it is not shown.
         if tier == "none":
             continue
         
@@ -888,8 +1150,10 @@ def main():
             "model_name": meta["model_name"],
             "model_r2": float(meta.get("r2", 0.0)),
             "projection": projection,
+            "projection_median": median_value,
             "raw_edge": raw_edge,
             "win_prob": win_prob,
+            "expected_value": expected_value,
             "recommended_side": recommended_side,
             "edge_tier": tier,
             "market_id": int(frow["market_id"]),
@@ -903,6 +1167,92 @@ def main():
         return
 
     out = pd.DataFrame(rows)
+
+    # Value flag: under on a top-quartile line, in the markets where the effect
+    # holds up across seasons.
+    #
+    # This is a STRUCTURAL flag, not a model signal, and after the walk-forward
+    # calibration result it is the only edge in this project still standing. The
+    # model contributes nothing on top of it: blind star-unders score 0.554
+    # against model-filtered 0.558.
+    #
+    # What the market is doing: props are a recreational market, the money buys
+    # overs, and the line gets pushed above the median until the over is a bad
+    # bet. Vig is symmetric by construction, so the gap between the two sides of
+    # the same market is shading. Measured blind, at best price, by season
+    # (eval_over_shade.py):
+    #
+    #             over     under
+    #   2023     -0.013   -0.034
+    #   2024     -0.098   +0.043
+    #   2025     -0.056   +0.005
+    #
+    # The over is negative in all three. That is the asymmetry, and it is the
+    # part I trust.
+    #
+    # Top-quartile unders at best price, by season: +5.4%, +10.4%, +2.6%,
+    # pooled +3.6% with a slate-clustered 95% interval of [+0.1%, +7.2%].
+    # Positive in three independent seasons and the pooled interval clears zero.
+    #
+    # Two honest caveats. The interval clears zero by a hair, and 2025 alone
+    # does not clear it. And the effect is shrinking every year (+10.4 -> +2.6),
+    # which is what a market getting sharper looks like, so this is worth
+    # re-measuring every season rather than trusting forever.
+    #
+    # Markets are whitelisted on the pooled three-season result at best price:
+    # rush_yds +6.5% [+1.2%, +11.8%], recs +4.9% [+0.6%, +9.2%],
+    # rush_att +8.0% [-0.7%, +15.9%] (kept on direction, n=159 is thin),
+    # rec_yds +2.7% [-1.4%, +7.5%] (kept, weakest of the four).
+    # pass_yds and pass_td are excluded: neither shows the effect.
+    # The verified selection, marked before the structural value flag below.
+    #
+    # This is the only configuration in the project with a bootstrapped interval
+    # that clears zero on a season never used to choose it: top tier, under
+    # side, one pick per player-game. Chosen on 2023-24, verified on 2025 at
+    # +7.1% per unit with a 95% interval of [+1.6%, +13.2%].
+    #
+    # Each condition was established on its own before being combined, so this
+    # is three known effects stacked rather than a filter tuned until the number
+    # looked good:
+    #
+    #   top tier      the tiers rank monotonically once the probability is
+    #                 calibrated, elite +4.7% down to small -4.5%
+    #   under side    the over side lost in both periods and no slice survived
+    #   one per game  71.5% of player-games carried 2+ picks, and receptions and
+    #                 receiving yards on the same player win and lose together
+    #
+    # Deliberately narrow. It marks a handful of rows a week, which is the point:
+    # a board of sixty picks is a research tool, and this is the part of it that
+    # has actually been shown to work.
+    out["best_bet"] = False
+    if len(out):
+        eligible = out[
+            (out["recommended_side"] == "under")
+            & (out["edge_tier"].isin(["elite", "strong"]))
+        ]
+        if len(eligible):
+            keep = (eligible.sort_values("expected_value", ascending=False)
+                            .drop_duplicates(subset=["player_name", "market_code"])
+                            .drop_duplicates(subset=["player_name",
+                                                     "commence_time"]))
+            out.loc[keep.index, "best_bet"] = True
+        print(f"best-bet flagged {int(out['best_bet'].sum())} of {len(out)} edges")
+
+    VALUE_MARKETS = {"recs", "rush_att", "rush_yds", "rec_yds"}
+    out["value_flag"] = False
+    if len(out):
+        for mc, grp in out.groupby("market_code"):
+            if mc not in VALUE_MARKETS or grp["line"].nunique() < 4:
+                continue
+            cut = grp["line"].quantile(0.75)
+            mask = (
+                (out["market_code"] == mc)
+                & (out["recommended_side"] == "under")
+                & (out["line"] >= cut)
+            )
+            out.loc[mask, "value_flag"] = True
+        print(f"value-flagged {int(out['value_flag'].sum())} of {len(out)} edges")
+
 
     with engine.begin() as conn:
         # prop_edge_results is intentionally NOT cascaded: the graded track
