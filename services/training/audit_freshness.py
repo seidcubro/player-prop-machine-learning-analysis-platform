@@ -16,6 +16,7 @@ Run after any pipeline change. Exit code is non-zero when a check fails, so it
 can gate a deploy.
 """
 
+import ast
 import json
 import os
 import re
@@ -28,19 +29,7 @@ from sqlalchemy import create_engine, text
 
 ARTIFACTS = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 
-# Sportsbook market key per internal market code. Mirrors
-# services/api/app/odds_market_map.py, which lives in a different service and is
-# not importable from here.
-ODDS_MARKET_KEYS = {
-    "pass_att": "player_pass_attempts",
-    "pass_completions": "player_pass_completions",
-    "pass_yds": "player_pass_yds",
-    "pass_td": "player_pass_tds",
-    "rush_att": "player_rush_attempts",
-    "rush_yds": "player_rush_yds",
-    "recs": "player_receptions",
-    "rec_yds": "player_reception_yds",
-}
+from odds_markets import MARKET_TO_ODDS as ODDS_MARKET_KEYS
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://{u}:{p}@{h}:{port}/{db}".format(
@@ -480,6 +469,52 @@ def check_live_odds_table(engine):
         ok(f"all {row['total']} rows are for upcoming games")
 
 
+def check_market_map_agreement():
+    """Do the two services still ask for the same markets?
+
+    The training side and the API side each hold a market map and neither can
+    import the other. When they drifted the live sync stopped requesting passing
+    yards, one of the largest markets on the board, and nothing failed: the edge
+    builder simply found no rows and published a shorter list. The whole class
+    of bug is silent by construction, so it needs an explicit check.
+    """
+    print("\n[9] Market map agreement between services")
+    api_path = Path("/opt/api_odds_market_map.py")
+    if not api_path.exists():
+        warn("API market map not mounted, cannot compare "
+             "(expected at /opt/api_odds_market_map.py)")
+        return
+
+    # Parsed rather than imported: the API package pulls in FastAPI and a
+    # settings module this container has no reason to install.
+    tree = ast.parse(api_path.read_text(encoding="utf-8"))
+    api_map = next(
+        (ast.literal_eval(n.value) for n in tree.body
+         if isinstance(n, ast.Assign)
+         and any(getattr(t, "id", None) == "ODDS_API_MARKET_MAP" for t in n.targets)),
+        None,
+    )
+    if api_map is None:
+        fail("could not find ODDS_API_MARKET_MAP in the API market map")
+        return
+
+    only_training = set(ODDS_MARKET_KEYS) - set(api_map)
+    only_api = set(api_map) - set(ODDS_MARKET_KEYS)
+    mismatched = {k for k in set(ODDS_MARKET_KEYS) & set(api_map)
+                  if ODDS_MARKET_KEYS[k] != api_map[k]}
+
+    if only_training:
+        fail(f"markets the models use but the sync never buys: "
+             f"{sorted(only_training)}")
+    if only_api:
+        fail(f"markets the sync buys but nothing here maps: {sorted(only_api)}")
+    for k in sorted(mismatched):
+        fail(f"market {k!r} maps to {ODDS_MARKET_KEYS[k]!r} in training and "
+             f"{api_map[k]!r} in the API")
+    if not (only_training or only_api or mismatched):
+        print(f"  OK: both services agree on {len(api_map)} markets")
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     print("=" * 62)
@@ -494,6 +529,7 @@ def main():
     check_projection_coverage(engine)
     check_quantile_calibration(engine)
     check_live_odds_table(engine)
+    check_market_map_agreement()
 
     print("\n" + "=" * 62)
     if failures:

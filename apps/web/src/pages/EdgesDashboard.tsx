@@ -17,6 +17,7 @@ import Glossary from "../components/Glossary";
 import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { fullDateTime, kickoff, price as fmtOdds } from "../lib/format";
+import { MARKET_ORDER, isYesNo, marketLabel } from "../lib/markets";
 import {
   fetchEdges,
   fetchEdgesSummary,
@@ -24,20 +25,6 @@ import {
   type EdgeTier,
   type PropEdge,
 } from "../api";
-
-const MARKET_LABELS: Record<string, string> = {
-  rec_yds: "Receiving Yards",
-  recs: "Receptions",
-  rec_td: "Receiving TDs",
-  rush_yds: "Rushing Yards",
-  rush_att: "Rush Attempts",
-  rush_td: "Rushing TDs",
-  pass_yds: "Passing Yards",
-  pass_att: "Pass Attempts",
-  pass_completions: "Completions",
-  pass_td: "Passing TDs",
-  any_td: "Anytime TD",
-};
 
 const TIERS: EdgeTier[] = ["elite", "strong", "medium", "small"];
 const PAGE_SIZE = 50;
@@ -208,7 +195,7 @@ export default function EdgesDashboard() {
   }, [market, minTier, side, debouncedSearch, bestOnly, exactTier]);
 
   const markets = useMemo(
-    () => summary?.by_market.map((m) => m.market_code) ?? Object.keys(MARKET_LABELS),
+    () => summary?.by_market.map((m) => m.market_code) ?? [...MARKET_ORDER],
     [summary],
   );
 
@@ -268,7 +255,9 @@ export default function EdgesDashboard() {
         <strong>Edge</strong> is how far that median clears the line{" "}
         <em>in the direction of the pick</em>, so green means the model&rsquo;s
         own number backs the bet and red means it does not and the bet rests on
-        the price alone. Both happen, and the difference is worth seeing.{" "}
+        the price alone. Both happen, and the difference is worth seeing.
+        Anytime touchdown settles yes or no rather than at a number, so it has
+        no median to compare and its edge reads n/a.{" "}
         <a href="/faq">How It Works</a>.
       </p>
 
@@ -360,7 +349,7 @@ export default function EdgesDashboard() {
           minWidth={196}
           options={[
             { value: "", label: "All markets" },
-            ...markets.map((m) => ({ value: m, label: MARKET_LABELS[m] ?? m })),
+            ...markets.map((m) => ({ value: m, label: marketLabel(m) })),
           ]}
         />
         <Select
@@ -459,7 +448,7 @@ export default function EdgesDashboard() {
                       </div>
                     </div>
                   </td>
-                  <td data-label="Market">{MARKET_LABELS[e.market_code] ?? e.market_code}</td>
+                  <td data-label="Market">{marketLabel(e.market_code)}</td>
                   <td data-label="Line" className="num">
                     {e.line ?? "-"}{" "}
                     <span className="matchup">({fmtOdds(e.price_american)})</span>
@@ -483,7 +472,9 @@ export default function EdgesDashboard() {
                       UNDER". The mean stays in the tooltip: it is the right
                       number for a projection, just not for a pick.
                     */}
-                    {(e.projection_median ?? e.projection).toFixed(1)}
+                    {isYesNo(e.market_code)
+                      ? e.projection.toFixed(2)
+                      : (e.projection_median ?? e.projection).toFixed(1)}
                   </td>
                   {/*
                     Show the real sign, not the side's sign.
@@ -499,15 +490,25 @@ export default function EdgesDashboard() {
                   */}
                   <td
                     data-label="Edge"
-                    className={`num ${e.raw_edge >= 0 ? "pos" : "neg"}`}
+                    className={`num ${
+                      isYesNo(e.market_code) ? "" : e.raw_edge >= 0 ? "pos" : "neg"
+                    }`}
                     title={
-                      e.raw_edge >= 0
-                        ? "The median clears the line in the direction of this pick."
-                        : "The median does not support this pick. It qualifies on price alone, so check the EV column."
+                      isYesNo(e.market_code)
+                        ? "A yes-or-no market has no median to clear the line, so the edge lives entirely in the EV column."
+                        : e.raw_edge >= 0
+                          ? "The median clears the line in the direction of this pick."
+                          : "The median does not support this pick. It qualifies on price alone, so check the EV column."
                     }
                   >
-                    {e.raw_edge > 0 ? "+" : e.raw_edge < 0 ? "−" : ""}
-                    {Math.abs(e.raw_edge).toFixed(1)}
+                    {isYesNo(e.market_code) ? (
+                      <span className="matchup">n/a</span>
+                    ) : (
+                      <>
+                        {e.raw_edge > 0 ? "+" : e.raw_edge < 0 ? "−" : ""}
+                        {Math.abs(e.raw_edge).toFixed(1)}
+                      </>
+                    )}
                   </td>
                   <td
                     data-label="EV"

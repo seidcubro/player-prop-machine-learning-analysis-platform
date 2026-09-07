@@ -14,19 +14,7 @@
 import { useEffect, useState } from "react";
 import Sparkline from "./Sparkline";
 import { fetchEdges, fetchPlayerGames, type PropEdge, type PlayerGame } from "../api";
-
-const MARKET_LABELS: Record<string, string> = {
-  rec_yds: "Receiving Yards",
-  recs: "Receptions",
-  rec_td: "Receiving TDs",
-  rush_yds: "Rushing Yards",
-  rush_att: "Rush Attempts",
-  rush_td: "Rushing TDs",
-  pass_yds: "Passing Yards",
-  pass_att: "Pass Attempts",
-  pass_completions: "Completions",
-  pass_td: "Passing TDs",
-};
+import { isYesNo, marketLabel } from "../lib/markets";
 
 function fmtPrice(p: number | null): string {
   if (p === null || p === undefined) return "-";
@@ -160,7 +148,7 @@ export default function PropCards({
               className={`ps-propcard ${over ? "over" : "under"}`}
             >
               <div className="market">
-                <h4>{MARKET_LABELS[market] ?? market}</h4>
+                <h4>{marketLabel(market)}</h4>
                 <span className={`tier tier-${top.edge_tier}`}>
                   {top.edge_tier}
                 </span>
@@ -181,9 +169,21 @@ export default function PropCards({
                 </div>
                 <div>
                   <div className="label">Edge</div>
-                  <div className={`value ${over ? "green" : "red"}`}>
-                    {top.raw_edge >= 0 ? "+" : ""}
-                    {fmtNum(top.raw_edge, market)}
+                  {/* A yes-or-no market has no median to clear the line, so the
+                      difference is meaningless here. See lib/markets.ts. */}
+                  <div
+                    className={`value ${
+                      isYesNo(market) ? "" : over ? "green" : "red"
+                    }`}
+                  >
+                    {isYesNo(market) ? (
+                      "n/a"
+                    ) : (
+                      <>
+                        {top.raw_edge >= 0 ? "+" : ""}
+                        {fmtNum(top.raw_edge, market)}
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

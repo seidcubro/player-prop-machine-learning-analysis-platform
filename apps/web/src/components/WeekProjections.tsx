@@ -15,20 +15,7 @@
 import { useEffect, useState } from "react";
 import { fetchPlayerProjections, type Projection } from "../api";
 import { fullDate as fmtDate } from "../lib/format";
-
-const MARKET_LABELS: Record<string, string> = {
-  rec_yds: "Receiving Yards",
-  recs: "Receptions",
-  rec_td: "Receiving TDs",
-  rush_yds: "Rushing Yards",
-  rush_att: "Rush Attempts",
-  rush_td: "Rushing TDs",
-  pass_yds: "Passing Yards",
-  pass_att: "Pass Attempts",
-  pass_completions: "Completions",
-  pass_td: "Passing TDs",
-  any_td: "Anytime TD",
-};
+import { marketLabel } from "../lib/markets";
 
 /** Counting stats read better with a decimal, yardage as whole numbers. */
 function fmt(v: number | null | undefined, market: string): string {
@@ -127,7 +114,7 @@ export default function WeekProjections({ playerId }: { playerId: number }) {
             style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}
           >
             <div className="ps-wp-label">
-              {MARKET_LABELS[r.market_code] ?? r.market_code}
+              {marketLabel(r.market_code)}
             </div>
             <div className="ps-wp-value">{fmt(r.projection, r.market_code)}</div>
             <Range p={r} />

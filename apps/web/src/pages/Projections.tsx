@@ -19,22 +19,10 @@ import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { shortDate as fmtDate } from "../lib/format";
 import { fetchProjections, type Projection } from "../api";
+import { MARKET_OPTIONS, marketLabel } from "../lib/markets";
 
 const PAGE_SIZE = 50;
 
-const MARKETS = [
-  { code: "rec_yds", label: "Receiving Yards" },
-  { code: "recs", label: "Receptions" },
-  { code: "rush_yds", label: "Rushing Yards" },
-  { code: "rush_att", label: "Rush Attempts" },
-  { code: "pass_yds", label: "Passing Yards" },
-  { code: "pass_att", label: "Pass Attempts" },
-  { code: "pass_completions", label: "Completions" },
-  { code: "pass_td", label: "Passing TDs" },
-  { code: "any_td", label: "Anytime TD" },
-  { code: "rush_td", label: "Rushing TDs" },
-  { code: "rec_td", label: "Receiving TDs" },
-];
 
 const POSITIONS = ["", "QB", "RB", "WR", "TE"];
 
@@ -123,8 +111,6 @@ export default function Projections() {
       });
   }, [market, position, debounced, startersOnly, page]);
 
-  const marketLabel =
-    MARKETS.find((m) => m.code === market)?.label ?? market;
 
   return (
     <>
@@ -150,7 +136,7 @@ export default function Projections() {
           value={market}
           onChange={setMarket}
           minWidth={200}
-          options={MARKETS.map((m) => ({ value: m.code, label: m.label }))}
+          options={MARKET_OPTIONS.map((m) => ({ value: m.code, label: m.label }))}
         />
         <Select
           label="Position"
@@ -184,7 +170,7 @@ export default function Projections() {
             <tr>
               <th scope="col">Player</th>
               <th scope="col">Game</th>
-              <th scope="col">{marketLabel}</th>
+              <th scope="col">{marketLabel(market)}</th>
               <th scope="col">Range (p10-p90)</th>
               <th scope="col">Depth</th>
             </tr>
@@ -221,7 +207,7 @@ export default function Projections() {
                   <div className="ps-gamedate">{fmtDate(r.game_date)}</div>
                   <div className="matchup">vs {r.opponent ?? "-"}</div>
                 </td>
-                <td data-label={marketLabel} className="num">
+                <td data-label={marketLabel(market)} className="num">
                   <strong>{fmt(r.projection, r.market_code)}</strong>
                 </td>
                 <td data-label="Range">

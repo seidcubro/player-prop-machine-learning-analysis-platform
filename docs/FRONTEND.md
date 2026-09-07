@@ -36,6 +36,12 @@ instead of echoing it.
 `Logo`, `Sparkline`, `PropCards`, `WeekProjections` and `TrackRecord` (the
 per-player one) are the rest.
 
+`lib/markets.ts` owns market codes, their names and their order. Six files each
+had their own copy and two of them had no entry for anytime touchdown, so those
+views would have printed a raw `any_td` the day that market went live. It also
+holds `isYesNo`, because anytime touchdown is priced as a single Yes and has no
+median to compare against a line.
+
 `lib/format.ts` owns every date, time and number. These were formatted inline in
 six files with six different option objects, so the same kickoff rendered three
 different ways. Times carry the zone, because a kickoff without one is ambiguous.
@@ -70,6 +76,13 @@ fixed ones leave, so an undeclared width collapses the column to nothing.
 **The mobile table is not a table.** Below 960px the element, its body and its
 colgroup all become blocks so the grid rows can fill the screen. Leaving it as
 `display: table` sized it to a 97px intrinsic width and truncated every name.
+
+**A missing market key is silent.** Nothing throws when a label is absent; the
+column just prints a code, or a filter quietly omits a market. That is why the
+map is in one file, and why `marketLabel` falls back to the raw code rather than
+to an empty string. `services/training/odds_markets.py` is the same idea on the
+other side, and `audit_freshness.py` check [9] fails the run if the two services
+disagree about which markets exist.
 
 **Deduplication is server-side.** The API returns one row per prop with the other
 books in `alts`. Doing it in the browser made the counts, the pagination and the

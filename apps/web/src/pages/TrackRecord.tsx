@@ -26,6 +26,7 @@ import { Link } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import Select from "../components/Select";
 import PageTitle from "../components/PageTitle";
+import { marketLabel } from "../lib/markets";
 import {
   fetchCalibration,
   fetchLeaders,
@@ -39,20 +40,6 @@ import {
   type SeasonRecord,
   type TierRecord,
 } from "../api";
-
-const MARKET_LABELS: Record<string, string> = {
-  rec_yds: "Receiving Yards",
-  recs: "Receptions",
-  rec_td: "Receiving TDs",
-  rush_yds: "Rushing Yards",
-  rush_att: "Rush Attempts",
-  rush_td: "Rushing TDs",
-  pass_yds: "Passing Yards",
-  pass_att: "Pass Attempts",
-  pass_completions: "Completions",
-  pass_td: "Passing TDs",
-  any_td: "Anytime TD",
-};
 
 const pct = (v: number | null | undefined, dp = 1) =>
   v === null || v === undefined ? "-" : `${(v * 100).toFixed(dp)}%`;
@@ -392,7 +379,7 @@ export default function TrackRecord() {
                   <tr key={m.market_code} className="ps-row-in"
                       style={{ animationDelay: `${Math.min(i, 10) * 26}ms` }}>
                     <td data-label="Market">
-                      {MARKET_LABELS[m.market_code] ?? m.market_code}
+                      {marketLabel(m.market_code)}
                     </td>
                     <td data-label="Picks" className="num">{m.picks.toLocaleString()}</td>
                     <td data-label="Claimed vs Actual">

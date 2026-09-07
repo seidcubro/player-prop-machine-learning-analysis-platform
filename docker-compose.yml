@@ -77,6 +77,11 @@ services:
       POSTGRES_USER: app
     volumes:
       - ./services/training/artifacts:/artifacts
+      # Read-only so audit_freshness.py can compare the API service's market map
+      # against this service's. The two cannot import each other, and when they
+      # drifted the sync quietly stopped buying a market nothing noticed was
+      # missing.
+      - ./services/api/app/odds_market_map.py:/opt/api_odds_market_map.py:ro
     depends_on:
       - postgres
 

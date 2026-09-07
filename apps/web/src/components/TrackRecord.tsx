@@ -13,19 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchEdgeHistory, type EdgeHistory } from "../api";
-
-const MARKET_LABELS: Record<string, string> = {
-  rec_yds: "Rec Yds",
-  recs: "Receptions",
-  rec_td: "Rec TD",
-  rush_yds: "Rush Yds",
-  rush_att: "Rush Att",
-  rush_td: "Rush TD",
-  pass_yds: "Pass Yds",
-  pass_att: "Pass Att",
-  pass_completions: "Completions",
-  pass_td: "Pass TD",
-};
+import { marketLabelShort } from "../lib/markets";
 
 function fmtDate(d: string | null): string {
   if (!d) return "-";
@@ -142,7 +130,7 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
                     </div>
                   )}
                 </td>
-                <td data-label="Market">{MARKET_LABELS[r.market_code] ?? r.market_code}</td>
+                <td data-label="Market">{marketLabelShort(r.market_code)}</td>
                 <td data-label="Line" className="num">
                   {r.line ?? "-"}
                 </td>
