@@ -515,6 +515,50 @@ def check_market_map_agreement():
         print(f"  OK: both services agree on {len(api_map)} markets")
 
 
+def check_projection_agreement(engine):
+    """The board and the projections page must show the same number.
+
+    Both are the same model on the same player for the same game, so any gap
+    means one of them fed the model different features. That is how a real bug
+    surfaced: the edge builder took the game's date from `commence_time`, which
+    is UTC, so every Thursday, Sunday and Monday night kickoff landed on the
+    following day. The date is the key into the scheduled-game context, so those
+    games missed the lookup and silently kept the stored row's opponent, venue
+    and Vegas numbers. Three or four games a week, invisible, for as long as the
+    context refresh had existed.
+
+    Nothing else caught it. The projections were right, the edges were wrong,
+    and the only symptom was two numbers that disagreed in the fourth decimal
+    place on a page nobody cross-references.
+    """
+    print("\n[10] Board and projections agree")
+    df = pd.read_sql(text("""
+        SELECT e.player_name, e.market_code, e.projection AS edge_projection,
+               p.projection AS page_projection
+        FROM (SELECT DISTINCT player_name, market_code, projection
+              FROM prop_edges) e
+        JOIN player_projections p
+          ON p.player_name = e.player_name AND p.market_code = e.market_code
+    """), engine)
+    if df.empty:
+        warn("no rows in common between prop_edges and player_projections")
+        return
+
+    gap = (df["edge_projection"] - df["page_projection"]).abs()
+    bad = df[gap > 0.001]
+    if len(bad):
+        worst = bad.assign(gap=gap).nlargest(3, "gap")
+        detail = ", ".join(
+            f"{r.player_name} {r.market_code} "
+            f"{r.edge_projection:.3f} vs {r.page_projection:.3f}"
+            for r in worst.itertuples()
+        )
+        fail(f"{len(bad)} of {len(df)} rows disagree between the board and the "
+             f"projections page: {detail}")
+    else:
+        print(f"  OK: all {len(df)} shared rows match to within 0.001")
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     print("=" * 62)
@@ -530,6 +574,7 @@ def main():
     check_quantile_calibration(engine)
     check_live_odds_table(engine)
     check_market_map_agreement()
+    check_projection_agreement(engine)
 
     print("\n" + "=" * 62)
     if failures:
