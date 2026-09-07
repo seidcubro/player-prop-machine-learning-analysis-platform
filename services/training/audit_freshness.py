@@ -27,6 +27,20 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 
 ARTIFACTS = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
+
+# Sportsbook market key per internal market code. Mirrors
+# services/api/app/odds_market_map.py, which lives in a different service and is
+# not importable from here.
+ODDS_MARKET_KEYS = {
+    "pass_att": "player_pass_attempts",
+    "pass_completions": "player_pass_completions",
+    "pass_yds": "player_pass_yds",
+    "pass_td": "player_pass_tds",
+    "rush_att": "player_rush_attempts",
+    "rush_yds": "player_rush_yds",
+    "recs": "player_receptions",
+    "rec_yds": "player_reception_yds",
+}
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://{u}:{p}@{h}:{port}/{db}".format(
@@ -300,6 +314,172 @@ def check_edges(engine):
             ok("no implausible win probabilities")
 
 
+def check_projection_coverage(engine):
+    """Are we projecting everyone we should be?
+
+    The platform silently shipped for weeks projecting only the 38 players a
+    sportsbook happened to price, out of ~1,000 skill players and QBs on current
+    depth charts, because the edge builder was driven by odds rather than by the
+    roster. Nothing failed; there was simply no number for most of the league.
+    """
+    print("\n[6] projection coverage")
+    with engine.connect() as c:
+        eligible = c.execute(text("""
+            SELECT count(DISTINCT p.id) FROM players p
+            WHERE p.position IN ('QB','RB','WR','TE','FB')
+              AND EXISTS (SELECT 1 FROM depth_charts d
+                          WHERE d.player_id = p.external_id
+                            AND d.season = (SELECT MAX(season) FROM depth_charts))
+        """)).scalar() or 0
+        upcoming_games = c.execute(text(
+            "SELECT count(*) FROM nfl_games WHERE game_date >= CURRENT_DATE "
+            "AND game_date < CURRENT_DATE + make_interval(days => 14)"
+        )).scalar() or 0
+        try:
+            projected = c.execute(text(
+                "SELECT count(DISTINCT player_id) FROM player_projections"
+            )).scalar() or 0
+            rows = c.execute(text("SELECT count(*) FROM player_projections")).scalar() or 0
+        except Exception:
+            fail("player_projections table missing (run build_projections.py)")
+            return
+
+    if not upcoming_games:
+        warn("no games in the next 14 days, nothing to project")
+        return
+    if projected == 0:
+        fail("no projections at all (run build_projections.py)")
+        return
+
+    # Not every rostered player has a game inside the window or enough history
+    # for a feature row, so this is a floor rather than an equality check.
+    ok(f"{projected} players projected, {rows} player-market rows")
+    if projected < 200:
+        fail(f"only {projected} players projected across {upcoming_games} games; "
+             "expected several hundred")
+    else:
+        ok(f"coverage looks sane against {eligible} rostered skill players/QBs")
+
+    with engine.connect() as c:
+        neg = c.execute(text(
+            "SELECT count(*) FROM player_projections WHERE projection < 0"
+        )).scalar() or 0
+        inverted = c.execute(text(
+            "SELECT count(*) FROM player_projections "
+            "WHERE p10 IS NOT NULL AND p90 IS NOT NULL AND p10 > p90"
+        )).scalar() or 0
+    if neg:
+        fail(f"{neg} negative projections")
+    else:
+        ok("no negative projections")
+    if inverted:
+        fail(f"{inverted} projections have p10 above p90")
+    else:
+        ok("prediction intervals are ordered")
+
+
+def check_quantile_calibration(engine):
+    """Do the published probabilities match what actually happened?
+
+    This check used to score quantile *coverage* and fail whenever two adjacent
+    quantiles reported the same number. That was a proxy, and measuring the
+    outcome directly showed the proxy was pointing at the wrong thing. For
+    pass_td the coverage check fired because q10 and q25 are identical, yet at
+    the 0.5 line the model claimed 70.0% and hit 69.4% across 36 picks: the flat
+    region of the CDF was doing no damage at all. The real problem was at the
+    1.5 line, where q10 and q25 are irrelevant and the model claimed 61.9%
+    against an actual 47.2% over 265 picks.
+
+    So this now measures the thing that matters: for every market with enough
+    graded picks, the gap between the win probability the site published and the
+    rate those picks actually won at. That is the number a user is implicitly
+    trusting, and it is the one worth gating on.
+
+    Coverage is still reported for markets with no graded history yet, since
+    something is better than nothing before the first results land.
+    """
+    print()
+    print("[7] probability calibration (published vs actual)")
+    with engine.connect() as c:
+        rows = list(c.execute(text("""
+            SELECT market_code,
+                   count(*) AS picks,
+                   avg(win_prob) AS claimed,
+                   avg(CASE WHEN hit THEN 1.0 ELSE 0 END) AS actual
+            FROM prop_edge_results
+            WHERE hit IS NOT NULL AND win_prob IS NOT NULL
+            GROUP BY market_code
+            HAVING count(*) >= 100
+            ORDER BY market_code
+        """)).mappings())
+
+    if not rows:
+        warn("no graded picks yet; cannot measure calibration")
+        return
+
+    worst = 0.0
+    for r in rows:
+        gap = float(r["actual"]) - float(r["claimed"])
+        worst = max(worst, abs(gap))
+        line = (f"{r['market_code']}: claimed {r['claimed']:.3f}, "
+                f"actual {r['actual']:.3f}, off by {gap:+.3f} "
+                f"on {r['picks']} picks")
+        # A published probability that is more than 15 points optimistic is not
+        # a probability, it is a sales pitch. Ten points is worth flagging.
+        if abs(gap) > 0.15:
+            fail(line)
+        elif abs(gap) > 0.10:
+            warn(line)
+        else:
+            ok(line)
+
+    if worst > 0.10:
+        warn("probabilities run optimistic across the board. Expected before a "
+             "season has been played, since no calibration can anticipate a "
+             "regime it has not seen; it should tighten as the weekly retrain "
+             "picks up current games.")
+
+
+def check_live_odds_table(engine):
+    """Is the "upcoming slate" table actually holding the upcoming slate?
+
+    It was not. `odds_player_props` is meant to be current lines only, and it
+    held 1,581 rows from December 2023 sitting beside 216 real ones, left behind
+    by historical-odds work that wrote into the live table. `build_prop_edges.py`
+    had no time filter, so the dashboard published 260 edges on games from two
+    seasons ago -- including a 98% confident under on a 2023 game.
+
+    The builder now refuses anything already kicked off, so this can no longer
+    reach the dashboard. This check is about the table itself: stale rows still
+    cost query time, still confuse anything that reads the table directly, and
+    their presence means something wrote where it should not have.
+    """
+    print()
+    print("[8] live odds table")
+    with engine.connect() as c:
+        row = c.execute(text("""
+            SELECT count(*) AS total,
+                   count(*) FILTER (WHERE e.commence_time < NOW()) AS past,
+                   count(*) FILTER (WHERE e.provider_event_id IS NULL) AS orphan,
+                   min(e.commence_time)::date AS oldest
+            FROM odds_player_props p
+            LEFT JOIN odds_events e ON e.provider_event_id = p.provider_event_id
+        """)).mappings().first()
+    if not row or not row["total"]:
+        warn("odds_player_props is empty; run the props sync")
+        return
+    if row["orphan"]:
+        fail(f"{row['orphan']} props reference an event row that does not exist")
+    else:
+        ok("every prop resolves to an event")
+    if row["past"]:
+        warn(f"{row['past']} of {row['total']} rows are for games already "
+             f"played, oldest {row['oldest']}. The edge builder ignores them, "
+             "but they do not belong in the live table.")
+    else:
+        ok(f"all {row['total']} rows are for upcoming games")
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     print("=" * 62)
@@ -311,6 +491,9 @@ def main():
     check_model_consistency(engine)
     check_data_freshness(engine)
     check_edges(engine)
+    check_projection_coverage(engine)
+    check_quantile_calibration(engine)
+    check_live_odds_table(engine)
 
     print("\n" + "=" * 62)
     if failures:
