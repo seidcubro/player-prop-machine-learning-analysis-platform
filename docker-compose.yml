@@ -30,6 +30,14 @@ services:
       ODDS_API_REGIONS: ${ODDS_API_REGIONS}
       ODDS_API_ODDS_FORMAT: ${ODDS_API_ODDS_FORMAT}
       ODDS_API_BOOKMAKERS: ${ODDS_API_BOOKMAKERS}
+      # Shared secret for the four POST endpoints that rewrite the database or
+      # spend Odds API credits. Unset means those endpoints return 503, which is
+      # the safe default; reads are unaffected. See services/api/app/admin_auth.py
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # Comma-separated browser origins allowed to call the API. Local Vite is
+      # assumed; add the deployed frontend's origin here.
+      WEB_ORIGINS: ${WEB_ORIGINS:-}
+      WEB_ORIGIN_REGEX: ${WEB_ORIGIN_REGEX:-}
     ports:
       - 8000:8000
     volumes:
