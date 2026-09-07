@@ -21,41 +21,89 @@ Postgres, FastAPI, scikit-learn, React, Docker.
 
 ## Does it work?
 
-No. Not yet, and I'd rather say that here than bury it.
+Depends what you ask it to do. The head-on version, project every player and bet
+wherever I disagree with the book, loses money. I trained on 2022 through 2024,
+ran the whole 2025 season blind, and graded 6,736 picks against real lines:
+51.5% hit rate against a 53.9% break-even, -4.3% ROI. Prop vig is heavier than
+the -110 textbook number, and my biggest disagreements with the line were my
+worst bets.
 
-I trained a model on 2022 through 2024, ran it on the entire 2025 season, and
-graded every pick against the real lines I pulled from the archive. 6,736 picks:
+Then I stopped grading and started dissecting, and the loss wasn't symmetric.
 
-| | |
+**My under picks beat their break-even in four of six markets. My over picks
+lost everywhere. And I was picking overs 60% of the time.**
+
+Two causes, stacked:
+
+1. **Books shade prop lines toward the over.** Blind unders hit above 50% raw in
+   every market, and the shade grows with the size of the name: raw under hit
+   rates on the top third of lines run 54-58%. Casual money bets stars to go
+   over, and the books lean into it. This is the classic square-bet pattern and
+   my data reproduces it cleanly.
+2. **My models predicted the mean. A line sits at the median.** Yardage stats
+   are right-skewed, so the mean is always above the median, and a
+   mean-predicting model hallucinates over-value on nearly every prop. My real
+   signal was being aimed at the structurally losing side.
+
+The proof there was signal underneath: my unders beat *blind* unders by 2 to 5
+points in every market. To say under, the model had to overcome its own upward
+bias first.
+
+So I rebuilt side selection and then spent as much effort trying to break the
+result as I did finding it. `stress_test_edge.py` is that attack, and it changed
+two of my conclusions.
+
+The first thing it killed was the model's role. Blind star-unders hit 55.4%.
+Model-filtered ones hit 55.8%. That 0.4 point difference is noise, so **the edge
+is structural, not predictive**. My models aren't what makes this work. Saying
+otherwise would have been the easiest thing in the world to get wrong, because I
+wanted the model to matter.
+
+The second was my significance claim. I originally computed standard errors per
+pick, which assumes 6,000 independent bets. They aren't independent, picks on the
+same slate share weather and game scripts. Bootstrapping by slate instead:
+
+| variant | edge | 95% CI |
+|---|---|---|
+| star unders, best price | +3.3% | [+0.2%, +6.1%] |
+| star unders, average price | +2.0% | [-1.0%, +4.8%] |
+| 2023/24 star unders, best price | +7.4% | [-0.4%, +14.2%] |
+
+It barely clears zero, and only when I take the best available price. At average
+prices it isn't significant at all. The independent-season check crosses zero on
+its own too, since it's only twelve slates. Line shopping isn't a bonus on top of
+this strategy, it's half of it.
+
+What survived is the mechanism, and it survived the test I trust most. Sorting by
+line size gives a clean gradient:
+
+| line tier | edge |
 |---|---|
-| hit rate | 51.5% |
-| break-even at the price offered | 53.9% |
-| edge | -2.4% |
-| ROI | -4.3% |
-| units | -292 |
+| top 25% | +3.3% |
+| top 50% | +2.4% |
+| bottom 50% | -1.3% |
+| bottom 25% | -3.1% |
 
-Every market came out negative or flat. rush_yds +0.2%, pass_td -0.1%,
-rush_att -1.5%, recs -2.5%, rec_yds -3.6%, pass_yds -5.7%.
+Data-mined patterns don't usually line up in a straight dose response like that.
+The bigger the name, the harder the public backs the over, the more the book
+shades it, the more the under is worth. Week to week, 13 of 20 slates were
+positive with a median slate edge of +4.3%.
 
-Three things I learned from that:
+It also concentrates in counting stats, which makes sense: receptions +7.6%,
+rush attempts +5.4%, rushing yards +2.2%, receiving yards +1.3%, and passing
+yards **-10.0%**, which is why that market is excluded. People bet their star to
+catch passes, not to fall short.
 
-**Prop vig is heavier than people assume.** Everyone quotes 52.4% as break-even
-because that's what -110 implies. The real number across these props was 53.9%.
-Any claim of edge has to clear that, not the textbook figure.
+So the dashboard flags unders on top-quartile lines in those four markets. Not
+because a model likes them, but because that's where the market's own bias is
+measurable. It's a plausible small edge, not a proven one, and I'm tracking
+closing line value going forward to find out which.
 
-**My biggest disagreements with the line are my worst bets.** Sorted by how far
-my projection sits from the line, the widest bucket hit 50.0% against a 53.1%
-break-even. That's backwards from how the dashboard tiers picks, which ranks
-"elite" by disagreement size. Three separate tests found the same thing.
-
-**Line shopping beats modeling.** Taking the best price across books instead of
-the average is worth +2.6% per unit staked. That's bigger than any model
-improvement I got out of this project, and the feature was already built.
-
-The model isn't useless. It beats a rolling five-game average, which is the
-baseline I set for it, and it lands closer to the result than the line does on
-46.5% of props (up from 43.8% when I was using the raw average). It just doesn't
-clear the vig.
+The general lesson cost me four failed experiments to learn: I couldn't
+out-predict the market, and neither could a residual model given the market's
+own number. The edge wasn't in better projections. It was in market structure,
+picking the right side of a known public bias, filtering with a median instead
+of a mean, and always taking the best price.
 
 ## Models
 
@@ -255,6 +303,39 @@ curl -X POST "http://localhost:8000/api/v1/odds/sync/player_props?days_ahead=8"
 ```
 
 Model artifacts aren't in git. Regenerate them with the refresh script.
+
+## In season
+
+Two runs a week:
+
+```bash
+sh scripts/weekly_update.sh
+```
+
+Tuesday. Ingests last week's results, rebuilds features, retrains, rebuilds
+edges, grades whatever has been played, and ends with the freshness audit.
+Retraining weekly is on purpose. Every week adds real games and the record is
+the whole point.
+
+```bash
+sh scripts/weekly_update.sh --close-only
+```
+
+Sunday, about an hour before the first kickoff. Captures the closing lines into
+`odds_snapshots`.
+
+The Sunday run matters more than it looks. A closing line I don't capture is gone
+unless I pay the archive rate for it later, and the archive costs about 840
+credits a slate against roughly 130 for capturing it live. Six times cheaper to
+just take the snapshot.
+
+Closing line value is why I bother. Win/loss over a few hundred bets is mostly
+variance at a 53% break-even, but whether I consistently take numbers the market
+later moves toward settles the question much faster.
+
+```bash
+docker compose run --rm training python eval_clv.py
+```
 
 ## What I'd do next
 

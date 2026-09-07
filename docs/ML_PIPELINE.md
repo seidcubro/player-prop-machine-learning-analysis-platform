@@ -97,6 +97,60 @@ Resolves the feature space from `active_models`, not from an env var. An unset
 `MODEL_NAME` used to fall back to a legacy model with a much smaller feature set,
 and the mismatch only surfaced later at inference.
 
+Two things about the fit are load-bearing and were both wrong at first.
+
+The calibration map is measured on a **held-out season**, not on cross-validated
+folds. `TimeSeriesSplit` puts its boundaries wherever the row count falls, which
+is mid-season, and a quantile model scored against its own era looks calibrated,
+so the map came back as the identity while the model covered 25 to 32% of
+outcomes below its own q10 on a fresh season.
+
+It is measured on the **priced population**, taken from three seasons of odds
+history rather than a snap-share proxy. The proxy excluded 43% of players who
+actually receive a rushing line, because committee backs are priced constantly,
+so the map was fitted on bell-cow backs and applied to everyone. rush_yds was
+claiming 73.4% against an actual 52.1%.
+
+Ships trained on all rows. The holdout exists to measure, not to cripple the
+artifact, so the models are refit on everything before being saved.
+
+### 5b. Probability calibration
+
+`fit_probability_calibrator.py` fits isotonic regression on graded results and
+`build_prop_edges.py` applies it before choosing a side.
+
+This exists because the quantile map was not enough: the published probability
+still ran 14 points high, and expected value is probability minus break-even, so
+an inflated probability inflated EV by the same amount and "EV > 10%" was really
+selecting bets at about -4% EV.
+
+Fitted on **P(over)**, not on the recommended side's probability. The latter is
+almost always above 0.5, so a curve fitted on it never sees the lower half of the
+range, and pushing a 0.2 through it produced a board of 89 unders out of 93.
+
+Isotonic rather than Platt because the error varies with the claimed probability
+instead of being a constant shift.
+
+### 5c. Count markets do not use quantiles
+
+`pass_td`, `rush_td`, `rec_td` and `any_td` derive P(over) and the median from a
+Poisson built on the point model's rate.
+
+Quantile regression on a 0-to-4 integer reproduces the population shape rather
+than a particular player's. Stafford's last ten games were 3, 0, 3, 4, 2, 3, 2,
+3, 2, 3 and the point model projected 2.61, which matches; the quantile CDF then
+put P(under 1.5) at 0.53 and the board recommended the under. A Poisson on 2.61
+puts it at 0.265.
+
+That is a contradiction inside our own output rather than a question of which
+method scores better: no distribution over non-negative integers has a mean of
+2.61 and a median of 1.
+
+Honest caveat: on graded picks the two are within noise, because the odds history
+contains no pick above a 2.0 projected rate and cannot adjudicate the case that
+prompted the change. The argument is internal consistency plus the fact that the
+point model is the validated one.
+
 ### 6. Evaluation
 
 `eval.py`. Time-ordered split, position filter from the database, bias check,

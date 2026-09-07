@@ -1,61 +1,88 @@
+# Frontend
 
-# Frontend (React)
+React + TypeScript + Vite in `apps/web`. See `apps/web/README.md` for running it
+and `docs/DEPLOYMENT.md` for shipping it.
 
-Location: `apps/web`
+## Pages
 
-## Current state
+All under one shell (`App.tsx`), which is a fixed left rail on desktop and a
+bottom bar below 960px. The rail moved off the top because these are dense data
+pages: a top bar costs about 70px of every screen forever, and a pill row does
+not scale past four items.
 
-Three routed pages under a shared shell (`App.tsx`: sticky navbar + `<Outlet/>`):
+| route | file | what it is |
+|---|---|---|
+| `/` | `EdgesDashboard.tsx` | Today's Signals. Sportsbook line against the model's number, ranked by expected value. |
+| `/projections` | `Projections.tsx` | Every eligible player with a game this week, priced or not. This is the model's actual output. |
+| `/record` | `TrackRecord.tsx` | How the picks have done, by season, with a calibration curve and leaderboards. |
+| `/faq` | `Faq.tsx` | How it works, in plain English and for data scientists. |
+| `/players`, `/players/:id` | `PlayersSearch.tsx`, `PlayerDetail.tsx` | Browse and profile. |
 
-- **`EdgesDashboard.tsx` (`/`, the core screen)**. Sportsbook line vs. model projection
-  vs. edge vs. win probability, per row. Summary stat cards (`GET /edges/summary`),
-  debounced player search, market/tier/side filters, sortable columns, pagination
-  (`GET /edges`). Desktop renders a dense table; below 760px the same table collapses
-  into stacked labeled cards via CSS only (`data-label` attributes).
-- `PlayersSearch.tsx` (`/players`) and `PlayerDetail.tsx` (`/players/:id`). The original
-  player browse/projection pages, now living under the shared shell.
+## Shared components
 
-## Brand / design system
+`Select` replaces every native `<select>`. The OS widget renders with its own
+chrome, which on a dark panel is a white popup in the system font, and no CSS on
+the element reaches the list it opens. This keeps the keyboard handling and ARIA
+roles a native select gives for free.
 
-PropSignal is dark-mode-native ("trading terminal for props"). All theming lives in
-`:root` custom properties in `src/index.css`, surfaces, text tiers, the signal palette
-(green = value/over, red = avoid/under), and edge-tier badge colors. A future mobile app
-or theme pass should only touch tokens, not components.
+`Pager` is the only pagination. Three pages had three of these and they
+disagreed about word order, separators and whether the buttons had arrows.
 
-The logo is an inline-SVG recreation of the brand mark (`src/components/Logo.tsx`:
-circle ring + "W" waveform + emitted beam) so it stays crisp at navbar/favicon sizes;
-`public/favicon.svg` is the flat high-contrast tile variant. The raster brand PNGs
-(from the branding session) are marketing assets and are not yet in the repo.
+`PageTitle` splits a heading into a plain lead and a gradient noun, the same
+shape as the wordmark. Gradienting a whole heading competes with the logo
+instead of echoing it.
 
-## Accessibility (maintain these when changing the UI)
+`Glossary` defines EV, break-even and the rest above the board. `Avatar`,
+`Logo`, `Sparkline`, `PropCards`, `WeekProjections` and `TrackRecord` (the
+per-player one) are the rest.
 
-- All text/background pairs meet WCAG AA; contrast ratios are annotated next to each
-  token in `index.css`.
-- `:focus-visible` outlines everywhere (restyle, never remove); sortable headers are
-  real `<button>`s with `aria-sort`/`aria-label`; nav uses `aria-current`; the table has
-  a visually-hidden `<caption>`; pager status is `aria-live`; decorative logo instances
-  are `aria-hidden`.
-- `prefers-reduced-motion` disables transitions.
+`lib/format.ts` owns every date, time and number. These were formatted inline in
+six files with six different option objects, so the same kickoff rendered three
+different ways. Times carry the zone, because a kickoff without one is ambiguous.
 
-## Dev
+## Design system
 
-```bash
-cd apps/web
-npm install
-npm run dev
-```
+Tokens live in `:root` in `src/index.css`. One rule matters more than the rest:
 
-## Dev
+**Colour carries meaning, or it is not used.** Green means over or won. Red means
+under or lost. Amber means the value pattern. Everything structural is blue,
+violet or slate. An earlier pass painted surfaces, borders, brand, logo and tiers
+all green, which meant green stopped saying anything and a winning row did not
+register.
 
-```bash
-cd apps/web
-npm install
-npm run dev
-```
+The brand ramp is cyan → blue → violet, matching the mark. There is no green in
+the logo for the same reason: a logo should not borrow a semantic colour.
 
-## Notes
+`scripts/build_brand.py` generates the whole asset pack (icons, favicon,
+avatars, banners, lockups) from one definition, so they cannot drift apart.
 
-If the UI appears out of date relative to backend capabilities:
-- ensure API routes and client functions align
-- confirm the API base URL and response shapes
-- consider regenerating TypeScript types from OpenAPI (future improvement)
+## Things that will break if you are not careful
+
+**Row heights.** The table pins rows at 84px. The identity cell stacks three
+lines beside a 42px avatar and the tier column can carry three chips, so both
+have fixed line-heights that add up to less than the row. Adding a fourth chip
+or a fourth line will push rows out of alignment.
+
+**Fixed table layout.** `.ps-table:has(colgroup)` is `table-layout: fixed` with a
+declared `min-width`. Under fixed layout an `auto` column only gets what the
+fixed ones leave, so an undeclared width collapses the column to nothing.
+
+**The mobile table is not a table.** Below 960px the element, its body and its
+colgroup all become blocks so the grid rows can fill the screen. Leaving it as
+`display: table` sized it to a 97px intrinsic width and truncated every name.
+
+**Deduplication is server-side.** The API returns one row per prop with the other
+books in `alts`. Doing it in the browser made the counts, the pagination and the
+rows describe different things.
+
+## Accessibility
+
+Maintain these when changing the UI:
+
+- Text and background pairs meet WCAG AA.
+- `:focus-visible` outlines everywhere. Restyle, never remove.
+- Sortable headers are real buttons with `aria-sort`. The custom `Select` is a
+  proper `listbox` with full keyboard control. Tables carry a visually hidden
+  `<caption>` and the pager is `aria-live`.
+- Decorative logo instances are `aria-hidden`.
+- `prefers-reduced-motion` disables every transition and animation.

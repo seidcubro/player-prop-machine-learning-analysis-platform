@@ -17,14 +17,32 @@ projection, with win probability, recommended side and tier.
 | param | default | what it does |
 |---|---|---|
 | `market_code` | | filter to one market |
-| `min_tier` | | small, medium, strong or elite |
+| `min_tier` | | small, medium, strong or elite, and everything above it |
+| `tier` | | exactly one tier, unlike `min_tier` |
 | `side` | | over or under |
+| `best_bets_only` | `false` | only the verified selection |
 | `search` | | player name, case insensitive |
 | `upcoming_only` | `true` | hide games that already kicked off |
-| `sort` | `edge` | edge, win_prob, line, projection, commence_time, player_name |
+| `sort` | `featured` | featured, best_bet, expected_value, edge, win_prob, line, projection, projection_median, commence_time, player_name |
 | `order` | `desc` | asc or desc |
 | `limit` | 50 | max 500 |
 | `offset` | 0 | |
+
+`min_tier` and `tier` mean different things on purpose. The dropdown wants "and
+above"; the stat cards want the one tier they name. Conflating them is what made
+a card reading "Strong 15" show 20 rows, because strong-and-above includes every
+elite signal too.
+
+`featured` is the default sort: biggest names first by `star_score`, expected
+value breaking ties inside that. Sorting purely by EV opened the board on a
+fourth-string back with the highest number on it, which is the wrong first
+impression. It is display ordering only and nothing in the modelling path reads
+it.
+
+**One row per prop.** Every book prices the same prop, so the API returns the
+strongest and puts the rest in `alts`. Deduplicating in the browser instead meant
+the count, the pagination and the visible rows described three different things,
+and a page boundary could land mid-prop.
 
 `upcoming_only` defaults to true because the dashboard is for deciding what to
 bet, not browsing finished slates. Pass false to look at history.
@@ -34,10 +52,46 @@ Player names aren't unique (there's a Josh Allen at QB for Buffalo and another a
 center for Tampa Bay), so resolution prefers a player whose position can actually
 produce that market's stat, then the one with more game history.
 
+Each row carries both projections. `projection` is the mean, which is what the
+point model predicts and the right number for a projection. `projection_median`
+is what belongs beside a pick: the side is chosen from the predicted
+distribution, and on a right-skewed market the mean sits 25 to 35% above the
+median, which produced rows reading "model 75.6, line 66.5, pick UNDER".
+
+`raw_edge` is signed relative to the pick. Positive means the median clears the
+line in the direction of the bet; negative means it does not and the bet rests on
+the price alone, which is legitimate and worth being able to see.
+
+`best_bet` marks the only selection verified profitable on a season it was never
+chosen on: top tier, under side, one pick per player-game. `value_flag` is a
+different thing, the structural over-shade, and needs no model at all.
+
 `GET /edges/summary`
 
-Counts per market and per tier for the dashboard header, scoped to upcoming games
-so it agrees with the table underneath it.
+Counts per market and per tier for the dashboard header, scoped to upcoming
+games, deduplicated the same way `/edges` is so the cards agree with the table
+underneath them. Also returns `best_bets` and a `coverage` object
+(`games_upcoming`, `games_priced`, `markets_priced`), because a signal count
+without a denominator is a mystery: 41 reads as a thin week until you know it
+came from five games out of sixteen.
+
+## Track Record
+
+`GET /record/seasons`, `/record/by_market`, `/record/by_tier`,
+`/record/leaders`, `/record/calibration`
+
+How the picks have actually done. All take an optional `season` and a `source`
+of `all`, `live` or `backtest`.
+
+`source` matters. `live` picks were published before kickoff. `backtest` picks
+were reconstructed by `backfill_track_record.py` with models refit on strictly
+earlier seasons. They are different claims and nothing merges them silently.
+
+Every response reports its sample size next to the rate, because a 100% hit rate
+on two picks is noise and a number without its `n` invites exactly that mistake.
+`/record/leaders` takes `direction=best|worst` and a `min_picks` floor; the worst
+list exists deliberately, since knowing where the model is reliably wrong is
+worth as much as knowing where it is right.
 
 ## Players
 

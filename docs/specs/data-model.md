@@ -17,6 +17,16 @@ built; the real system uses one unified feature table for every market.
   recurring historical bug (it's an `integer`, `external_id` is `text`; the two are unrelated
   values).
 - `first_name`, `last_name`, `name`, `position`, `team`.
+- `headshot`. NFL Cloudinary URL. Two shapes exist, `/image/private/` and
+  `/image/upload/`, and the frontend rewrites both to request a size; the
+  originals run to 1.4 MB.
+- `star_score`. Last completed season's fantasy production, refreshed by
+  `scripts/refresh_star_scores.sql`. Display ordering only, so the board opens
+  on names people recognise rather than on the highest number. Nothing in the
+  modelling path reads it.
+
+142 skill players have duplicate rows and some copies carry a NULL headshot, so
+aggregate over players by `external_id` and filter nulls before taking a MAX.
 
 ## prop_markets
 
@@ -70,9 +80,37 @@ outcome), with `line`, `price_american`.
 
 ## prop_edges
 
-Output of `build_prop_edges.py`. One row per (event, market, player, bookmaker): `line`,
-`projection`, `raw_edge`, `win_prob`, `recommended_side`, `edge_tier`, `model_name`,
-`model_r2`. Served by `GET /api/v1/edges`, see `docs/API.md`.
+Output of `build_prop_edges.py`. One row per (event, market, player, bookmaker):
+`line`, `projection`, `projection_median`, `raw_edge`, `win_prob`,
+`expected_value`, `recommended_side`, `edge_tier`, `value_flag`, `best_bet`,
+`model_name`, `model_r2`. Served by `GET /api/v1/edges`, see `docs/API.md`.
+
+`projection` is the mean and `projection_median` is the median. The side is
+chosen from the predicted distribution, so the median is the number that belongs
+beside a pick; on a right-skewed market the mean sits 25 to 35% above it.
+
+`expected_value` is the probability minus the price's break-even, and it is what
+the tiers are cut on. Overs clear roughly double the bar, because the over side
+has not been profitable in any season tested.
+
+`best_bet` marks the verified selection: top tier, under side, one per
+player-game. `value_flag` marks the structural over-shade and needs no model.
+
+## player_projections
+
+Output of `build_projections.py`. One row per (player, market, game) for every
+eligible player with a game inside the window, whether or not a book has priced
+them: `projection` plus `p10` through `p90`, `depth_rank`, `is_starter`.
+
+Roster-driven rather than odds-driven, which is the point. Books price a few
+dozen players a week out of roughly a thousand.
+
+## prop_edge_results
+
+Graded picks. Carries `source`, which is `live` for picks published before
+kickoff and `backtest` for ones reconstructed by `backfill_track_record.py` with
+models refit on strictly earlier seasons. They are different claims and nothing
+merges them silently.
 
 ## Supporting context tables (all sourced from nflverse ingestion)
 
