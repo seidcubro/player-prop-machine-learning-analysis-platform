@@ -289,6 +289,11 @@ def load_current_context(engine) -> dict:
     }
 
 
+# Teams whose scheduled game could not be found for the date being predicted.
+# Reported after the build; see the miss branch in apply_current_context.
+CONTEXT_MISSES: list[tuple[str, object]] = []
+
+
 def apply_current_context(
     row_features: dict, ctx: dict, player_id: str, team: str, event_date,
     position: str | None = None,
@@ -372,6 +377,16 @@ def apply_current_context(
 
     found = ctx["games"].get((team, event_date))
     if not found:
+        # Counted, not silent.
+        #
+        # This returning early means the row keeps the stale opponent, venue,
+        # weather and Vegas numbers from whenever it was stored. That is a
+        # bigger problem than a missing feature, and for a year it happened to
+        # every night game without leaving a trace, because a UTC date never
+        # matched the schedule's Eastern one. A miss is legitimate for a team on
+        # a bye or a player whose team has no scheduled game, so it is a warning
+        # rather than a failure, but it has to be visible.
+        CONTEXT_MISSES.append((team, event_date))
         return
     game, is_home = found
 
@@ -789,7 +804,24 @@ def main():
     odds["market_code"] = odds["market_key"].map(ODDS_TO_MARKET)
     odds = odds[odds["market_code"].notna()].copy()
     pmf["as_of_game_date"] = pd.to_datetime(pmf["as_of_game_date"]).dt.date
-    odds["event_date"] = pd.to_datetime(odds["commence_time"]).dt.date
+    # The NFL's own date for the game, not the UTC one.
+    #
+    # `commence_time` is UTC, and a Thursday, Sunday or Monday night kickoff is
+    # already past midnight there, so taking the UTC date pushed those games on
+    # to the following day. That is three or four of the sixteen games every
+    # week. The date is the key into the scheduled-game context, so those games
+    # missed the lookup entirely and `apply_current_context` returned before it
+    # could refresh opponent defense, venue, weather or the Vegas number. They
+    # silently kept whatever their stored feature row happened to hold, and the
+    # rest-day and staleness features were a day out on top of that.
+    #
+    # `nfl_games.game_date` is the schedule date in US Eastern, so the odds side
+    # has to be read in the same zone for the two to meet.
+    odds["event_date"] = (
+        pd.to_datetime(odds["commence_time"], utc=True)
+        .dt.tz_convert("America/New_York")
+        .dt.date
+    )
     pmf["team_norm"] = pmf["team"].str.lower().map(TEAM_MAP)
     pmf["opponent_norm"] = pmf["opponent"].str.lower().map(TEAM_MAP)
     odds["home_team_norm"] = odds["home_team"].map(normalize_team)
@@ -1279,6 +1311,13 @@ def main():
                                                      "commence_time"]))
             out.loc[keep.index, "best_bet"] = True
         print(f"best-bet flagged {int(out['best_bet'].sum())} of {len(out)} edges")
+
+    if CONTEXT_MISSES:
+        teams = sorted({t for t, _ in CONTEXT_MISSES})
+        dates = sorted({str(d) for _, d in CONTEXT_MISSES})
+        print(f"  WARNING: no scheduled game found for {len(CONTEXT_MISSES)} rows "
+              f"covering {len(teams)} team(s) {teams} on {dates}. Those rows kept "
+              f"the stored opponent, venue and Vegas context.")
 
     VALUE_MARKETS = {"recs", "rush_att", "rush_yds", "rec_yds"}
     out["value_flag"] = False
