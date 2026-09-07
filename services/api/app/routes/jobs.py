@@ -18,6 +18,7 @@ import re
 import json
 
 from ..db import get_db
+from ..admin_auth import require_admin
 
 router = APIRouter()
 
@@ -212,7 +213,7 @@ def _get_safe_upstream_markets(db: Session, market_code: str):
     return safe
 
 
-@router.post("/jobs/build_features")
+@router.post("/jobs/build_features", dependencies=[Depends(require_admin)])
 def build_features(
     market_code: str,
     lookback: int = Query(5, ge=1, le=50),
@@ -1201,7 +1202,7 @@ def build_features(
     }
 
 
-@router.post("/jobs/attach_labels")
+@router.post("/jobs/attach_labels", dependencies=[Depends(require_admin)])
 def attach_labels(
     market_code: str,
     db: Session = Depends(get_db),

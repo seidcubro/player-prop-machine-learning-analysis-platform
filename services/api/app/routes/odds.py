@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..odds_market_map import ODDS_API_MARKET_MAP
 from ..services.odds_api_client import OddsApiClient
+from ..admin_auth import require_admin
 
 import requests
 
@@ -25,7 +26,7 @@ def _parse_ts(value: str | None):
         return None
 
 
-@router.post("/odds/sync/events")
+@router.post("/odds/sync/events", dependencies=[Depends(require_admin)])
 def sync_odds_events(db: Session = Depends(get_db)):
     client = OddsApiClient()
     events = client.get_upcoming_events()
@@ -63,7 +64,7 @@ def sync_odds_events(db: Session = Depends(get_db)):
     return {"ok": True, "events_upserted": upserts}
 
 
-@router.post("/odds/sync/player_props")
+@router.post("/odds/sync/player_props", dependencies=[Depends(require_admin)])
 def sync_odds_player_props(
     days_ahead: int = 8,
     limit: int | None = None,
