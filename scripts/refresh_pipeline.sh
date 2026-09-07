@@ -18,9 +18,18 @@
 
 set -e
 
-MARKETS="rec_yds rush_yds pass_yds recs rush_att pass_att pass_completions pass_td rush_td rec_td"
+# any_td is the anytime touchdown scorer market, which is what books
+# actually post for touchdowns. The split rush_td and rec_td keys returned
+# zero rows across three seasons, but their models still run because the
+# projections page shows a number for every market a position can produce.
+MARKETS="rec_yds rush_yds pass_yds recs rush_att pass_att pass_completions pass_td rush_td rec_td any_td"
 MODEL="${MODEL:-rf_posfilt_v9}"
 API="${API:-http://localhost:8000/api/v1}"
+
+# The write endpoints now require a shared secret, so an exposed API cannot have
+# its Odds credits spent by a stranger. Export ADMIN_TOKEN before running this.
+: "${ADMIN_TOKEN:?set ADMIN_TOKEN to the value the API is running with}"
+AUTH="X-Admin-Token: ${ADMIN_TOKEN}"
 
 if [ "$1" != "--skip-ingest" ]; then
   echo "==> 1/7 nflverse ingestion"
@@ -36,9 +45,9 @@ docker compose exec -T postgres psql -U app -d app -f - < db/backfills/fix_team_
 echo "==> 3/7 features + labels"
 for m in $MARKETS; do
   printf '    %-18s ' "$m"
-  curl -sf -X POST "$API/jobs/build_features?market_code=$m&lookback=5" >/dev/null || {
+  curl -sf -X POST -H "$AUTH" "$API/jobs/build_features?market_code=$m&lookback=5" >/dev/null || {
     echo "FAILED"; exit 1; }
-  curl -sf -X POST "$API/jobs/attach_labels?market_code=$m&lookback=5" >/dev/null
+  curl -sf -X POST -H "$AUTH" "$API/jobs/attach_labels?market_code=$m&lookback=5" >/dev/null
   echo "ok"
 done
 
@@ -66,6 +75,10 @@ for m in $MARKETS; do
 done
 
 echo "==> 7/7 edges + grading"
+docker compose run --rm training python build_projections.py
+# The calibrator has to exist before edges are built: the builder corrects
+# P(over) with it before choosing a side or assigning a tier.
+docker compose run --rm training python fit_probability_calibrator.py ||   echo "  (no graded results yet; edges will ship uncalibrated)"
 docker compose run --rm training python build_prop_edges.py
 docker compose run --rm training python grade_edges.py
 
