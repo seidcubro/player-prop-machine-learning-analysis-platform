@@ -1262,8 +1262,8 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   .ps-table tbody tr {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: var(--s4) var(--s3);
-    padding: var(--s4);
+    gap: var(--s3) var(--s3);
+    padding: var(--s3) var(--s4);
     height: auto;
     max-height: none;
   }
@@ -1297,13 +1297,41 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
    * and Pick pair. Tier and Book get the full width because their chips wrap.
    * Leaving a column empty is what made the card look like it had holes in it.
    */
-  .ps-table td:first-child,
-  .ps-table td[data-label="Market"],
-  .ps-table td[data-label="Tier"],
-  .ps-table td[data-label="Book"] { grid-column: 1 / -1; }
+  /*
+   * Only the identity block earns a row to itself.
+   *
+   * Market, Tier and Book each used to take the full width, so a card was six
+   * stacked rows for ten values and ran nearly the height of a phone screen.
+   * Pairing them two to a row halves that without crowding anything: Market
+   * sits beside the Pick it describes, and Tier beside the Book offering it.
+   */
+  .ps-table td:first-child { grid-column: 1 / -1; }
   .ps-table td:first-child::before { display: none; }
+  .ps-table td[data-label="Market"],
+  .ps-table td[data-label="Pick"],
   .ps-table td[data-label="Win %"],
-  .ps-table td[data-label="Pick"] { grid-column: span 2; }
+  .ps-table td[data-label="Tier"] { grid-column: span 2; }
+  .ps-table td[data-label="Book"] { grid-column: 1 / -1; }
+
+  /*
+   * Reading order, which is not the column order.
+   *
+   * The table puts Pick near the end because that is where it belongs in a
+   * wide row. On a card the market and the pick are the two things being
+   * looked up, so they go together at the top, the four numbers form a stat
+   * line under them, and the supporting chips follow. Grid honours `order`, so
+   * this needs no change to the markup.
+   */
+  .ps-table td:first-child { order: 0; }
+  .ps-table td[data-label="Market"] { order: 1; }
+  .ps-table td[data-label="Pick"] { order: 2; }
+  .ps-table td[data-label="Line"] { order: 3; }
+  .ps-table td[data-label="Model"] { order: 4; }
+  .ps-table td[data-label="Edge"] { order: 5; }
+  .ps-table td[data-label="EV"] { order: 6; }
+  .ps-table td[data-label="Win %"] { order: 7; }
+  .ps-table td[data-label="Tier"] { order: 8; }
+  .ps-table td[data-label="Book"] { order: 9; }
 
   .ps-table td[data-label="Tier"],
   .ps-table td[data-label="Book"] {
@@ -1330,11 +1358,17 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   /* Chip stacks read better inline on a narrow card. */
   .ps-table td[data-label="Tier"],
   .ps-table td[data-label="Book"] {
-    line-height: 1.4;
+    line-height: 1.3;
     flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 5px;
+    justify-content: flex-start;
+    gap: 4px;
   }
+  /* Half-width now, so the label sits above the chips rather than beside them
+     and steals none of the row. */
+  .ps-table td[data-label="Tier"],
+  .ps-table td[data-label="Book"] { flex-direction: column; align-items: flex-start; }
+  .ps-table td[data-label="Tier"] > *,
+  .ps-table td[data-label="Book"] > * { display: flex; flex-wrap: wrap; gap: 4px; }
 }
 
 /* ================================================== track record */

@@ -559,6 +559,57 @@ def check_projection_agreement(engine):
         print(f"  OK: all {len(df)} shared rows match to within 0.001")
 
 
+def check_board_internal_consistency(engine):
+    """Every row on the board has to tell one story.
+
+    The board shows a model number, a line, an edge and a pick, and a reader
+    takes them as one statement. They were four statements. The edge was signed
+    toward whichever side was chosen, so the same numbers printed +0.56 on an
+    over and -0.56 on an under; the pick came from expected value while the
+    number beside it came from the median; and the median came off the quantile
+    bundle while the probability had a further correction applied. On 131 of 481
+    rows the pick disagreed with the model number sitting next to it.
+
+    All three now derive from the median, so this holds by construction. It is
+    checked anyway, because it held by construction before too, in a different
+    part of the code, and stopped.
+    """
+    print("\n[11] Board rows are internally consistent")
+    df = pd.read_sql(text("""
+        SELECT player_name, market_code, line, projection_median, raw_edge,
+               recommended_side, win_prob, expected_value
+        FROM prop_edges WHERE projection_median IS NOT NULL
+    """), engine)
+    if df.empty:
+        warn("no edges to check")
+        return
+
+    over = df["recommended_side"] == "over"
+    problems = {
+        "edge sign disagrees with the pick": (df["raw_edge"] > 0) != over,
+        "pick disagrees with the model number": (
+            df["projection_median"] > df["line"]) != over,
+        "edge is not the model number minus the line": (
+            (df["raw_edge"] - (df["projection_median"] - df["line"])).abs() > 0.001),
+        "win probability is not better than even": df["win_prob"] <= 0.5,
+        "expected value is not positive": df["expected_value"] <= 0,
+    }
+    clean = True
+    for label, mask in problems.items():
+        n = int(mask.sum())
+        if n:
+            clean = False
+            bad = df[mask].head(2)
+            detail = ", ".join(
+                f"{r.player_name} {r.market_code} line {r.line} "
+                f"model {r.projection_median:.2f} edge {r.raw_edge:+.2f} "
+                f"{r.recommended_side}"
+                for r in bad.itertuples())
+            fail(f"{n} of {len(df)} rows where {label}: {detail}")
+    if clean:
+        print(f"  OK: all {len(df)} rows agree on model, edge, pick and price")
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     print("=" * 62)
@@ -575,6 +626,7 @@ def main():
     check_live_odds_table(engine)
     check_market_map_agreement()
     check_projection_agreement(engine)
+    check_board_internal_consistency(engine)
 
     print("\n" + "=" * 62)
     if failures:

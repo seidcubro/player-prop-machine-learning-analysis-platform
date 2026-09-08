@@ -252,10 +252,11 @@ export default function EdgesDashboard() {
       <p className="ps-tagline">
         <strong>Model</strong> is the median outcome, not the average, because
         the pick is chosen from the same distribution.{" "}
-        <strong>Edge</strong> is how far that median clears the line{" "}
-        <em>in the direction of the pick</em>, so green means the model&rsquo;s
-        own number backs the bet and red means it does not and the bet rests on
-        the price alone. Both happen, and the difference is worth seeing.{" "}
+        <strong>Edge</strong> is always the model&rsquo;s number minus the
+        book&rsquo;s. Green means the model sits above the line, which is why
+        the pick is the over; red means it sits below and the pick is the under.
+        <strong> EV</strong> then says whether the price makes that pick worth
+        taking.{" "}
         <a href="/faq">How It Works</a>.
       </p>
 
@@ -494,9 +495,7 @@ export default function EdgesDashboard() {
                     title={
                       isYesNo(e.market_code)
                         ? "A yes-or-no market has no median to clear the line, so the edge lives entirely in the EV column."
-                        : e.raw_edge >= 0
-                          ? "The median clears the line in the direction of this pick."
-                          : "The median does not support this pick. It qualifies on price alone, so check the EV column."
+                        : "The model's number minus the line. Positive means the model is above the line, which is why the pick is the over."
                     }
                   >
                     {isYesNo(e.market_code) ? (
