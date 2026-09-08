@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchEdgeHistory, type EdgeHistory } from "../api";
-import { marketLabelShort } from "../lib/markets";
+import { marketLabelShort, sideLabel } from "../lib/markets";
 
 function fmtDate(d: string | null): string {
   if (!d) return "-";
@@ -140,7 +140,7 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
                       r.recommended_side === "over" ? "side-over" : "side-under"
                     }
                   >
-                    {r.recommended_side}
+                    {sideLabel(r.market_code, r.recommended_side)}
                   </span>
                 </td>
                 <td data-label="Model" className="num">

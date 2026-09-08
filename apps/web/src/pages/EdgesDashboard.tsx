@@ -17,7 +17,7 @@ import Glossary from "../components/Glossary";
 import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { fullDateTime, kickoff, price as fmtOdds } from "../lib/format";
-import { MARKET_ORDER, isYesNo, marketLabel } from "../lib/markets";
+import { MARKET_ORDER, isYesNo, marketLabel, sideLabel } from "../lib/markets";
 import {
   fetchEdges,
   fetchEdgesSummary,
@@ -255,9 +255,7 @@ export default function EdgesDashboard() {
         <strong>Edge</strong> is how far that median clears the line{" "}
         <em>in the direction of the pick</em>, so green means the model&rsquo;s
         own number backs the bet and red means it does not and the bet rests on
-        the price alone. Both happen, and the difference is worth seeing.
-        Anytime touchdown settles yes or no rather than at a number, so it has
-        no median to compare and its edge reads n/a.{" "}
+        the price alone. Both happen, and the difference is worth seeing.{" "}
         <a href="/faq">How It Works</a>.
       </p>
 
@@ -529,7 +527,7 @@ export default function EdgesDashboard() {
                   </td>
                   <td data-label="Pick">
                     <span className={over ? "side-over" : "side-under"}>
-                      {e.recommended_side}
+                      {sideLabel(e.market_code, e.recommended_side)}
                     </span>
                   </td>
                   <td data-label="Tier">

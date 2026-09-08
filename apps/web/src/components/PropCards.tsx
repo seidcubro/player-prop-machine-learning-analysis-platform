@@ -14,7 +14,7 @@
 import { useEffect, useState } from "react";
 import Sparkline from "./Sparkline";
 import { fetchEdges, fetchPlayerGames, type PropEdge, type PlayerGame } from "../api";
-import { isYesNo, marketLabel } from "../lib/markets";
+import { isYesNo, marketLabel, sideLabel } from "../lib/markets";
 
 function fmtPrice(p: number | null): string {
   if (p === null || p === undefined) return "-";
@@ -191,7 +191,7 @@ export default function PropCards({
               <div className="rec">
                 <span>
                   <span className={over ? "side-over" : "side-under"}>
-                    {top.recommended_side}
+                    {sideLabel(market, top.recommended_side)}
                   </span>{" "}
                   {top.bookmaker_title ?? top.bookmaker_key}{" "}
                   {fmtPrice(top.price_american)}
