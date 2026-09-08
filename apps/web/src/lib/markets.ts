@@ -104,3 +104,29 @@ export function sideLabel(marketCode: string, side: string): string {
   if (!isYesNo(marketCode)) return side;
   return side === "over" ? "yes" : "no";
 }
+
+/**
+ * Markets that are projected but never priced on the board.
+ *
+ * These decide which number a projection row should lead with. Everywhere a
+ * market appears on both pages the median is shown, so the board and the
+ * projections page can never print different numbers for the same player. But
+ * the median of a touchdown market is an integer that is almost always zero:
+ * 99% of anytime-touchdown rows and every single rushing and receiving
+ * touchdown row have a median of 0, which told you Justin Jefferson's anytime
+ * touchdown projection was 0.0 rather than that he is about a third to score.
+ *
+ * These three are never priced, so there is no board figure to contradict, and
+ * the expected count is the informative number.
+ */
+export const PROJECTION_ONLY_MARKETS = new Set(["any_td", "rush_td", "rec_td"]);
+
+/** The figure a projection row should lead with. */
+export function displayProjection(row: {
+  market_code: string;
+  projection: number;
+  p50?: number | null;
+}): number {
+  if (PROJECTION_ONLY_MARKETS.has(row.market_code)) return row.projection;
+  return row.p50 ?? row.projection;
+}

@@ -227,16 +227,22 @@ export default function EdgesDashboard() {
     }
   }
 
-  function sortLabel(key: string, label: string) {
+  /*
+   * The whole header cell, not just the button inside it.
+   *
+   * `aria-sort` belongs on the element with the columnheader role, which is the
+   * `th`. It was on the button, where it is not a valid attribute and every
+   * screen reader ignores it, so the table announced no sort state at all while
+   * looking like it did.
+   */
+  function sortableTh(key: string, label: string) {
     const active = sort === key;
     return (
-      <button
-        onClick={() => toggleSort(key)}
-        aria-sort={active ? (order === "desc" ? "descending" : "ascending") : undefined}
-        aria-label={`Sort by ${label}`}
-      >
-        {label} {active ? (order === "desc" ? "▾" : "▴") : ""}
-      </button>
+      <th aria-sort={active ? (order === "desc" ? "descending" : "ascending") : "none"}>
+        <button onClick={() => toggleSort(key)} aria-label={`Sort by ${label}`}>
+          {label} {active ? (order === "desc" ? "▾" : "▴") : ""}
+        </button>
+      </th>
     );
   }
 
@@ -405,13 +411,16 @@ export default function EdgesDashboard() {
           </colgroup>
           <thead>
             <tr>
-              <th>{sortLabel("player_name", "Player")}</th>
+              {sortableTh("player_name", "Player")}
               <th>Market</th>
-              <th>{sortLabel("line", "Line")}</th>
-              <th>{sortLabel("projection", "Model")}</th>
-              <th>{sortLabel("edge", "Edge")}</th>
-              <th>{sortLabel("expected_value", "EV")}</th>
-              <th>{sortLabel("win_prob", "Win %")}</th>
+              {sortableTh("line", "Line")}
+              {/* Sorts on the median, which is the number this column shows.
+                  Sorting on the mean put the rows out of the order they were
+                  displayed in wherever the two disagreed. */}
+              {sortableTh("projection_median", "Model")}
+              {sortableTh("edge", "Edge")}
+              {sortableTh("expected_value", "EV")}
+              {sortableTh("win_prob", "Win %")}
               <th>Pick</th>
               <th>Tier</th>
               <th>Book</th>
@@ -476,16 +485,14 @@ export default function EdgesDashboard() {
                       : (e.projection_median ?? e.projection).toFixed(1)}
                   </td>
                   {/*
-                    Show the real sign, not the side's sign.
+                    Always the model's number minus the line.
 
-                    This used to print `Math.abs(raw_edge)` with a plus for
-                    overs and a minus for unders, so the sign only ever told you
-                    which side was picked, which the Pick column already says.
-                    `raw_edge` is now a signed quantity: how far the median
-                    clears the line in the direction of the pick. Positive means
-                    the model's own number supports the pick. Negative means it
-                    does not, and the bet is being justified by the price alone,
-                    which is legitimate but worth being able to see.
+                    This was signed toward whichever side was picked, so the
+                    same 4.06 model against a 3.5 line printed +0.56 on an over
+                    and -0.56 on an under, and the sign only repeated the Pick
+                    column while looking like it disagreed with it. The pick now
+                    follows the median too, so a positive edge is always an over
+                    and a negative one always an under.
                   */}
                   <td
                     data-label="Edge"

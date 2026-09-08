@@ -532,10 +532,20 @@ def check_projection_agreement(engine):
     place on a page nobody cross-references.
     """
     print("\n[10] Board and projections agree")
+    # Both the mean the two tables store and the median each page prints.
+    #
+    # Comparing only the mean missed the thing a reader would actually notice:
+    # the board shows the median and the projections page used to show the mean,
+    # so Bijan Robinson read 92.7 on one page and 75.8 on the other for the same
+    # game. Both pages lead with the median now, and both numbers are checked.
     df = pd.read_sql(text("""
-        SELECT e.player_name, e.market_code, e.projection AS edge_projection,
-               p.projection AS page_projection
-        FROM (SELECT DISTINCT player_name, market_code, projection
+        SELECT e.player_name, e.market_code,
+               e.projection AS edge_projection,
+               p.projection AS page_projection,
+               e.projection_median AS edge_shown,
+               p.p50 AS page_shown
+        FROM (SELECT DISTINCT player_name, market_code, projection,
+                     projection_median
               FROM prop_edges) e
         JOIN player_projections p
           ON p.player_name = e.player_name AND p.market_code = e.market_code
@@ -544,19 +554,21 @@ def check_projection_agreement(engine):
         warn("no rows in common between prop_edges and player_projections")
         return
 
-    gap = (df["edge_projection"] - df["page_projection"]).abs()
-    bad = df[gap > 0.001]
+    gap = (df["edge_projection"] - df["page_projection"]).abs().fillna(0)
+    shown_gap = (df["edge_shown"] - df["page_shown"]).abs().fillna(0)
+    bad = df[(gap > 0.001) | (shown_gap > 0.001)]
     if len(bad):
-        worst = bad.assign(gap=gap).nlargest(3, "gap")
+        worst = bad.assign(gap=gap.combine(shown_gap, max)).nlargest(3, "gap")
         detail = ", ".join(
-            f"{r.player_name} {r.market_code} "
-            f"{r.edge_projection:.3f} vs {r.page_projection:.3f}"
+            f"{r.player_name} {r.market_code} board {r.edge_shown:.3f} "
+            f"vs page {r.page_shown:.3f}"
             for r in worst.itertuples()
         )
         fail(f"{len(bad)} of {len(df)} rows disagree between the board and the "
              f"projections page: {detail}")
     else:
-        print(f"  OK: all {len(df)} shared rows match to within 0.001")
+        print(f"  OK: all {len(df)} shared rows match on both the mean and the "
+              f"median each page shows")
 
 
 def check_board_internal_consistency(engine):
@@ -610,6 +622,51 @@ def check_board_internal_consistency(engine):
         print(f"  OK: all {len(df)} rows agree on model, edge, pick and price")
 
 
+def check_injury_currency(engine):
+    """Is the injury report we are using from this season?
+
+    There was no recency bound on the injury lookup, so it took each player's
+    most recent report ever and fed it in as current. In September that meant
+    January: thirty-five players on the board carried a flag from last season,
+    thirteen of them "Out" -- Bo Nix on the ankle he broke in the playoffs,
+    Jayden Daniels on an elbow, Nico Collins on a concussion. Two were carrying
+    "Questionable" from 2024. Every one of them was healthy and starting.
+
+    Nothing failed, because a stale flag looks exactly like a fresh one. The
+    query is bounded to the current season now, and this checks the bound is
+    doing what it should rather than quietly matching nothing forever.
+    """
+    print("\n[12] Injury reports are from this season")
+    row = pd.read_sql(text("""
+        SELECT (SELECT max(season) FROM nfl_games
+                WHERE game_date <= CURRENT_DATE + 14) AS current_season,
+               (SELECT max(season) FROM injuries) AS newest_injury_season,
+               (SELECT count(*) FROM injuries
+                WHERE season = (SELECT max(season) FROM nfl_games
+                                WHERE game_date <= CURRENT_DATE + 14)) AS current_rows,
+               (SELECT count(*) FROM nfl_games
+                WHERE game_date BETWEEN CURRENT_DATE - 2 AND CURRENT_DATE + 4)
+                   AS games_this_week
+    """), engine).iloc[0]
+
+    cur = row["current_season"]
+    if row["current_rows"] > 0:
+        print(f"  OK: {int(row['current_rows'])} injury rows for season {cur}")
+        return
+
+    # No current-season reports. Before game week that is simply how it is:
+    # teams do not publish until the Wednesday. Inside game week it means the
+    # models are running blind and somebody should know.
+    stale = row["newest_injury_season"]
+    if row["games_this_week"]:
+        warn(f"no injury reports for season {cur} while {int(row['games_this_week'])} "
+             f"games are inside the next few days; the newest data is from season "
+             f"{stale}, and it is correctly being ignored rather than applied")
+    else:
+        print(f"  OK: no season {cur} reports yet, which is expected before game "
+              f"week; season {stale} data is correctly not being applied")
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     print("=" * 62)
@@ -627,6 +684,7 @@ def main():
     check_market_map_agreement()
     check_projection_agreement(engine)
     check_board_internal_consistency(engine)
+    check_injury_currency(engine)
 
     print("\n" + "=" * 62)
     if failures:

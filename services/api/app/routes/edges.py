@@ -18,9 +18,12 @@ router = APIRouter()
 # Whitelisted sort keys -> SQL expressions. Never interpolate raw user input
 # into ORDER BY.
 _SORTS = {
-    # raw_edge is stored as a positive magnitude for both sides; sign it by
-    # recommended side so desc runs +35 (over) ... 0 ... -35 (under).
-    "edge": "(CASE WHEN recommended_side = 'under' THEN -raw_edge ELSE raw_edge END)",
+    # raw_edge is the model's number minus the line, already signed, so this
+    # sorts on it directly and descending runs +35 (over) ... 0 ... -35 (under).
+    # It used to be stored as a magnitude and re-signed here; once the builder
+    # started storing the signed value this negated it a second time and
+    # "Edge, descending" put the largest unders at the top.
+    "edge": "raw_edge",
     "win_prob": "win_prob",
     # Expected value against the offered price. This is the honest ranking: a
     # 60% pick at -180 is worse than a 52% pick at +110, and sorting by win_prob
@@ -48,6 +51,26 @@ _SORTS = {
     "commence_time": "commence_time",
     "player_name": "player_name",
 }
+
+def _split_keys(expr: str) -> list[str]:
+    """Split a sort expression on its top-level commas.
+
+    A plain `str.split(",")` cuts through the comma inside
+    `COALESCE(star_score, 0)` and produces two fragments that are not valid SQL
+    on their own, which is how the default ordering briefly returned a 500.
+    """
+    keys, depth, start = [], 0, 0
+    for i, ch in enumerate(expr):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            keys.append(expr[start:i].strip())
+            start = i + 1
+    keys.append(expr[start:].strip())
+    return [k for k in keys if k]
+
 
 _TIER_ORDER = ["small", "medium", "strong", "elite"]
 
@@ -92,43 +115,74 @@ def list_edges(
     if side is not None and side not in ("over", "under"):
         raise HTTPException(status_code=400, detail=f"Invalid side: {side}")
 
-    where = ["1=1"]
+    # Filters split by what they describe.
+    #
+    # A prop is priced by several books and the board shows one row for it, the
+    # strongest. `pre` narrows which props exist at all and is safe to apply
+    # before that choice is made, because every row of a prop shares the same
+    # player, market and kickoff. `post` describes the row that won, and has to
+    # be applied after.
+    #
+    # Applying a tier filter before the dedup asked a different question: "does
+    # this prop have any strong row", which is true for props whose best row is
+    # elite. So the same prop was counted under two tiers, and the tier filters
+    # summed to 255 against a board total of 216. Clicking "Strong" showed 51
+    # signals under a card reading 43.
+    pre = ["1=1"]
+    post = ["1=1"]
     params: dict = {}
 
     if market_code:
-        where.append("market_code = :market_code")
+        pre.append("market_code = :market_code")
         params["market_code"] = market_code
     if min_tier:
         allowed = _TIER_ORDER[_TIER_ORDER.index(min_tier):]
-        where.append("edge_tier = ANY(:tiers)")
+        post.append("edge_tier = ANY(:tiers)")
         params["tiers"] = allowed
     if side:
-        where.append("recommended_side = :side")
+        post.append("recommended_side = :side")
         params["side"] = side
     if search:
-        where.append("player_name ILIKE :search")
+        pre.append("player_name ILIKE :search")
         params["search"] = f"%{search.strip()}%"
 
     if tier:
         # Exact, unlike `min_tier` which is "and up". The stat cards use this so
-        # that clicking "Strong" shows the 15 strong signals the card claims,
-        # rather than the 20 you get from strong-and-above.
-        where.append("edge_tier = :tier")
+        # that clicking "Strong" shows the strong signals the card claims,
+        # rather than everything strong and above.
+        post.append("edge_tier = :tier")
         params["tier"] = tier
 
     if best_bets_only:
-        where.append("best_bet")
+        post.append("best_bet")
 
     if upcoming_only:
-        where.append("commence_time >= NOW()")
+        pre.append("commence_time >= NOW()")
 
-    where_sql = " AND ".join(where)
+    pre_sql = " AND ".join(pre)
+    post_sql = " AND ".join(post)
+    dedup_order = (
+        "player_name, market_code, commence_time, "
+        "best_bet DESC, expected_value DESC NULLS LAST, id"
+    )
     # The direction suffix only binds to the final expression in the clause, so
     # a multi-key sort has to carry its own direction on every key but the last.
     # Getting this wrong sorted star_score ascending and put the least-known
     # player on the board at the top, which was the exact problem "featured" was
     # added to fix.
-    order_sql = f"{_SORTS[sort]} {'ASC' if order == 'asc' else 'DESC'}"
+    # Bind the direction to every key, not just the last one.
+    #
+    # A composite sort is written "best_bet DESC, expected_value", and appending
+    # a direction to that string only reaches `expected_value`. Ordering by
+    # best_bet ascending therefore returned best bets first, the opposite of
+    # what was asked, and the same shape of mistake once sorted star_score
+    # ascending on the default view. Any explicit DESC already written into a
+    # key is dropped first so the requested direction wins.
+    direction = "ASC" if order == "asc" else "DESC"
+    order_sql = ", ".join(
+        f"{key.removesuffix(' DESC').removesuffix(' ASC')} {direction}"
+        for key in _split_keys(_SORTS[sort])
+    )
 
     # Count props, not rows.
     #
@@ -138,9 +192,11 @@ def list_edges(
     total = db.execute(
         text(
             "SELECT COUNT(*) FROM ("
-            "  SELECT DISTINCT player_name, market_code, commence_time"
-            f"   FROM prop_edges WHERE {where_sql}"
-            ") p"
+            "  SELECT DISTINCT ON (player_name, market_code, commence_time)"
+            "         edge_tier, recommended_side, best_bet"
+            f"   FROM prop_edges WHERE {pre_sql}"
+            f"   ORDER BY {dedup_order}"
+            f") d WHERE {post_sql}"
         ),
         params,
     ).scalar_one()
@@ -194,17 +250,20 @@ def list_edges(
               -- what number, which is the whole point of shopping a line.
               COALESCE(alts.books, '[]'::json) AS alts
             FROM (
-                -- One row per prop, keeping the strongest.
+                -- One row per prop, keeping the strongest, and only then the
+                -- filters that describe that row.
                 --
                 -- Deduplicating here rather than in the browser keeps the
                 -- count, the pagination and what is on screen describing the
                 -- same thing. Doing it client-side meant page two could start
                 -- mid-prop and the totals never matched the rows.
-                SELECT DISTINCT ON (player_name, market_code, commence_time) *
-                FROM prop_edges
-                WHERE {where_sql}
-                ORDER BY player_name, market_code, commence_time,
-                         best_bet DESC, expected_value DESC NULLS LAST, id
+                SELECT * FROM (
+                    SELECT DISTINCT ON (player_name, market_code, commence_time) *
+                    FROM prop_edges
+                    WHERE {pre_sql}
+                    ORDER BY {dedup_order}
+                ) d
+                WHERE {post_sql}
             ) AS prop_edges
             LEFT JOIN LATERAL (
                 SELECT p.id, p.headshot, p.star_score

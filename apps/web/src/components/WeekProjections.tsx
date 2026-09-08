@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import { fetchPlayerProjections, type Projection } from "../api";
 import { fullDate as fmtDate } from "../lib/format";
-import { marketLabel } from "../lib/markets";
+import { displayProjection, marketLabel } from "../lib/markets";
 
 /** Counting stats read better with a decimal, yardage as whole numbers. */
 function fmt(v: number | null | undefined, market: string): string {
@@ -34,7 +34,7 @@ function Range({ p }: { p: Projection }) {
   const lo = p.p10;
   const hi = p.p90;
   if (lo === null || hi === null || hi <= lo) return null;
-  const pos = ((p.projection - lo) / (hi - lo)) * 100;
+  const pos = ((displayProjection(p) - lo) / (hi - lo)) * 100;
   return (
     <div className="ps-wp-range">
       <span className="ps-wp-track">
@@ -116,7 +116,9 @@ export default function WeekProjections({ playerId }: { playerId: number }) {
             <div className="ps-wp-label">
               {marketLabel(r.market_code)}
             </div>
-            <div className="ps-wp-value">{fmt(r.projection, r.market_code)}</div>
+            <div className="ps-wp-value">
+              {fmt(displayProjection(r), r.market_code)}
+            </div>
             <Range p={r} />
           </div>
         ))}

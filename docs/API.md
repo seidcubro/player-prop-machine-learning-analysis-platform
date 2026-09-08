@@ -58,9 +58,12 @@ is what belongs beside a pick: the side is chosen from the predicted
 distribution, and on a right-skewed market the mean sits 25 to 35% above the
 median, which produced rows reading "model 75.6, line 66.5, pick UNDER".
 
-`raw_edge` is signed relative to the pick. Positive means the median clears the
-line in the direction of the bet; negative means it does not and the bet rests on
-the price alone, which is legitimate and worth being able to see.
+`raw_edge` is `projection_median - line`, always in that order and never flipped
+to match the side. Positive means the model sits above the line, which is why the
+pick is the over; negative means it sits below and the pick is the under. The
+side is chosen from the median too, so the sign, the pick and the model number
+can never disagree. The price decides only whether a pick clears its tier and
+gets published at all.
 
 `best_bet` marks the only selection verified profitable on a season it was never
 chosen on: top tier, under side, one pick per player-game. `value_flag` is a

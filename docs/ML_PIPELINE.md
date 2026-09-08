@@ -131,6 +131,41 @@ range, and pushing a 0.2 through it produced a board of 89 unders out of 93.
 Isotonic rather than Platt because the error varies with the claimed probability
 instead of being a constant shift.
 
+### 5d. Markets I project but do not price
+
+`any_td` is built and shown on the projections page and never appears on the
+board.
+
+The rate model is fine. Held out on 5,827 player-games it predicted a 0.190
+chance of scoring against an actual 0.187, and its ordering matches the market:
+Derrick Henry 1.10, Kyren Williams 1.00, Jahmyr Gibbs 0.99. What is not fine is
+the price. Across the sixteen priced games the book's implied probabilities add
+up to 5.54 scorers per game against the 4.04 that actually score, a 37%
+overround, and no pick in this market has ever been graded because the snapshot
+table holds no historical price for it.
+
+At that margin the EV filter can only ever clear on longshots, and the
+favourite-longshot bias puts most of the margin on exactly those prices. So it
+selected backup running backs at +800 and called them the best value on the
+board. The list is in `SUPPRESSED_MARKETS` in `build_prop_edges.py`, and it
+comes off once a season of closing prices has been collected and graded.
+
+### 5e. Injury reports have to be from this season
+
+The injury lookup had no recency bound, so it took each player's most recent
+report ever and applied it as current. In September that meant January.
+Thirty-five players on the board carried a flag from the previous season,
+thirteen of them "Out": Bo Nix on the ankle he broke in the playoffs, Jayden
+Daniels on an elbow, Nico Collins on a concussion. Two were still carrying
+"Questionable" from 2024. All of them were healthy and starting.
+
+Nothing failed, because a stale flag is indistinguishable from a fresh one. The
+query is bounded to the current season now, and a player with no report this
+season carries no injury rather than repeating an old one. Teams do not publish
+until the Wednesday of game week, so an empty result through the preseason is
+the normal state. `audit_freshness.py` check 12 warns if that is still true once
+games are inside a few days.
+
 ### 5c. Count markets do not use quantiles
 
 `pass_td`, `rush_td`, `rec_td` and `any_td` derive P(over) and the median from a

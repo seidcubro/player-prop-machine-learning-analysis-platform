@@ -103,10 +103,10 @@ function Plain() {
             time the player goes over it, half the time under.
           </li>
           <li>
-            <strong>Edge</strong> is how far our number sits from the line, in
-            the direction of the pick. Green means our own number backs the bet.
-            Red means it does not, and the bet only makes sense because the price
-            is generous.
+            <strong>Edge</strong> is our number minus the line, always in that
+            order. Green means our number is above the line, which is why the
+            pick is the over. Red means it is below, and the pick is the under.
+            The pick always follows the sign, so the two can never disagree.
           </li>
           <li>
             <strong>EV</strong> is the one that matters. It is how much better
@@ -130,8 +130,8 @@ function Plain() {
         <p>
           It is the only selection that has been tested on a season the model
           had never seen and still made money: the strongest picks, on the under
-          side, one per player per game. Over that test it returned about 7% per
-          unit bet.
+          side, one per player per game. Over that test it returned about 6.6%
+          per unit bet.
         </p>
         <p>
           The rest of the board is research. Best Bets are the part that has
@@ -285,27 +285,27 @@ function Technical() {
             <tbody>
               <tr>
                 <td>Board as published</td>
-                <td className="num">4,652</td>
-                <td className="num">+0.9%</td>
-                <td className="num">[&minus;1.7%, +4.0%]</td>
+                <td className="num">4,357</td>
+                <td className="num">+2.2%</td>
+                <td className="num">[&minus;0.4%, +5.0%]</td>
               </tr>
               <tr>
                 <td>Unders only</td>
-                <td className="num">2,884</td>
-                <td className="num pos">+4.4%</td>
-                <td className="num">[+1.8%, +7.2%]</td>
+                <td className="num">3,170</td>
+                <td className="num pos">+4.9%</td>
+                <td className="num">[+2.5%, +7.4%]</td>
               </tr>
               <tr>
                 <td>Elite unders, one per player-game</td>
-                <td className="num">783</td>
-                <td className="num pos">+7.1%</td>
-                <td className="num">[+1.6%, +13.2%]</td>
+                <td className="num">1,152</td>
+                <td className="num pos">+6.6%</td>
+                <td className="num">[+2.6%, +10.5%]</td>
               </tr>
               <tr>
                 <td>Overs only</td>
-                <td className="num">1,768</td>
-                <td className="num neg">&minus;4.7%</td>
-                <td className="num">[&minus;10.3%, +1.4%]</td>
+                <td className="num">1,187</td>
+                <td className="num neg">&minus;5.0%</td>
+                <td className="num">[&minus;10.8%, +1.0%]</td>
               </tr>
             </tbody>
           </table>
@@ -339,6 +339,19 @@ function Technical() {
             <strong>pass_td quantiles are degenerate</strong> below the median,
             because touchdowns are a small integer count. A Poisson survival
             alternative was tested twice and lost on Brier both times.
+          </li>
+          <li>
+            <strong>Rush attempt quantiles do not condition on the player at
+            the bottom of the range.</strong> The 10th percentile comes out at
+            zero carries for every player, because 15% of running back game rows
+            are players who dressed and never touched the ball. Coverage looks
+            right in aggregate, 0.098 against a target of 0.10, but that is an
+            average of over-covering low usage backs at 0.56 and under-covering
+            starters at 0.06. For the highest usage games the actual 10th
+            percentile is one carry. Refitting on the priced population only was
+            tested and moved the error rather than removing it. No published
+            line falls below the 10th percentile, so this affects the displayed
+            range and not any pick.
           </li>
         </ul>
       </QA>

@@ -19,7 +19,11 @@ import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { shortDate as fmtDate } from "../lib/format";
 import { fetchProjections, type Projection } from "../api";
-import { MARKET_OPTIONS, marketLabel } from "../lib/markets";
+import {
+  MARKET_OPTIONS,
+  displayProjection,
+  marketLabel,
+} from "../lib/markets";
 
 const PAGE_SIZE = 50;
 
@@ -47,7 +51,7 @@ function RangeBar({ p: row }: { p: Projection }) {
   if (lo === null || hi === null || hi <= lo) return <span className="matchup">-</span>;
 
   const span = hi - lo;
-  const mid = ((row.projection - lo) / span) * 100;
+  const mid = ((displayProjection(row) - lo) / span) * 100;
   return (
     <span className="ps-range" title={`p10 ${lo.toFixed(0)} to p90 ${hi.toFixed(0)}`}>
       <span className="ps-range-track">
@@ -208,7 +212,10 @@ export default function Projections() {
                   <div className="matchup">vs {r.opponent ?? "-"}</div>
                 </td>
                 <td data-label={marketLabel(market)} className="num">
-                  <strong>{fmt(r.projection, r.market_code)}</strong>
+                  {/* The median, so this page and the board never disagree
+                      about the same player. Bijan Robinson read 92.7 here
+                      and 75.8 on the board. */}
+                  <strong>{fmt(displayProjection(r), r.market_code)}</strong>
                 </td>
                 <td data-label="Range">
                   <RangeBar p={r} />

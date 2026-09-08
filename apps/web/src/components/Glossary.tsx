@@ -64,14 +64,14 @@ const TERMS: Term[] = [
   },
   {
     term: "Edge",
-    short: "Model minus line, in the pick's direction",
+    short: "Model minus line, always in that order",
     body: (
       <>
-        How far our number clears the line for the side we picked.{" "}
-        <span className="pos">Green</span> means our own projection backs the
-        bet. <span className="neg">Red</span> means it does not, and the bet
-        rests on the price being generous. Both are legitimate; the difference is
-        worth seeing.
+        Our number minus the book&rsquo;s.{" "}
+        <span className="pos">Green</span> means our number sits above the line,
+        which is why the pick is the over. <span className="neg">Red</span> means
+        it sits below, and the pick is the under. The pick always follows the
+        sign, so the two can never contradict each other.
       </>
     ),
   },

@@ -360,7 +360,17 @@ def list_projections(
     produce, with the predicted distribution attached.
     """
     sorts = {
-        "projection": "projection",
+        # Sorts on whichever figure the page actually leads with, which is the
+        # median everywhere except the three touchdown markets that are never
+        # priced. Their median is an integer and almost always zero, so the page
+        # shows the expected count instead; sorting on the median there would
+        # have put nearly every row in a tie at zero. Kept in step with
+        # `displayProjection` in apps/web/src/lib/markets.ts.
+        "projection": (
+            "CASE WHEN market_code IN ('any_td', 'rush_td', 'rec_td')"
+            "     THEN projection ELSE COALESCE(p50, projection) END"
+        ),
+        "mean": "projection",
         "player_name": "player_name",
         "game_date": "game_date",
         "depth_rank": "depth_rank",
@@ -370,28 +380,37 @@ def list_projections(
     if order not in ("asc", "desc"):
         raise HTTPException(status_code=400, detail=f"Invalid order: {order}")
 
+    # Every column qualified with the projections alias.
+    #
+    # The row query joins `players` to pick up a headshot, and both tables have
+    # `position` and `team`. Unqualified, Postgres rejects the filter as
+    # ambiguous and the request returns a 500, so the position dropdown on the
+    # projections page failed on every value except "all positions". The count
+    # query has no join and so never saw it, which is why the failure only
+    # showed up on the page and not in the total.
     where = ["1=1"]
     params: dict = {"limit": limit, "offset": offset}
     if market_code:
-        where.append("market_code = :market_code")
+        where.append("pr.market_code = :market_code")
         params["market_code"] = market_code
     if position:
-        where.append("position = :position")
+        where.append("pr.position = :position")
         params["position"] = position.upper()
     if team:
-        where.append("team = :team")
+        where.append("pr.team = :team")
         params["team"] = team.upper()
     if search and search.strip():
-        where.append("player_name ILIKE :search")
+        where.append("pr.player_name ILIKE :search")
         params["search"] = f"%{search.strip()}%"
     if starters_only:
-        where.append("depth_rank <= 1")
+        where.append("pr.depth_rank <= 1")
 
     where_sql = " AND ".join(where)
     order_sql = f"{sorts[sort]} {'ASC' if order == 'asc' else 'DESC'} NULLS LAST"
 
     total = db.execute(
-        text(f"SELECT COUNT(*) FROM player_projections WHERE {where_sql}"), params
+        text(f"SELECT COUNT(*) FROM player_projections pr WHERE {where_sql}"),
+        params,
     ).scalar_one()
 
     rows = db.execute(

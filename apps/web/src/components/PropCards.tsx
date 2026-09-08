@@ -164,7 +164,10 @@ export default function PropCards({
                 <div>
                   <div className="label">Model</div>
                   <div className="value">
-                    {fmtNum(top.projection, market)}
+                    {/* The median, matching the board and the edge beside
+                        it. This showed the mean, so a card could read
+                        "line 22, model 33, edge -2". */}
+                    {fmtNum(top.projection_median ?? top.projection, market)}
                   </div>
                 </div>
                 <div>

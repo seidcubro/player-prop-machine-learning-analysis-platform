@@ -171,11 +171,28 @@ def load_current_context(engine) -> dict:
         engine,
     ).set_index("player_id")
 
+    # Only this season's injury reports count.
+    #
+    # There was no bound here at all, so this took each player's most recent
+    # report ever and applied it as though it were current. In September that
+    # means January. Thirty-five players on the board carried a flag from last
+    # season, thirteen of them "Out": Bo Nix out with the ankle he broke in the
+    # playoffs, Jayden Daniels out with an elbow, Nico Collins out with a
+    # concussion, all of them long since healthy and starting. Two were older
+    # still -- Jameson Williams and Rachaad White were carrying "Questionable"
+    # from 2024.
+    #
+    # A player who has not appeared on a report this season has no injury, and
+    # the features should say so rather than repeating a stale one. Week 1
+    # reports are not published until the Wednesday of game week, so an empty
+    # result here is the normal state for most of the preseason and is correct.
     inj = pd.read_sql(
         text(
             """
             SELECT DISTINCT ON (player_id) player_id, report_status, season, week
             FROM injuries
+            WHERE season = (SELECT max(season) FROM nfl_games
+                            WHERE game_date <= CURRENT_DATE + 14)
             ORDER BY player_id, season DESC, week DESC
             """
         ),
@@ -1078,23 +1095,25 @@ def main():
             # correct, and nothing better available for this market.
             median_value = projection
 
-        # Pick the side by expected value against the actual price, not by
-        # which outcome is more likely.
+        # Price decides whether a pick is published, not which side it is.
         #
-        # Taking the more likely side is not a strategy. On a -130 under the
-        # break-even is 56.5%, so a 52% under is the more likely outcome and
-        # still a losing bet, and roughly half the props on a slate are exactly
-        # that shape. Backtested on the held-out 2025 season with models refit
-        # on earlier seasons only, best of three books, bootstrapped by slate:
+        # The side comes from the median further down. What the price decides is
+        # whether that pick is worth making at all, and the tier cuts are on
+        # expected value for that reason. Backtested on the held-out 2025 season
+        # with models refit on earlier seasons only, best of three books,
+        # bootstrapped by slate:
         #
-        #   more-likely-side rule            -0.4% ROI
+        #   no EV filter                     -0.4% ROI
         #   EV > 2%                          +1.1%
         #   EV > 4%                          +2.0%
         #   EV > 8%                          +2.7%  95% CI [+0.2%, +5.1%]
         #   EV > 10%                         +4.1%  95% CI [+1.0%, +7.2%]
         #
         # Monotone all the way up, and the first result in this project whose
-        # interval clears zero. Tiers are cut on EV for that reason.
+        # interval clears zero. A 52% under at -130 needs 56.5% to break even,
+        # so being the likelier side is not on its own a reason to bet it; the
+        # EV cut is what removes those.
+        #
         # Correct the probability before anything is decided from it. The side,
         # the expected value and the tier all derive from this number, so
         # calibrating afterwards would leave the filter selecting on the

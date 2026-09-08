@@ -28,7 +28,12 @@
   /* ---------------------------------------------------------------- text */
   --text: #e9edf7;
   --text-dim: #97a1bd;
-  --text-faint: #67728f;
+  /* Lightened from #67728f, which measured 3.69:1 behind the table headers and
+     3.94:1 behind the matchup line and the pager stamp. All three are 11 to
+     12px, so AA wants 4.5:1 and they were the only text on the site that missed
+     it. This clears 5.0:1 on the raised panels and 5.35:1 on the page ground
+     while staying the faintest step in the ramp. */
+  --text-faint: #7d88a6;
 
   /* ---------------------------------------------------------------- brand */
   --accent: #4d7cfe;
@@ -734,6 +739,23 @@ button:focus-visible, a:focus-visible, [role="option"]:focus-visible {
    */
   min-width: 1176px;
 }
+/*
+ * Deliberately wider than a 1440px viewport, so the board scrolls sideways
+ * inside its own container there rather than clipping anything.
+ *
+ * These are content minimums, measured rather than guessed. "Kenneth Walker
+ * III" needs 131px of name beside a 42px avatar. "Pass Completions" wraps below
+ * 126px. The win-percentage cell needs 132px for its bar and its number. And a
+ * row can carry three tier chips, "strong", "Best" and "Value" at 85, 65 and
+ * 64px, which need 137px of content to land on two lines; at less they take
+ * three and the row grows from its pinned 84px to 106px, which is what pushed
+ * rows out of alignment when this column was briefly narrowed to 150px.
+ *
+ * Trimming to fit 1440 was tried and every version cost something real: clipped
+ * names, a wrapped market label, or uneven rows. Collapsing the rail to icons
+ * that early would have taken the navigation labels away instead. A horizontal
+ * scroll inside a wide data table is the honest trade.
+ */
 .ps-table col.c-player { width: 250px; }
 .ps-table col.c-market { width: 146px; }
 .ps-table col.c-num    { width: 96px; }

@@ -200,7 +200,17 @@ def main():
 
             ev_over = p_over - american_to_prob(m["over_am"])
             ev_under = p_under - american_to_prob(m["under_am"])
-            take_over = ev_over >= ev_under
+
+            # Same side rule the live board uses.
+            #
+            # This took whichever side had the better expected value, which is
+            # not what ships any more: the board picks the side the model's own
+            # median favours, and lets the price decide only whether the pick is
+            # worth publishing. A record generated under a rule the site no
+            # longer follows describes a product nobody can bet.
+            #
+            # See the side selection in build_prop_edges.py.
+            take_over = m["q50"].to_numpy() > m["over_line"].to_numpy()
 
             m["recommended_side"] = np.where(take_over, "over", "under")
             m["win_prob"] = np.where(take_over, p_over, p_under)
@@ -222,7 +232,9 @@ def main():
             push = m["actual"] == m["line"]
             m["hit"] = np.where(push, None, won)
 
-            keep = (m["edge_tier"] != "none") & (~push)
+            # The live builder drops anything it does not make better than
+            # even money, so the record has to as well.
+            keep = (m["edge_tier"] != "none") & (~push) & (m["win_prob"] > 0.5)
             m = m[keep]
             if not m.empty:
                 all_rows.append(m)
