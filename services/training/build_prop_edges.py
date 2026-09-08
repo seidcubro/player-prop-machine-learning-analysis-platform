@@ -97,10 +97,29 @@ def normalize_team(name: str) -> str:
     return " ".join((name or "").lower().replace(".", "").replace("-", " ").split())
 
 
-# Markets with no graded pick and no historical price, so no claim about them
-# has ever been checked against a book. Capped below the top tiers in the tier
-# assignment; see the comment there.
-UNVALIDATED_MARKETS = frozenset({"any_td"})
+# Markets projected but never published as picks.
+#
+# Anytime touchdown is here because the book's margin on it is enormous. Across
+# the sixteen priced games its implied probabilities sum to 5.54 scorers per
+# game against 4.04 that actually score, which is a 37% overround. Nothing in a
+# market that wide is beatable without a demonstrated edge, and this market has
+# none: no pick in it has ever been graded and the snapshot table holds no
+# historical price to backtest against.
+#
+# The arithmetic makes it worse than merely unprofitable. A 37% margin means the
+# EV filter can only ever clear on longshots, because those are the only prices
+# far enough from the model's number to survive it, and the favourite-longshot
+# bias puts most of that margin on exactly those prices. So the filter selects
+# the bets where the vig is heaviest and the model's error is largest. That is
+# how a board of backup running backs at +800 came to be presented as the best
+# available value.
+#
+# The rate model itself is sound and stays on the projections page, where it
+# ranks Derrick Henry at 1.10 and Jahmyr Gibbs at 0.99 and agrees with the
+# devigged market. What is withdrawn is the claim that any of it is a bet.
+#
+# Revisit after a season of closing prices has been collected and graded.
+SUPPRESSED_MARKETS = frozenset({"any_td"})
 
 
 def edge_tier(raw_edge: float) -> str:
@@ -1124,6 +1143,10 @@ def main():
         if not math.isfinite(expected_value):
             continue
 
+        # Projected, but not offered as a bet. See SUPPRESSED_MARKETS.
+        if market_code in SUPPRESSED_MARKETS:
+            continue
+
         # Tiers re-cut for the calibrated probability.
         #
         # The old cuts (10/8/4/2) were chosen against the uninflated EV, so once
@@ -1182,27 +1205,6 @@ def main():
         else:
             tier = "none"
 
-        # A market nobody has ever graded does not get to call itself elite.
-        #
-        # Anytime touchdown is the only market on the board with no history at
-        # all: books post it as a Yes-only price, the snapshot table holds zero
-        # rows for it across three seasons, and no pick in it has ever been
-        # settled. The underlying rate is well calibrated out of sample, 0.190
-        # predicted against 0.187 actual on 5,827 held-out player-games, so the
-        # number itself is worth publishing.
-        #
-        # What cannot be checked is the only thing that decides profit: whether
-        # the rate beats the price. Its edges land almost entirely on longshots
-        # at +600 to +1100, which is where the favourite-longshot bias runs
-        # hardest against a bettor, and every market I could test showed the
-        # largest disagreements with the book were where the model was most
-        # wrong. Claiming a 14-point edge there on an untested market would be
-        # asserting exactly the thing that has failed every previous check.
-        #
-        # So it is shown, capped, and labelled, and it revisits this cap once a
-        # season of closing prices has been collected and graded.
-        if market_code in UNVALIDATED_MARKETS and tier in ("elite", "strong"):
-            tier = "medium"
 
         # A bet the price already covers is not an edge, so it is not shown.
         if tier == "none":
