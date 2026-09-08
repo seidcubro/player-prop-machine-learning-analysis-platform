@@ -1124,23 +1124,68 @@ def main():
         if only_under and only_over:
             continue
 
-        if only_over or (not only_under and ev_over >= ev_under):
+        # The side the model actually favours, not the side with the better
+        # price.
+        #
+        # These come apart on roughly one row in thirteen, and when they did the
+        # board printed a model number above the line next to a pick of UNDER.
+        # No amount of column labelling makes that read as anything but a bug,
+        # and a board people cannot read is worse than one that passes on a few
+        # bets.
+        #
+        # The median is what decides it, because the median is what the board
+        # shows. Deriving the side from the corrected probability instead was
+        # tried and produced a coherent board with absurd numbers on it: the
+        # isotonic map has to be inverted to yield a median, that inversion runs
+        # well outside the range the map was fitted on, and it put Justin
+        # Jefferson at 2.49 receptions. The correction belongs where it was
+        # measured, on the probability that prices the bet.
+        #
+        # Nothing is lost by the change that the record can detect. Graded picks
+        # split by whether the pick agreed with the model return +0.3% when they
+        # agree and +4.2% when they do not, but on 25 slates the intervals are
+        # [-3.4%, +4.2%] and [-0.2%, +7.9%] and neither clears zero. There is no
+        # measured edge being given up here, only an unmeasured one.
+        #
+        # The price still decides whether a pick is published at all: expected
+        # value is computed for the chosen side, and a side the price does not
+        # justify falls below the tier cut and never appears.
+        prefer_over = median_value > line_value
+        if only_over or (not only_under and prefer_over):
             recommended_side = "over"
             win_prob = float(p_over)
             chosen_price = o["over_price"]
             expected_value = ev_over
-            # Measured from the median for the same reason it is displayed:
-            # an edge computed off the mean can point the opposite way to the
-            # pick it is sitting next to.
-            raw_edge = median_value - line_value
         else:
             recommended_side = "under"
             win_prob = float(p_under)
             chosen_price = o["under_price"]
             expected_value = ev_under
-            raw_edge = line_value - median_value
+
+        # Always the model's number minus the book's, never flipped to match
+        # the pick.
+        #
+        # It used to be signed in the direction of whichever side was chosen, so
+        # the same 4.06 model against a 3.5 line printed +0.56 on an over and
+        # -0.56 on an under. The magnitude was the only real information and the
+        # sign just repeated the Pick column in a way that looked like it
+        # disagreed with it. Now a positive edge means the model is above the
+        # line and nothing else, so two rows with the same numbers read the same
+        # way.
+        raw_edge = median_value - line_value
 
         if not math.isfinite(expected_value):
+            continue
+
+        # A pick the model does not think is more likely than not.
+        #
+        # The side comes from the median and the probability comes from the
+        # median's distribution with the isotonic correction on top, so on a
+        # handful of rows the correction lands just the other side of even. Six
+        # of 350. Publishing a recommendation next to a 49% chance of winning it
+        # invites exactly the question the rest of this work was meant to
+        # settle, and six rows are not worth it.
+        if win_prob <= 0.5:
             continue
 
         # Projected, but not offered as a bet. See SUPPRESSED_MARKETS.
