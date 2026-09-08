@@ -92,3 +92,15 @@ export const YES_NO_MARKETS = new Set(["any_td"]);
 export function isYesNo(code: string): boolean {
   return YES_NO_MARKETS.has(code);
 }
+
+/**
+ * What to call the side of a bet.
+ *
+ * A yes-or-no market has no over and no under. The board rendered "OVER" on
+ * every anytime touchdown row, which reads as nonsense next to a 0.5 line that
+ * only exists because the code needed a number to compare against.
+ */
+export function sideLabel(marketCode: string, side: string): string {
+  if (!isYesNo(marketCode)) return side;
+  return side === "over" ? "yes" : "no";
+}
