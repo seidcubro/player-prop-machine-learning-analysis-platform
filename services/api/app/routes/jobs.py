@@ -10,6 +10,9 @@ Uses the market registry to determine:
 This version stores cross-market upstream features in player_market_features.extra_features JSONB.
 """
 
+import logging
+import os
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -19,6 +22,45 @@ import json
 
 from ..db import get_db
 from ..admin_auth import require_admin
+
+
+log = logging.getLogger(__name__)
+
+# Median recorded temperature of an outdoor game, by calendar month.
+#
+# Measured from nfl_games across 2022 onward, outdoor and open roofs only, and
+# used when a game has no reading at all. February is the Super Bowl and has a
+# single game behind it, so it borrows January rather than trusting an n of one.
+#
+#   Sep 74   Oct 66   Nov 54   Dec 46   Jan 38
+#
+# The fallback is the median across every outdoor game, 56F.
+_OUTDOOR_TEMP_BY_MONTH = {1: 38.0, 2: 38.0, 9: 74.0, 10: 66.0, 11: 54.0, 12: 46.0}
+_OUTDOOR_TEMP_DEFAULT = 56.0
+
+# Median wind at an outdoor game, in mph. Unlike temperature this barely moves
+# across the season, 7 to 8 from September through January, so one number does
+# the job. Zero would mean dead calm, which is not the same as unrecorded and
+# reads as the most pass-friendly conditions of the year.
+_OUTDOOR_WIND_DEFAULT = 8.0
+
+# Stadiums with a retractable roof, and how often they actually close it.
+#
+# nflverse leaves `roof` blank for these venues until game day, when it resolves
+# to "open" or "closed". That is 43 of the 2026 season's scheduled games, and a
+# blank roof used to read as is_indoor = 0: every Dallas, Houston, Arizona,
+# Atlanta and Indianapolis home game modelled as open air.
+#
+# They are not. Measured over 2022-2025, these roofs are shut between 82% and
+# 94% of the time, so the honest expectation for a scheduled game is indoors.
+#
+#   SELECT home_team,
+#          count(*) FILTER (WHERE roof = 'closed')::float
+#            / count(*) FILTER (WHERE roof IN ('closed','open'))
+#     FROM nfl_games WHERE season BETWEEN 2022 AND 2025 GROUP BY 1;
+_RETRACTABLE_CLOSED_RATE = {
+    "ARI": 0.848, "ATL": 0.824, "DAL": 0.943, "HOU": 0.944, "IND": 0.824,
+}
 
 router = APIRouter()
 
@@ -32,6 +74,53 @@ def _mean(vals):
 def _stddev_pop(vals):
     m = _mean(vals)
     return math.sqrt(sum((x - m) ** 2 for x in vals) / len(vals))
+
+
+# Emit a feature row for each player's next scheduled game, not only for games
+# he has already played. Set to 0 to go back to played games only.
+SERVING_ROWS = os.getenv("SERVING_ROWS", "1") != "0"
+# Fewest prior games a serving row will be built from. Three is enough for a
+# mean and a trend to mean anything; below that the window is one good game.
+MIN_SERVING_GAMES = int(os.getenv("MIN_SERVING_GAMES", "3"))
+
+
+def _append_serving_game(player_id, games, schedule_by_team, current_team):
+    """Append a synthetic target for the player's next scheduled game.
+
+    The row is a copy of his last played game with the date and opponent moved
+    to the upcoming one, so every context column the feature loop reads is
+    present. Those columns are all refreshed at serving time anyway, by
+    apply_current_context in build_prop_edges and build_projections, which is
+    what makes copying them safe: the only thing this row is relied on for is
+    the rolling window, and that is the one thing it gets right.
+    """
+    last = games[-1]
+    last_date = last.get("game_date")
+    if last_date is None:
+        return games
+    team = current_team.get(player_id) or last.get("team")
+    # Strictly ahead of today, not merely ahead of his last appearance.
+    #
+    # A player who has not played since Week 5 because he is hurt has a "next
+    # scheduled game" in Week 6, which has already been played without him.
+    # Emitting a row there serves nothing, and since a row is written on every
+    # rebuild at whatever date was next at the time, they pile up: the first
+    # run of this produced 714 serving rows of which only 252 were for a game
+    # that had not happened. Feature rows are never deleted, so clutter here is
+    # permanent.
+    today = date.today()
+    upcoming = next(((d, opp) for d, opp in schedule_by_team.get(team, [])
+                     if d > last_date and d >= today), None)
+    if upcoming is None:
+        return games
+    game_date, opponent = upcoming
+    synthetic = dict(last)
+    synthetic["game_date"] = game_date
+    synthetic["opponent"] = opponent
+    synthetic["team"] = team
+    synthetic["y"] = 0.0
+    synthetic["_serving"] = True
+    return list(games) + [synthetic]
 
 
 def _weighted_mean_recent(vals):
@@ -160,6 +249,28 @@ def _get_safe_upstream_markets(db: Session, market_code: str):
         "rush_yds": ["rush_att"],
         "rush_td": ["rush_att"],
 
+        # Anytime touchdown, deliberately with nothing upstream.
+        #
+        # This market was added after the map was written and had no entry at
+        # all, so it fell through to the empty default while both siblings got
+        # one: rush_td has carries, rec_td has receptions. That looked like the
+        # cause of a real problem, since anytime touchdown projections run at
+        # 81% of the measured rate for receivers and 76% for tight ends against
+        # 95% for backs, and without volume the model cannot separate a receiver
+        # who runs twelve routes from one who runs two.
+        #
+        # Tested: carries and receptions added, everything else held fixed.
+        # R2 went 0.12941 to 0.12895, MAE 0.3197 to 0.3183, and the receiver
+        # ratio moved 0.805 to 0.813. Nothing that survives a fourth decimal
+        # place. The other ten markets came back bit identical, so that is a
+        # clean read and not noise in the harness.
+        #
+        # So the entry stays empty, and it is written out rather than left
+        # missing: an absent key and an intentionally empty one now mean
+        # different things, and this one is intentional. The receiver bias is
+        # real and still unexplained.
+        "any_td": [],
+
         # passing
         "pass_att": [],
         "pass_completions": ["pass_att"],
@@ -185,6 +296,16 @@ def _get_safe_upstream_markets(db: Session, market_code: str):
         "punts": [],
         "punt_yds": [],
     }
+
+    # A market missing from the map is not the same as a market with nothing
+    # upstream, and the silent default made them identical. any_td was added
+    # after this map was written, never got an entry, and trained with no volume
+    # features for as long as it existed while both of its siblings had one.
+    if market_code not in allowed_by_market:
+        log.warning(
+            "market %r has no entry in the upstream feature map, so it will "
+            "train with no volume features from other markets. Add an explicit "
+            "entry, even an empty one, to say that is intended.", market_code)
 
     allowed_codes = allowed_by_market.get(market_code, [])
     if not allowed_codes:
@@ -461,7 +582,8 @@ def build_features(
             COALESCE(opd.pos_recs_allowed, 0)::float8      AS opp_pos_recs,
             COALESCE(opd.pos_targets_allowed, 0)::float8   AS opp_pos_targets,
             COALESCE(opd.pos_tds_allowed, 0)::float8       AS opp_pos_tds,
-            -- The upcoming opponent's own recent form (see opp_pos_form). Opf.form_pos_rush_yds  AS form_pos_rush_yds,
+            -- The upcoming opponent's own recent form (see opp_pos_form).
+            opf.form_pos_rush_yds  AS form_pos_rush_yds,
             opf.form_pos_carries   AS form_pos_carries,
             opf.form_pos_rec_yds   AS form_pos_rec_yds,
             opf.form_pos_recs      AS form_pos_recs,
@@ -579,6 +701,7 @@ def build_features(
             market_id,
             as_of_game_date,
             opponent,
+            team,
             lookback,
             mean,
             stddev,
@@ -594,6 +717,7 @@ def build_features(
             :market_id,
             :as_of_game_date,
             :opponent,
+            :team,
             :lookback,
             :mean,
             :stddev,
@@ -605,6 +729,15 @@ def build_features(
           )
         ON CONFLICT (player_id, market_id, as_of_game_date, opponent, lookback)
         DO UPDATE SET
+          -- Written here rather than patched afterwards.
+          --
+          -- Every new row used to arrive with a NULL team and
+          -- db/backfills/fix_team_final.sql filled it in on a later step, which
+          -- worked only because that backfill joins the stat line for the same
+          -- player and date. A row for a game that has not been played has no
+          -- stat line, so 5,287 serving rows stayed NULL and the freshness
+          -- audit failed on them. The value is already in hand at insert time.
+          team = COALESCE(EXCLUDED.team, player_market_features.team),
           mean = EXCLUDED.mean,
           stddev = EXCLUDED.stddev,
           weighted_mean = EXCLUDED.weighted_mean,
@@ -617,15 +750,78 @@ def build_features(
 
     upserts = 0
 
+    # One extra row per player, for the game he has not played yet.
+    #
+    # Feature rows are keyed by the game they predict, so the window in the row
+    # dated 2026-01-04 holds the five games BEFORE that date. Right for
+    # training, wrong for serving: the newest row that exists for a player is
+    # the one for his last played game, so the board read a window that stopped
+    # one game early. Travis Kelce's newest row means 33.0 over Nov 23 to Dec
+    # 25; his real last five through Jan 4 average 26.4, and the model was
+    # handed the older number on every projection this site has published.
+    #
+    # At training the window is always adjacent to the game being predicted. At
+    # serving there was always a one game gap. Across 17,872 rec_yds
+    # player-games the adjacent window scores 17.502 MAE and 0.5945 correlation
+    # against 17.821 and 0.5825 for the window one game back.
+    #
+    # These rows cost nothing elsewhere: label_actual is filled by
+    # attach_labels from a real stat line, an unplayed game has none, and every
+    # query feeding training filters on label_actual IS NOT NULL. They are
+    # invisible to training by construction rather than by remembering to
+    # exclude them.
+    schedule_by_team: dict = {}
+    current_team: dict = {}
+    if SERVING_ROWS:
+        for g in db.execute(text(
+            "SELECT game_date, home_team, away_team FROM nfl_games "
+            "WHERE game_date IS NOT NULL"
+        )).mappings().all():
+            schedule_by_team.setdefault(g["home_team"], []).append(
+                (g["game_date"], g["away_team"]))
+            schedule_by_team.setdefault(g["away_team"], []).append(
+                (g["game_date"], g["home_team"]))
+        for t in schedule_by_team:
+            schedule_by_team[t].sort()
+        # The player's CURRENT team, not the one he last played for. A traded
+        # player's next game belongs to his new club, and keying off history is
+        # what once left David Montgomery with 12 priced props and no edges.
+        current_team = {
+            r[0]: r[1] for r in db.execute(text(
+                "SELECT external_id, team FROM players "
+                "WHERE external_id IS NOT NULL AND team IS NOT NULL"
+            )).all()
+        }
+
+    serving_written = 0
     for player_id, games in by_player.items():
+        if SERVING_ROWS and games:
+            games = _append_serving_game(
+                player_id, games, schedule_by_team, current_team)
         ys = [float(g["y"] or 0.0) for g in games]
 
         for i in range(len(games)):
-            if i < lookback:
+            is_serving = bool(games[i].get("_serving"))
+            # A training row needs a full window. A serving row does not.
+            #
+            # Requiring `lookback` prior games before writing anything means a
+            # player is invisible until his sixth career game: no feature row,
+            # so no projection, so no profile and nothing on the board. That is
+            # right for training, where a short window would be a different kind
+            # of row from the ones the model learns on, and wrong for serving,
+            # where the alternative to a window of three games is showing
+            # nothing at all about a rookie the books are already pricing.
+            #
+            # These rows never reach training regardless, because they carry no
+            # label. So the floor is only lowered for the row that gets served.
+            floor = MIN_SERVING_GAMES if is_serving else lookback
+            if i < floor:
                 continue
 
-            window_games = games[i - lookback:i]
-            window = ys[i - lookback:i]
+            # Never reaches back past the start of his career.
+            start = max(0, i - lookback)
+            window_games = games[start:i]
+            window = ys[start:i]
             # The game being predicted. Defined up front because several feature
             # families read the opponent's own context from it, not just the
             # Vegas block further down.
@@ -723,9 +919,30 @@ def build_features(
                 for g in games[:i]
                 if g.get("season") == games[i].get("season")
             ]
+            # The sample size is always written, including when it is zero.
+            #
+            # Omitting a key does not hide it from the model: anything named in
+            # feature_cols and missing here is read as 0.0, and y_season_mean is
+            # named by 158 model artifacts. In week one season_prior is empty by
+            # definition, so both keys vanished and the model was told every
+            # player is averaging zero this season. That is not a small lie for
+            # a feature this predictive, and it lands on the whole board at once
+            # rather than on a few rows: at the start of a season every row
+            # being served carries it.
+            #
+            # So the count says zero honestly, and the mean falls back to the
+            # player's own level instead of a number that means "he does not
+            # produce". y_season_n tells the model how far to trust it, which is
+            # the reason the count was there in the first place.
+            extra_features["y_season_n"] = float(len(season_prior))
             if season_prior:
                 extra_features["y_season_mean"] = _mean(season_prior)
-                extra_features["y_season_n"] = float(len(season_prior))
+            else:
+                anchor = extra_features.get("ewma_level")
+                if anchor is None and window:
+                    anchor = _mean(window)
+                if anchor is not None:
+                    extra_features["y_season_mean"] = float(anchor)
 
             for code, _col in upstream_cols:
                 vals = [float(g.get(code, 0.0) or 0.0) for g in window_games]
@@ -1024,23 +1241,62 @@ def build_features(
                 extra_features["team_implied_total"] = team_implied_total
                 extra_features["team_spread"] = team_spread
 
+            # Weather, with "not recorded" kept distinct from "zero".
+            #
+            # Leaving the key out does not mean the model never sees a number:
+            # a feature named in feature_cols but absent here is read with a
+            # default of 0.0, and game_temp is in the feature list of 214 model
+            # artifacts. So every game without a recorded temperature was being
+            # trained and served as 0F.
+            #
+            # For a dome that is merely wrong; indoor stadiums are climate
+            # controlled and 70F is the honest number, with no wind. For the
+            # 1,394 outdoor rows and every open-roof game with no reading it is
+            # worse: a September afternoon in Miami and a January night in
+            # Buffalo arrive as the same feature value, and the value is colder
+            # than either.
+            roof_raw = (target_game.get("game_roof") or "").strip().lower()
+            if roof_raw:
+                indoors = roof_raw in ("dome", "closed")
+            else:
+                # Blank means a retractable roof that has not been called yet.
+                # Go with what the venue usually does.
+                indoors = _RETRACTABLE_CLOSED_RATE.get(
+                    target_game.get("game_home_team"), 0.0) > 0.5
+
             game_wind = target_game.get("game_wind")
             game_temp = target_game.get("game_temp")
+
             if game_wind is not None:
                 extra_features["game_wind"] = float(game_wind)
+            elif indoors:
+                extra_features["game_wind"] = 0.0
+            else:
+                extra_features["game_wind"] = _OUTDOOR_WIND_DEFAULT
+
             if game_temp is not None:
                 extra_features["game_temp"] = float(game_temp)
+            elif indoors:
+                extra_features["game_temp"] = 70.0
+            else:
+                # Outdoors and unrecorded. The month is the single strongest
+                # thing known about an NFL temperature, so it beats both a
+                # constant and a zero.
+                extra_features["game_temp"] = _OUTDOOR_TEMP_BY_MONTH.get(
+                    getattr(target_game.get("game_date"), "month", 0),
+                    _OUTDOOR_TEMP_DEFAULT)
             extra_features["game_div_game"] = float(target_game.get("game_div_game", 0.0) or 0.0)
 
             # Venue and situation for the game being predicted. Indoor removes
             # weather entirely, surface affects pace, and rest days separate a
             # short-week Thursday game from a bye-week return -- all known well
             # before kickoff and none of it previously used.
-            roof = (target_game.get("game_roof") or "").strip().lower()
-            if roof:
-                # "closed" is a retractable roof shut for the game, so it plays
-                # as a dome; "open" is a retractable roof left open.
-                extra_features["is_indoor"] = 1.0 if roof in ("dome", "closed") else 0.0
+            # "closed" is a retractable roof shut for the game, so it plays as a
+            # dome; "open" is a retractable roof left open. A blank roof is a
+            # retractable venue whose game-day call has not been made, resolved
+            # above by what that stadium usually does rather than left to read
+            # as open air.
+            extra_features["is_indoor"] = 1.0 if indoors else 0.0
             surface = (target_game.get("game_surface") or "").strip().lower()
             if surface:
                 extra_features["is_turf"] = 0.0 if "grass" in surface else 1.0
@@ -1175,6 +1431,7 @@ def build_features(
                     "market_id": m["id"],
                     "as_of_game_date": games[i]["game_date"],
                     "opponent": games[i]["opponent"],
+                    "team": target_game.get("team"),
                     "lookback": lookback,
                     "mean": mu,
                     "stddev": sd,
@@ -1186,6 +1443,8 @@ def build_features(
                 },
             )
             upserts += 1
+            if target_game.get("_serving"):
+                serving_written += 1
 
     db.commit()
 
@@ -1199,6 +1458,7 @@ def build_features(
         "eligible_positions": sorted(list(eligible_positions)),
         "upstream_features_used": [code for code, _ in upstream_cols],
         "upserts": upserts,
+        "serving_rows": serving_written,
     }
 
 
