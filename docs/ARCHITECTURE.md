@@ -16,10 +16,10 @@ has no stats file. Roughly 1,600 lines covering `player_game_stats_app`,
 Not a compose service. Run it standalone, build context has to be the repo root:
 
 ```bash
-docker build -f jobs/ingestion/Dockerfile -t propsignal-ingestion .
+docker build -f jobs/ingestion/Dockerfile -t priorline-ingestion .
 docker run --rm --network player-prop-platform_default \
   -e DATABASE_URL="postgresql://app:app@postgres:5432/app" \
-  -e SEASON_START=2022 -e SEASON_END=2026 propsignal-ingestion
+  -e SEASON_START=2022 -e SEASON_END=2026 priorline-ingestion
 ```
 
 **2. Feature engineering** (`services/api/app/routes/jobs.py`)

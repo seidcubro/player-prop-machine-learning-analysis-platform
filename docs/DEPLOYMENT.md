@@ -1,5 +1,9 @@
 # Deployment
 
+This is the reasoning. The commands are in `deploy/README.md`, and the files
+they refer to are in `deploy/`: a production compose file, a Caddyfile, systemd
+timers, and a database migration script.
+
 ## What goes where
 
 Three pieces, and they don't all belong in the same place.
@@ -54,7 +58,7 @@ Frontend only. In the Vercel project settings:
 
 - Root directory: `apps/web`
 - Framework preset: Vite (auto-detected)
-- Environment variable: `VITE_API_BASE=https://your-api-host/api/v1`
+- Environment variable: `VITE_API_BASE=https://api.priorline.io/api/v1`
 
 `VITE_API_BASE` is read at build time, not runtime, so changing it needs a
 redeploy.
@@ -68,27 +72,37 @@ For preview deployments, each one gets its own subdomain, so add
 `WEB_ORIGIN_REGEX` on the API rather than listing them by hand:
 
 ```
-WEB_ORIGIN_REGEX=https://.*-yourname\.vercel\.app
+WEB_ORIGIN_REGEX=https://priorline-.*\.vercel\.app
 ```
 
 ## Custom domain
 
 Point the apex and `www` at Vercel for the frontend. Put the API on a subdomain
-(`api.yourdomain.com`) with its own TLS, then set `VITE_API_BASE` to it and add
+(`api.priorline.io`) with its own TLS, then set `VITE_API_BASE` to it and add
 it to `WEB_ORIGINS`. Keeping them on separate hostnames means the API can move
 later without touching the frontend.
 
 ## Keeping it current
 
-`scripts/weekly_update.sh` is the whole in-season loop. Twice a week:
+`scripts/scheduled_update.sh` is the whole in-season loop, and the systemd
+timers in `deploy/systemd` run it:
 
-```bash
-sh scripts/weekly_update.sh                # Tuesday: grade, refresh, retrain
-sh scripts/weekly_update.sh --close-only   # Sunday: capture closing lines
-```
+| timer | mode | when | credits |
+|---|---|---|---|
+| closing | `--closing` | hourly | 9 per game, only when a slate is inside 90 minutes |
+| daily | `--daily` | 08:00 | about 145 |
+| board | `--board` | 17:00 | free |
+| weekly | `--weekly` | Tuesday 01:00 | free |
 
-The Sunday run matters more than it looks. A closing line I don't capture is
-gone unless I pay the archive rate for it later.
+Every timer sets `Persistent=true`, which is the part that matters. A run the
+machine was down for happens when it comes back instead of being skipped
+silently. Windows Task Scheduler defaults to the opposite, which is why the
+laptop captured no closing lines at all for Week 1: it slept through both
+mornings and nothing retried.
+
+The closing capture matters more than it looks. A price not captured before
+kickoff is gone unless I pay the archive rate for it later, and closing line
+value converges far faster than win and loss does.
 
 Both scripts end with `audit_freshness.py`, which exits non-zero if anything is
 stale or inconsistent. Don't ignore it. It exists because the dashboard once

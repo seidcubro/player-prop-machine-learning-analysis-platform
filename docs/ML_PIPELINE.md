@@ -242,6 +242,65 @@ TD markets sit low on R² and always will. Touchdowns are rare and close to
 binary, so R² is the wrong lens. What matters there is whether the probability is
 calibrated.
 
+## The serving window used to be one game short
+
+Feature rows are keyed by the game they predict. The row dated 2026-01-04 for
+Travis Kelce holds the five games *before* that date, and its label is what he
+did on 01-04. That is right for training: the window never sees the game it is
+predicting.
+
+It was wrong for serving. The newest row that existed for any player was the one
+for his last played game, so when the board projected tonight's game it read a
+window that stopped one game earlier than it should. Kelce's newest row meant
+33.0, covering Nov 23 through Dec 25. His actual last five games through 01-04
+average 26.4. The model was handed the older number.
+
+At training the window is always adjacent to the game being predicted. At
+serving there was always a one game gap, on every projection the site had ever
+published. Measured on 17,872 rec_yds player-games:
+
+| window | MAE | correlation with actual |
+|---|---|---|
+| adjacent (what training sees) | 17.502 | 0.5945 |
+| one game back (what serving saw) | 17.821 | 0.5825 |
+
+It also made the backtested track record optimistic, because the reconstruction
+reads training rows, which carry adjacent windows, while live picks never did.
+
+### What fixed it
+
+`build_features` now emits one extra row per player for his next scheduled
+game, with the window running through his last played game. Training is
+untouched: `label_actual` is filled by `attach_labels` from a real stat line, an
+unplayed game has none, and every query feeding training filters on
+`label_actual IS NOT NULL`. Verified by row count, 18,563 labeled rec_yds rows
+before and after, newest training date still 2026-09-13.
+
+Three things had to come with it.
+
+The row is only written for a game genuinely ahead of today, not merely ahead of
+the player's last appearance. A player who has not played since Week 5 because
+he is hurt has a next scheduled game in Week 6, which has already been played
+without him. The first version wrote 714 rec_yds serving rows of which only 252
+were for a game that had not happened, and feature rows are never deleted, so
+that clutter would have been permanent.
+
+`days_since_last_game` had to stop reading `as_of_game_date`. Both builders
+measured staleness from it, which worked only because that date happened to be
+the player's last game. On a serving row it is the upcoming game, so staleness
+would have come out as zero for everyone on the board, silently switching off
+`is_stale_window`, `stale_role_change` and the stale-role correction that
+depends on them. `build_prop_edges.load_last_played` reads the real date from
+the stat table, where a game that has not happened cannot appear.
+
+`team` is now written at insert time instead of patched afterwards by
+`db/backfills/fix_team_final.sql`. That backfill fills the column by joining the
+stat line for the same player and date, and a serving row has no stat line, so
+5,287 of them stayed NULL and the freshness audit failed on them.
+
+Kelce's serving row now reads mean 26.40 against DEN with 253 days of
+staleness, which is the number his last five games actually average.
+
 ## History
 
 Things that were wrong, and what they actually were.

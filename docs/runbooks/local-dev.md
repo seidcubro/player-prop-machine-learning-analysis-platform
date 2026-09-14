@@ -17,9 +17,9 @@ re-run - apply new migrations/backfills manually (see `db/migrations/`, `db/back
 ## 2. (If the DB is empty) run ingestion
 
 ```bash
-docker build -f jobs/ingestion/Dockerfile -t propsignal-ingestion .
+docker build -f jobs/ingestion/Dockerfile -t priorline-ingestion .
 docker run --rm --network player-prop-platform_default \
-  -e POSTGRES_HOST=postgres propsignal-ingestion
+  -e POSTGRES_HOST=postgres priorline-ingestion
 ```
 
 This populates `player_game_stats_app`, `nfl_games`, `snap_counts`, `ff_opportunity`,

@@ -6,7 +6,7 @@ why, since the decision was never recorded)
 
 ## Context
 
-PropSignal needed a stack that a single developer could run entirely locally (Windows +
+PriorLine needed a stack that a single developer could run entirely locally (Windows +
 Docker Desktop), with a real relational store for a fairly relational feature/model
 registry problem (players, markets, feature rows, model versions, edges), and a Python ML
 ecosystem for training/evaluation.
