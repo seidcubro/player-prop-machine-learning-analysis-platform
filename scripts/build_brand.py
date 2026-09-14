@@ -1,4 +1,4 @@
-"""Generate the whole PropSignal brand pack from one definition of the mark.
+"""Generate the whole PriorLine brand pack from one definition of the mark.
 
 Everything here is drawn from the same geometry and the same three colours, so
 the favicon, the app icon and the LinkedIn banner cannot drift apart the way they
@@ -133,10 +133,10 @@ def font(size, bold=True):
 
 
 def wordmark(draw, xy, size, on_dark=True):
-    """"PropSignal", with "Signal" carrying the brand colour."""
+    """"PriorLine", with "Line" carrying the brand colour."""
     f = font(size)
     x, y = xy
-    a, b = "Prop", "Signal"
+    a, b = "Prior", "Line"
     draw.text((x, y), a, font=f, fill=(PAPER if on_dark else INK) + (255,), anchor="ls")
     wa = draw.textlength(a, font=f)
     draw.text((x + wa, y), b, font=f, fill=BLUE + (255,), anchor="ls")
@@ -152,7 +152,7 @@ def glow(img, mark, box, radius, strength=0.55):
     img.alpha_composite(layer)
 
 
-def banner(w, h, mark_px, out, tagline="Bet the signal, not the noise"):
+def banner(w, h, mark_px, out, tagline="Our prior. Their line."):
     img = Image.new("RGBA", (w, h), INK + (255,))
     # Faint diagonal brand wash across the whole field.
     wash = linear_gradient((w, h), [(0.0, (10, 14, 28)), (0.5, (14, 20, 42)),
@@ -171,7 +171,7 @@ def banner(w, h, mark_px, out, tagline="Bet the signal, not the noise"):
     tag_size = int(h * 0.075)
     gap = int(mark_px * 0.30)
     f_name, f_tag = font(name_size), font(tag_size)
-    name_w = d.textlength("PropSignal", font=f_name)
+    name_w = d.textlength("PriorLine", font=f_name)
     tag_w = d.textlength(tagline, font=f_tag)
     text_w = max(name_w, tag_w)
     total = mark_px + gap + text_w
@@ -191,7 +191,18 @@ def banner(w, h, mark_px, out, tagline="Bet the signal, not the noise"):
 
 
 def main():
-    dest = sys.argv[1] if len(sys.argv) > 1 else "."
+    # Somewhere deliberate, never the working directory.
+    #
+    # This defaulted to ".", so running it from the repo root scattered
+    # eighteen PNGs and a favicon across the top level of the project, next to
+    # the compose file. They are build output, not source, and they belong
+    # wherever the caller says.
+    if len(sys.argv) > 1:
+        dest = sys.argv[1]
+    else:
+        dest = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), os.pardir, "brand")
+    dest = os.path.abspath(dest)
     os.makedirs(dest, exist_ok=True)
 
     def p(name):

@@ -1,5 +1,5 @@
 /**
- * PropSignal logo, vector recreation of the final brand mark:
+ * PriorLine logo, vector recreation of the final brand mark:
  * a broken circular ring with an ECG waveform running through it. The ring
  * opens where the waveform crosses it, so the signal reads as passing through.
  *
@@ -15,7 +15,7 @@ type LogoProps = {
   title?: string;
 };
 
-export default function Logo({ size = 32, title = "PropSignal" }: LogoProps) {
+export default function Logo({ size = 32, title = "PriorLine" }: LogoProps) {
   const decorative = title === "";
   return (
     <svg

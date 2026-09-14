@@ -1,4 +1,4 @@
-# PropSignal web
+# PriorLine web
 
 React + TypeScript + Vite. This is the frontend only. The projections, edges and
 player data all come from the FastAPI service in `services/api`.

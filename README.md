@@ -1,4 +1,4 @@
-# PropSignal
+# PriorLine
 
 I built this to answer one question before I bet: is this line wrong?
 

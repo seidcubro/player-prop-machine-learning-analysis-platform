@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <!--
-    PropSignal mark: a broken ring with an ECG waveform running through it.
+    PriorLine mark: a broken ring with an ECG waveform running through it.
 
     The ring opens at exactly 0 and 180 degrees, which is where the horizontal
     waveform crosses it, so the signal reads as passing through rather than
