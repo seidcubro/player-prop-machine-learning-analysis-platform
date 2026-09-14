@@ -102,15 +102,15 @@ export default function App() {
       <header className="ps-topbar" aria-hidden="true">
         <Logo size={26} title="" />
         <span className="ps-topbar-word">
-          Prop<span className="sig">Signal</span>
+          Prior<span className="sig">Line</span>
         </span>
       </header>
 
       <aside className="ps-rail" aria-label="Main">
-        <NavLink to="/" className="ps-rail-brand" aria-label="PropSignal home">
+        <NavLink to="/" className="ps-rail-brand" aria-label="PriorLine home">
           <Logo size={30} title="" />
           <span className="ps-rail-word">
-            Prop<span className="sig">Signal</span>
+            Prior<span className="sig">Line</span>
           </span>
         </NavLink>
 
@@ -126,7 +126,7 @@ export default function App() {
         </nav>
 
         <div className="ps-rail-foot">
-          <span className="ps-rail-label">Bet the signal, not the noise</span>
+          <span className="ps-rail-label">Our prior. Their line.</span>
         </div>
       </aside>
 

@@ -125,7 +125,12 @@ export type PropEdge = {
    * number that decides whether a pick is worth making; win_prob on its own
    * says nothing without the price next to it.
    */
+  /** Model probability minus the book's implied probability. The tier cuts
+   *  were fitted on this, so it stays the ranking the tiers agree with. */
   expected_value: number | null;
+  /** Profit per unit staked, which is the probability edge times the decimal
+   *  odds. The same edge is worth about twice as much on a plus price. */
+  ev_per_unit: number | null;
   recommended_side: string;
   edge_tier: EdgeTier;
   created_at: string;
@@ -175,6 +180,14 @@ export type EdgesSummary = {
   ok: boolean;
   by_market: { market_code: string; count: number; avg_abs_edge: number }[];
   by_tier: Partial<Record<EdgeTier, number>>;
+  by_game: {
+    event_id: string;
+    away_team: string;
+    home_team: string;
+    commence_time: string;
+    count: number;
+    elite: number;
+  }[];
   /** Count of best bets across the whole board, not just the loaded page. */
   best_bets: number;
   coverage: EdgeCoverage | null;
@@ -278,6 +291,47 @@ export async function fetchPlayer(playerId: number): Promise<Player> {
  *
  * Backend: GET /players/{player_id}/games?limit=...
  */
+/** One played game: our projection, the outcome, and the pick if we made one. */
+export type GameMarketRow = {
+  market_code: string;
+  projection: number | null;
+  p10: number | null;
+  p25: number | null;
+  p50: number | null;
+  p75: number | null;
+  p90: number | null;
+  model_name: string | null;
+  actual: number | null;
+  pick: {
+    line: number | null;
+    recommended_side: string | null;
+    win_prob: number | null;
+    edge_tier: string | null;
+    best_bet: boolean | null;
+    price_american: number | null;
+    bookmaker_title: string | null;
+    hit: boolean | null;
+    ev_per_unit: number | null;
+  } | null;
+};
+
+export type GameDetail = {
+  ok: boolean;
+  player_id: number;
+  game: Record<string, number | string | null>;
+  markets: GameMarketRow[];
+};
+
+/** Backend: GET /players/{id}/games/{date}. */
+export async function fetchPlayerGameDetail(
+  playerId: number,
+  gameDate: string,
+): Promise<GameDetail> {
+  return http<GameDetail>(
+    `${getApiBase()}/players/${playerId}/games/${gameDate.slice(0, 10)}`,
+  );
+}
+
 export async function fetchPlayerGames(
   playerId: number,
   limit = 5,
@@ -305,6 +359,10 @@ export async function fetchEdges(args?: {
   best_bets_only?: boolean;
   /** Exact tier, unlike min_tier which is "and up". */
   tier?: EdgeTier | null;
+  /** One game, by provider event id. */
+  event_id?: string | null;
+  /** Either side of a matchup, by team name. */
+  team?: string | null;
   limit?: number;
   offset?: number;
 }): Promise<EdgesResponse> {
@@ -315,6 +373,8 @@ export async function fetchEdges(args?: {
     search: args?.search ?? undefined,
     sort: args?.sort ?? "featured",
     best_bets_only: args?.best_bets_only ? true : undefined,
+    event_id: args?.event_id ?? undefined,
+    team: args?.team ?? undefined,
     tier: args?.tier ?? undefined,
     order: args?.order ?? "desc",
     limit: args?.limit ?? 50,
@@ -399,6 +459,10 @@ export type Projection = {
   is_starter: boolean | null;
   app_player_id: number | null;
   headshot: string | null;
+  /** When this player last actually played. A projection is only as current
+   *  as the games behind it, and some listed starters have not played in over
+   *  a year. */
+  last_game?: string | null;
 };
 
 export type ProjectionsResponse = {
