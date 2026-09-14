@@ -15,7 +15,30 @@ import os
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
+# Pooling set explicitly, because the defaults assume a process that dies often.
+#
+# pool_pre_ping is the one that matters. Without it SQLAlchemy hands out
+# whatever connection is in the pool and finds out it is dead when the query
+# fails, so the first request after a Postgres restart, a container update or an
+# idle timeout returns an error rather than reconnecting. On a laptop the
+# database never goes away and this never shows up; on a single small server it
+# restarts for updates and the site answers 500s until the pool turns over.
+#
+# pool_recycle is the same problem from the other side: a connection idle for
+# hours can be dropped by the server or something in between without either end
+# noticing, and overnight this API is idle for hours at a time.
+#
+# The sizes are deliberate rather than inherited. Ten plus five is far more than
+# a read-mostly site behind a 60-per-minute rate limit needs, and small enough
+# that the API cannot exhaust Postgres's connection slots and lock out the
+# pipeline that has to write to it.
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_size=10,
+    max_overflow=5,
+)
 SessionLocal = sessionmaker(bind=engine)
 
 def get_db():

@@ -61,12 +61,14 @@ def sync_odds_events(db: Session = Depends(get_db)):
         upserts += 1
 
     db.commit()
-    return {"ok": True, "events_upserted": upserts}
+    return {"ok": True, "events_upserted": upserts,
+            "credits_remaining": OddsApiClient.last_remaining}
 
 
 @router.post("/odds/sync/player_props", dependencies=[Depends(require_admin)])
 def sync_odds_player_props(
     days_ahead: int = 8,
+    hours_ahead: float | None = None,
     limit: int | None = None,
     db: Session = Depends(get_db),
 ):
@@ -80,19 +82,36 @@ def sync_odds_player_props(
     """
     client = OddsApiClient()
 
+    # `hours_ahead` scopes a pull to the slate about to kick off.
+    #
+    # Billing is per event per market, so a blanket eight-day pull pays for all
+    # sixteen games every time even when fifteen of them are days away and their
+    # lines have not moved. Capturing a closing price is only useful for the
+    # games actually about to start.
+    #
+    # Week 1 is Wednesday 1, Thursday 1, Sunday 8 + 4 + 1, Monday 1. Scoped to
+    # the slate, closing captures for every game in the week cost 144 credits in
+    # total, which is what a single unscoped sync costs.
+    if hours_ahead is not None:
+        window_sql = "commence_time < NOW() + make_interval(secs => :window_secs)"
+        window_params = {"window_secs": float(hours_ahead) * 3600.0}
+    else:
+        window_sql = "commence_time < NOW() + make_interval(days => :days_ahead)"
+        window_params = {"days_ahead": days_ahead}
+
     rows = db.execute(
         text(
-            """
+            f"""
             SELECT provider_event_id
             FROM odds_events
             WHERE sport_key = :sport_key
               AND commence_time IS NOT NULL
               AND commence_time >= NOW()
-              AND commence_time < NOW() + make_interval(days => :days_ahead)
+              AND {window_sql}
             ORDER BY commence_time ASC
             """
         ),
-        {"sport_key": client.sport_key, "days_ahead": days_ahead},
+        {"sport_key": client.sport_key, **window_params},
     ).mappings().all()
 
     if limit is not None:
@@ -118,10 +137,20 @@ def sync_odds_player_props(
         for book in bookmakers:
             book_key = book.get("key")
             book_title = book.get("title")
-            last_update = _parse_ts(book.get("last_update"))
+            book_update = book.get("last_update")
 
             for market in book.get("markets") or []:
                 market_key = market.get("key")
+                # Market first, bookmaker second.
+                #
+                # This read the bookmaker's timestamp only, and came back empty
+                # every time: all 4,491 live rows carry a NULL last_update,
+                # against 57,324 historical rows where the same read works. The
+                # event-odds endpoint puts the timestamp on the market. Taking
+                # either one is correct under both shapes, and the column is how
+                # you tell a price set an hour ago from one set on Tuesday.
+                last_update = _parse_ts(
+                    market.get("last_update") or book_update)
 
                 for outcome in market.get("outcomes") or []:
                     player_name = outcome.get("description") or outcome.get("name")
@@ -175,10 +204,13 @@ def sync_odds_player_props(
                     inserts += 1
 
     db.commit()
+    # The balance is reported so a scheduled run can log what it spent.
     return {
         "ok": True,
         "events_synced": len(rows),
         "player_prop_rows_upserted": inserts,
+        "credits_remaining": OddsApiClient.last_remaining,
+        "credits_used_total": OddsApiClient.last_used,
     }
 
 # The two historical sync endpoints that lived here have been removed.

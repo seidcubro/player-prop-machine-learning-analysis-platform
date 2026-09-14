@@ -7,6 +7,10 @@ import requests
 
 
 class OddsApiClient:
+    # Balance from the most recent response, for logging and the floor check.
+    last_remaining: Optional[int] = None
+    last_used: Optional[int] = None
+
     def __init__(self) -> None:
         self.api_key = os.getenv("ODDS_API_KEY", "").strip()
         self.base_url = os.getenv("ODDS_API_BASE_URL", "https://api.the-odds-api.com/v4").rstrip("/")
@@ -25,6 +29,32 @@ class OddsApiClient:
         url = f"{self.base_url}/{path.lstrip('/')}"
         resp = requests.get(url, params=query, timeout=20)
         resp.raise_for_status()
+
+        # Record what the call cost and what is left.
+        #
+        # Every response carries the running balance in its headers and this
+        # threw them away, so the only way to know how many credits a sync had
+        # spent was to open the provider's dashboard. That is fine to do by hand
+        # and not fine once a scheduler is calling this on a timer: a job that
+        # spends money should be able to say how much.
+        #
+        # `ODDS_MIN_CREDITS` is a floor. Once the balance is below it the next
+        # call refuses rather than draining the account, which matters most for
+        # the runs nobody is watching.
+        remaining = resp.headers.get("x-requests-remaining")
+        used = resp.headers.get("x-requests-used")
+        if remaining is not None:
+            try:
+                OddsApiClient.last_remaining = int(float(remaining))
+                OddsApiClient.last_used = int(float(used or 0))
+            except (TypeError, ValueError):
+                pass
+            floor = int(os.getenv("ODDS_MIN_CREDITS", "0") or 0)
+            if floor and OddsApiClient.last_remaining is not None                     and OddsApiClient.last_remaining < floor:
+                raise RuntimeError(
+                    f"odds credits exhausted: {OddsApiClient.last_remaining} "
+                    f"left, floor is {floor}. Raise ODDS_MIN_CREDITS or top up."
+                )
         return resp.json()
 
     def get_upcoming_events(self) -> List[Dict[str, Any]]:

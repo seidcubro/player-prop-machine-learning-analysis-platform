@@ -29,6 +29,12 @@ _SORTS = {
     # 60% pick at -180 is worse than a 52% pick at +110, and sorting by win_prob
     # puts them in the wrong order.
     "expected_value": "expected_value",
+    # Profit per unit staked. expected_value above is the model's probability
+    # minus the book's implied probability, which is a probability edge, and the
+    # two differ by the decimal odds: the same edge pays about twice as much on
+    # a plus price as on a heavy minus one. Sorting on the probability edge
+    # ranks a -280 and a +172 at the same number.
+    "ev_per_unit": "ev_per_unit",
     # Default ordering: put the league's biggest names at the top.
     #
     # Sorting purely by expected value opened the board on George Holani and a
@@ -93,6 +99,10 @@ def list_edges(
         None, description="Exact tier, unlike min_tier which is 'and up'"),
     best_bets_only: bool = Query(
         False, description="Only the verified-profitable selection"),
+    event_id: str | None = Query(
+        None, description="One game, by its provider event id"),
+    team: str | None = Query(
+        None, description="Either side of a matchup, by team name"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -159,6 +169,18 @@ def list_edges(
     if upcoming_only:
         pre.append("commence_time >= NOW()")
 
+    # One game, or one team's players wherever they appear.
+    #
+    # Both are pre-dedup filters: a prop belongs to a game and to a team no
+    # matter which sportsbook priced it, so narrowing before the dedup cannot
+    # drop the row that would have survived it.
+    if event_id:
+        pre.append("event_id = :event_id")
+        params["event_id"] = event_id
+    if team:
+        pre.append("(home_team ILIKE :team OR away_team ILIKE :team)")
+        params["team"] = f"%{team.strip()}%"
+
     pre_sql = " AND ".join(pre)
     post_sql = " AND ".join(post)
     dedup_order = (
@@ -224,14 +246,19 @@ def list_edges(
               prop_edges.raw_edge,
               prop_edges.win_prob,
               prop_edges.expected_value,
+              prop_edges.ev_per_unit,
               prop_edges.recommended_side,
               prop_edges.edge_tier,
               prop_edges.created_at,
               prop_edges.value_flag,
               prop_edges.best_bet,
-              -- kickoff date for display; the UI shows when the game is, not
-              -- just when the edge row happened to be generated
-              (prop_edges.commence_time AT TIME ZONE 'UTC')::date AS game_date,
+              -- Kickoff date for display, in Eastern rather than UTC.
+              --
+              -- A Sunday night game kicks off at 20:20 Eastern, which is 00:20
+              -- the next day in UTC, so every Sunday, Monday and Thursday night
+              -- game was dated a day late on the board: 135 of 842 rows. The
+              -- edge builder had the same bug and was fixed; this copy was not.
+              (prop_edges.commence_time AT TIME ZONE 'America/New_York')::date AS game_date,
               -- Names are not unique: there is a Josh Allen at QB for Buffalo
               -- and a Josh Allen at C for Tampa Bay. A bare LIMIT 1 picked
               -- whichever row came first, so a prop could link to a completely
@@ -361,6 +388,28 @@ def edges_summary(db: Session = Depends(get_db)):
              "GROUP BY edge_tier")
     ).mappings().all()
 
+    # The slate, so the board can be filtered to one game.
+    #
+    # Counted off the same deduplicated set as every other number here, so the
+    # count beside a game matches what selecting it shows. Ordered by kickoff,
+    # which is the order somebody building a card for tonight thinks in.
+    by_game = db.execute(
+        text(
+            f"""
+            SELECT event_id,
+                   MIN(away_team) AS away_team,
+                   MIN(home_team) AS home_team,
+                   MIN(commence_time) AS commence_time,
+                   COUNT(*) AS count,
+                   COUNT(*) FILTER (WHERE edge_tier = 'elite') AS elite
+            FROM ({DEDUPED}) d
+            WHERE event_id IS NOT NULL
+            GROUP BY event_id
+            ORDER BY MIN(commence_time), MIN(away_team)
+            """
+        )
+    ).mappings().all()
+
     # Counted here, not in the browser.
     #
     # The dashboard was deriving this from whatever page of rows it happened to
@@ -403,6 +452,7 @@ def edges_summary(db: Session = Depends(get_db)):
         "ok": True,
         "by_market": [dict(r) for r in by_market],
         "by_tier": {r["edge_tier"]: int(r["count"]) for r in by_tier},
+        "by_game": [dict(r) for r in by_game],
         "best_bets": int(best_bets),
         "coverage": dict(coverage) if coverage else None,
         "last_updated": str(last_updated) if last_updated else None,

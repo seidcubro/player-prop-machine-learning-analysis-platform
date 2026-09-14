@@ -150,8 +150,26 @@ def list_players(
               status,
               rookie_year
             FROM players
+            -- Players who actually play, first.
+            --
+            -- Alphabetical by surname put Adrian McBride, a receiver with no
+            -- games in the database, above Trey McBride, who is a starting
+            -- tight end. Nine players share that surname and eight of them are
+            -- not the one anybody is searching for. Sorting by most recent game
+            -- puts the answer at the top and leaves the retired and the
+            -- never-played below it, still findable.
+            --
+            -- Joined against one grouped pass, not a correlated subquery. As a
+            -- subquery this ran once per player, 25,079 index probes for a
+            -- fifty row page, and cost 98ms of the endpoint's 145.
+            LEFT JOIN (
+                SELECT player_id, max(game_date) AS last_game
+                FROM player_game_stats_app
+                GROUP BY player_id
+            ) lg ON lg.player_id = players.external_id
             {where_sql}
-            ORDER BY last_name NULLS LAST, first_name NULLS LAST, name NULLS LAST
+            ORDER BY lg.last_game DESC NULLS LAST,
+            last_name NULLS LAST, first_name NULLS LAST, name NULLS LAST
             LIMIT :limit OFFSET :offset
             """
         ),
@@ -339,6 +357,115 @@ def player_edge_history(
     }
 
 
+@router.get("/players/{player_id}/games/{game_date}")
+def player_game_detail(
+    player_id: int,
+    game_date: str,
+    db: Session = Depends(get_db),
+):
+    """One played game: what we projected, what happened, and whether it hit.
+
+    Answers the question the site could not answer about its own output. The
+    board only ever showed upcoming numbers, and `player_projections` is wiped
+    on every build, so a projection disappeared the moment it could be checked.
+    A player with no published pick left no trace at all: Trey McBride is
+    projected every week and had zero stored rows, because a pick needs a
+    sportsbook line we paid for and a tier that cleared the filters.
+
+    Three sources, joined on the game:
+      * `player_projection_history` is what we said before kickoff.
+      * `player_game_stats_app` is what actually happened.
+      * `prop_edge_results` is the pick, where one was published, with the line
+        and whether it won. Absent for most player-games, which is honest: no
+        pick was made.
+    """
+    player = _get_player_row(db, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    stat = db.execute(
+        text("""
+            SELECT game_date, season, week, team, opponent,
+                   COALESCE(targets, 0)          AS targets,
+                   COALESCE(receptions, 0)       AS recs,
+                   COALESCE(receiving_yards, 0)  AS rec_yds,
+                   COALESCE(receiving_tds, 0)    AS rec_td,
+                   COALESCE(carries, 0)          AS rush_att,
+                   COALESCE(rushing_yards, 0)    AS rush_yds,
+                   COALESCE(rushing_tds, 0)      AS rush_td,
+                   COALESCE(attempts, 0)         AS pass_att,
+                   COALESCE(completions, 0)      AS pass_completions,
+                   COALESCE(passing_yards, 0)    AS pass_yds,
+                   COALESCE(passing_tds, 0)      AS pass_td,
+                   COALESCE(rushing_tds, 0) + COALESCE(receiving_tds, 0) AS any_td
+            FROM player_game_stats_app
+            WHERE player_id = :ext AND game_date = CAST(:d AS date)
+        """),
+        {"ext": player["external_id"], "d": game_date},
+    ).mappings().first()
+    if not stat:
+        raise HTTPException(status_code=404, detail="No game on that date")
+
+    projections = db.execute(
+        text("""
+            SELECT market_code, projection, p10, p25, p50, p75, p90, model_name
+            FROM player_projection_history
+            WHERE player_id = :ext AND game_date = CAST(:d AS date)
+            ORDER BY market_code
+        """),
+        {"ext": player["external_id"], "d": game_date},
+    ).mappings().all()
+
+    picks = db.execute(
+        text("""
+            SELECT market_code, line, recommended_side, projection,
+                   projection_median, win_prob, edge_tier, best_bet,
+                   price_american, bookmaker_title, actual, hit,
+                   expected_value, ev_per_unit
+            FROM prop_edge_results
+            WHERE player_id = :ext AND game_date = CAST(:d AS date)
+            ORDER BY market_code
+        """),
+        {"ext": player["external_id"], "d": game_date},
+    ).mappings().all()
+
+    # The actual figure for a market, keyed the way the markets are named, so
+    # the page can line a projection up against its own outcome without
+    # hardcoding the mapping in the browser.
+    actuals = {
+        "recs": stat["recs"], "rec_yds": stat["rec_yds"],
+        "rec_td": stat["rec_td"], "rush_att": stat["rush_att"],
+        "rush_yds": stat["rush_yds"], "rush_td": stat["rush_td"],
+        "pass_att": stat["pass_att"], "pass_yds": stat["pass_yds"],
+        "pass_td": stat["pass_td"], "any_td": stat["any_td"],
+        "pass_completions": stat["pass_completions"],
+    }
+    picks_by_market = {p["market_code"]: dict(p) for p in picks}
+
+    lines = []
+    for pr in projections:
+        m = pr["market_code"]
+        lines.append({
+            **dict(pr),
+            "actual": actuals.get(m),
+            "pick": picks_by_market.get(m),
+        })
+    # Markets we bet but never stored a projection for still belong on the page.
+    for m, pk in picks_by_market.items():
+        if not any(l["market_code"] == m for l in lines):
+            lines.append({"market_code": m, "projection": pk["projection"],
+                          "p50": pk["projection_median"], "actual": actuals.get(m),
+                          "pick": pk, "model_name": None,
+                          "p10": None, "p25": None, "p75": None, "p90": None})
+
+    return {
+        "ok": True,
+        "player_id": player_id,
+        "game": dict(stat),
+        "markets": sorted(lines, key=lambda r: r["market_code"]),
+    }
+
+
 @router.get("/projections")
 def list_projections(
     market_code: str | None = Query(None, description="Filter to one market"),
@@ -408,22 +535,56 @@ def list_projections(
     where_sql = " AND ".join(where)
     order_sql = f"{sorts[sort]} {'ASC' if order == 'asc' else 'DESC'} NULLS LAST"
 
+    # One row per player and market: the next game, not every game in the
+    # projection window.
+    #
+    # `build_projections.py` projects eight days ahead, so in a week with a
+    # Thursday game every player on those two teams gets two rows for the same
+    # market. The page listed both, which read as a duplicate, and the board
+    # only ever carries the priced slate, so the freshness audit was comparing a
+    # Sunday edge against a Thursday projection and calling the difference a
+    # disagreement. Cook's rush_yds was 64.7 against Houston and 71.9 against
+    # Detroit; both were right, they were just different games.
+    #
+    # Every filter above is a property of the player or the market rather than
+    # the game, so narrowing before the dedup cannot drop the row that would
+    # have survived it.
+    dedup_sql = f"""
+        SELECT DISTINCT ON (pr.player_id, pr.market_code) pr.*
+        FROM player_projections pr
+        WHERE {where_sql}
+        ORDER BY pr.player_id, pr.market_code, pr.game_date
+    """
+
     total = db.execute(
-        text(f"SELECT COUNT(*) FROM player_projections pr WHERE {where_sql}"),
-        params,
+        text(f"SELECT COUNT(*) FROM ({dedup_sql}) pr"), params
     ).scalar_one()
 
     rows = db.execute(
         text(
             f"""
+            WITH next_game AS ({dedup_sql})
             SELECT pr.player_id, pr.player_name, pr.position, pr.team, pr.opponent,
                    pr.game_date, pr.market_code, pr.projection,
                    pr.p10, pr.p25, pr.p50, pr.p75, pr.p90,
                    pr.model_name, pr.depth_rank, pr.is_starter,
-                   p.id AS app_player_id, p.headshot
-            FROM player_projections pr
+                   p.id AS app_player_id, p.headshot,
+                   -- When this player last actually played.
+                   --
+                   -- A projection is only as current as the games behind it,
+                   -- and four listed starters have not played since January
+                   -- 2025: a fullback who is the only fullback on his depth
+                   -- chart, a couple of fringe backs, a depth receiver. The
+                   -- depth chart is right about them and the number is built on
+                   -- twenty month old football, which the page had no way to
+                   -- say.
+                   lg.last_game
+            FROM next_game pr
             LEFT JOIN players p ON p.external_id = pr.player_id
-            WHERE {where_sql}
+            LEFT JOIN (
+                SELECT player_id, max(game_date) AS last_game
+                FROM player_game_stats_app GROUP BY player_id
+            ) lg ON lg.player_id = pr.player_id
             ORDER BY {order_sql}
             LIMIT :limit OFFSET :offset
             """
@@ -450,11 +611,12 @@ def player_projections(player_id: int, db: Session = Depends(get_db)):
     rows = db.execute(
         text(
             """
-            SELECT market_code, game_date, opponent, projection,
+            SELECT DISTINCT ON (market_code)
+                   market_code, game_date, opponent, projection,
                    p10, p25, p50, p75, p90, model_name, depth_rank
             FROM player_projections
             WHERE player_id = :ext
-            ORDER BY game_date, market_code
+            ORDER BY market_code, game_date
             """
         ),
         {"ext": player["external_id"]},

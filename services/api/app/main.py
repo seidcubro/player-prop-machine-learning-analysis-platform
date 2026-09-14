@@ -13,15 +13,101 @@ Operational notes:
 - Database connectivity is provided via `services/api/app/db.py`.
 """
 
+import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+
+from .db import engine
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from app.routes import router
 from app.routes.odds import router as odds_router
 
-app = FastAPI(title="Player Prop API", version="0.1.0")
+# A ceiling on how fast anyone can read the board.
+#
+# The odds are licensed for display, not redistribution. The provider's terms
+# permit showing their data in a UI and storing it indefinitely, and forbid
+# offering it "through your own API, data feed, downloadable files, or any other
+# format intended to serve as a source of raw data for others".
+#
+# /edges returns bookmaker, line and price for every prop, plus the other books
+# in `alts`. Serving that to the site is display. Serving it unmetered to a
+# script on a loop is a feed, and the difference is the request rate, not the
+# intent. CORS does not help here: it restrains browsers, not curl.
+#
+# The limit is set well above what the site needs. A page load is a handful of
+# calls, so a person never sees this; a harvester walking every market and page
+# does.
+_RATE = os.getenv("READ_RATE_LIMIT", "60/minute")
+
+
+def _client_ip(request: Request) -> str:
+    """The caller's address, not the proxy's.
+
+    In production Caddy sits in front, so every request arrives from the
+    proxy and `request.client.host` is the same value for all of them. Limiting
+    on that puts the entire internet in one bucket: the first busy visitor locks
+    everyone else out, including the site itself.
+
+    Caddy sets X-Forwarded-For, and the left-most entry is the original client.
+    The header is trivially forged, which is why this is only trusted when
+    TRUST_PROXY_HEADERS is set, and that is only set where something we control
+    is terminating the connection.
+    """
+    if os.getenv("TRUST_PROXY_HEADERS", "0") == "1":
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_client_ip, default_limits=[_RATE])
+
+# The interactive docs are on by default and can be turned off.
+#
+# They are worth having on a project like this: the schema is the clearest
+# statement of what the API does. The tradeoff is that they also advertise
+# POST /odds/sync/player_props, which bills a paid quota per event per market.
+# That endpoint is behind a shared secret, rate limited, and returns 503 when
+# unconfigured, so publishing its existence is not a hole. It is an invitation,
+# and worth being a deliberate choice rather than an accident.
+#
+# Set API_DOCS=off to serve neither the docs nor the schema.
+_DOCS = os.getenv("API_DOCS", "on").strip().lower() not in ("0", "off", "false", "no")
+
+log = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="Player Prop API",
+    version="0.1.0",
+    docs_url="/docs" if _DOCS else None,
+    redoc_url="/redoc" if _DOCS else None,
+    openapi_url="/openapi.json" if _DOCS else None,
+)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+def _rate_limited(request: Request, exc: RateLimitExceeded):
+    """Say what happened, rather than a bare 429 with no explanation."""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "ok": False,
+            "detail": (
+                "Rate limit exceeded. This API backs the PriorLine site; the "
+                "odds it returns are licensed for display, not redistribution."
+            ),
+        },
+        headers={"Retry-After": "60"},
+    )
 
 # Browser origins allowed to call this API.
 #
@@ -38,6 +124,15 @@ _DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _EXTRA_ORIGINS = [
     o.strip() for o in os.getenv("WEB_ORIGINS", "").split(",") if o.strip()
 ]
+
+# Registered before CORS, deliberately.
+#
+# Starlette applies the last middleware added as the outermost layer. With
+# the limiter outside CORS, a 429 returns before the CORS headers are
+# attached, and the browser reports a blocked request rather than a rate
+# limit. The site then looks broken instead of throttled, which is a worse
+# failure and a much harder one to diagnose.
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,13 +151,32 @@ app.include_router(odds_router, prefix="/api/v1")
 
 @app.get("/health")
 def health():
-    """Health check endpoint.
+    """Is this API able to serve a request, database included?
 
-    Returns a minimal payload used by local dev tooling, containers, and
-    orchestrators (Docker Compose / Kubernetes) to determine whether the API
-    process is up and able to serve requests.
+    It used to answer yes whenever the process was running. Renaming a table
+    out from under it left every real endpoint returning 500 while this still
+    said ok, which is the worst possible answer: the container healthcheck in
+    deploy/docker-compose.prod.yml reads this endpoint, so Docker would call the
+    API healthy, `restart: unless-stopped` would never fire, and Caddy would
+    keep routing traffic to something that cannot answer any of it.
 
-    Returns:
-        dict: `{"status": "ok", "service": "api"}`.
+    A health check that cannot fail is not a health check. This one touches the
+    database, because an API that cannot reach Postgres has nothing to serve.
+    The query is a constant, so it costs a round trip and no planning.
+
+    503 rather than 500: the service is unavailable rather than broken by the
+    request, and that is the code orchestrators act on.
     """
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        # The reason is logged, not returned. A health endpoint is reachable by
+        # anyone and connection errors carry hostnames and usernames.
+        log.warning("health check failed to reach the database: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "service": "api",
+                     "detail": "database unreachable"},
+        )
     return {"status": "ok", "service": "api"}
