@@ -76,10 +76,19 @@ def brier(p, y):
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     d = pd.read_sql(text("""
-        SELECT market_code, season, win_prob, hit,
+        -- The uncorrected probability, never this map's own output.
+        --
+        -- build_prop_edges applies the map and stores the result as win_prob,
+        -- which grade_edges copies here. Fitting on that column means fitting
+        -- on corrected numbers: if the map is working they look calibrated, the
+        -- refit learns the identity, and applying the identity takes the
+        -- correction away again. Backtested rows have no raw column because
+        -- they never went through this map, so their win_prob is already raw.
+        SELECT market_code, season,
+               COALESCE(win_prob_raw, win_prob) AS win_prob, hit,
                recommended_side, line, actual
         FROM prop_edge_results
-        WHERE hit IS NOT NULL AND win_prob IS NOT NULL
+        WHERE hit IS NOT NULL AND COALESCE(win_prob_raw, win_prob) IS NOT NULL
           AND line IS NOT NULL AND actual IS NOT NULL
     """), engine)
     if d.empty:
