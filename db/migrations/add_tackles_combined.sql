@@ -1,4 +1,4 @@
-﻿-- Add tackles_combined as computed column
+-- Add tackles_combined as computed column
 ALTER TABLE player_game_stats_app
 ADD COLUMN IF NOT EXISTS def_tackles_combined FLOAT
 GENERATED ALWAYS AS (

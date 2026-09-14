@@ -1,4 +1,4 @@
-﻿CREATE TABLE nfl_games (
+CREATE TABLE nfl_games (
     game_id TEXT PRIMARY KEY,
     season INT,
     week INT,

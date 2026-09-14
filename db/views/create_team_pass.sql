@@ -1,4 +1,4 @@
-﻿CREATE MATERIALIZED VIEW team_offense_pass AS
+CREATE MATERIALIZED VIEW team_offense_pass AS
 SELECT
   team,
   game_date,

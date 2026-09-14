@@ -1,4 +1,4 @@
-﻿-- Reset EVERYTHING to false
+-- Reset EVERYTHING to false
 UPDATE prop_markets
 SET can_be_upstream_feature = FALSE;
 

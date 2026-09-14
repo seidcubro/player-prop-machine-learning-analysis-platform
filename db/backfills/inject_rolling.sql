@@ -1,4 +1,4 @@
-﻿UPDATE player_market_features pmf
+UPDATE player_market_features pmf
 SET extra_features = extra_features
   || jsonb_build_object(
     'opp_rec_yds_allowed_rolling', r.opp_rec_yds_allowed_rolling,

@@ -1,4 +1,4 @@
-﻿ALTER TABLE prop_markets
+ALTER TABLE prop_markets
   ADD COLUMN IF NOT EXISTS scope TEXT,
   ADD COLUMN IF NOT EXISTS target_kind TEXT,
   ADD COLUMN IF NOT EXISTS entity_key TEXT,

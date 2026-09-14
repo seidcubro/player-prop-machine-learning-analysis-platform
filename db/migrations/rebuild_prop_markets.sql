@@ -1,4 +1,4 @@
-﻿-- Clear and rebuild prop_markets with full sportsbook scope
+-- Clear and rebuild prop_markets with full sportsbook scope
 TRUNCATE TABLE prop_markets CASCADE;
 
 INSERT INTO prop_markets (code, name, stat_field) VALUES

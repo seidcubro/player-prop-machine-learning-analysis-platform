@@ -1,4 +1,4 @@
-﻿UPDATE player_market_features pmf
+UPDATE player_market_features pmf
 SET team = pgs.team
 FROM player_game_stats_app pgs
 WHERE pmf.player_id = pgs.player_id

@@ -1,1 +1,1 @@
-﻿DROP TABLE IF EXISTS nfl_games;
+DROP TABLE IF EXISTS nfl_games;

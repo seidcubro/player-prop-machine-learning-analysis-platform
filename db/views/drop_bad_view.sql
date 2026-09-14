@@ -1,1 +1,1 @@
-﻿DROP MATERIALIZED VIEW IF EXISTS team_defense_rec;
+DROP MATERIALIZED VIEW IF EXISTS team_defense_rec;

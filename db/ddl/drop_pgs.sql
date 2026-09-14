@@ -1,1 +1,1 @@
-﻿DROP TABLE IF EXISTS player_game_stats;
+DROP TABLE IF EXISTS player_game_stats;

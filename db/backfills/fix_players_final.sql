@@ -1,4 +1,4 @@
-﻿INSERT INTO players (external_id, position, team, name)
+INSERT INTO players (external_id, position, team, name)
 SELECT
     pgs.player_id,
     MAX(pgs.position),

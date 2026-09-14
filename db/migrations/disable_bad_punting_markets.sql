@@ -1,4 +1,4 @@
-﻿UPDATE prop_markets
+UPDATE prop_markets
 SET
   is_active = FALSE,
   train_enabled = FALSE,

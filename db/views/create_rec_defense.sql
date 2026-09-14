@@ -1,4 +1,4 @@
-﻿CREATE MATERIALIZED VIEW IF NOT EXISTS team_defense_rec AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS team_defense_rec AS
 SELECT
   opponent AS team,
   AVG(receiving_yards) AS opp_rec_yds_allowed,

@@ -1,4 +1,4 @@
-﻿CREATE MATERIALIZED VIEW team_defense_rec_rolling AS
+CREATE MATERIALIZED VIEW team_defense_rec_rolling AS
 WITH team_game_totals AS (
   SELECT
     opponent AS defense_team,

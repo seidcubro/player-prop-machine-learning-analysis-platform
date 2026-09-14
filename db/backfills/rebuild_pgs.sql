@@ -1,4 +1,4 @@
-﻿DROP TABLE IF EXISTS player_game_stats;
+DROP TABLE IF EXISTS player_game_stats;
 
 CREATE TABLE player_game_stats (
     player_id TEXT,

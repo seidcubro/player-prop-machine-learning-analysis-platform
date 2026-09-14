@@ -1,4 +1,4 @@
-﻿CREATE TABLE player_game_stats (
+CREATE TABLE player_game_stats (
     player_id TEXT,
     game_id TEXT,
     season INT,

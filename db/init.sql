@@ -95,34 +95,15 @@ CREATE TABLE IF NOT EXISTS player_market_features (
 );
 
 -- Baseline projections
-CREATE TABLE IF NOT EXISTS projections (
-  id SERIAL PRIMARY KEY,
-  player_id INTEGER REFERENCES players(id),
-  market_id INTEGER REFERENCES prop_markets(id),
-  game_date DATE,
-  opponent TEXT,
-  model_name TEXT,
-  mean DOUBLE PRECISION,
-  stddev DOUBLE PRECISION,
-  p_over DOUBLE PRECISION,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
 
--- ML projection history
-CREATE TABLE IF NOT EXISTS ml_projections (
-  id SERIAL PRIMARY KEY,
-  player_id INTEGER REFERENCES players(id),
-  market_code TEXT,
-  model_name TEXT,
-  lookback INTEGER,
-  as_of_game_date DATE,
-  opponent TEXT,
-  prediction DOUBLE PRECISION,
-  features JSONB,
-  artifact_path TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE (player_id, market_code, model_name, lookback, as_of_game_date)
-);
+
+-- Three tables were removed here: projections, ml_projections and prop_lines.
+--
+-- Scaffolding from the first version of the schema, superseded by
+-- player_projections and odds_player_props and referenced by nothing since:
+-- no query, no script, no page. Two held zero rows and the third held 32 stale
+-- ones. They were left out rather than dropped, so an existing database keeps
+-- whatever is in them and a fresh one simply never creates them.
 
 -- Model registry
 CREATE TABLE IF NOT EXISTS trained_models (
@@ -149,12 +130,3 @@ CREATE TABLE IF NOT EXISTS active_models (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS prop_lines (
-  id SERIAL PRIMARY KEY,
-  player_id INTEGER REFERENCES players(id),
-  market_id INTEGER REFERENCES prop_markets(id),
-  game_date DATE,
-  line DOUBLE PRECISION,
-  source TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
