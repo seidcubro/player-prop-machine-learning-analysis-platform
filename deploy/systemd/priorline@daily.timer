@@ -1,0 +1,13 @@
+# The morning refresh: full ingest, features, grading, recalibration, and one
+# full odds sync. About 145 credits.
+
+[Unit]
+Description=PriorLine daily refresh
+
+[Timer]
+OnCalendar=*-*-* 08:00:00
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

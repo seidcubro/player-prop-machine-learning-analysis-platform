@@ -1,0 +1,28 @@
+# TLS with no certificate management.
+#
+# Caddy gets a certificate from Let's Encrypt on first request for the hostname
+# and renews it without being asked. That is the whole configuration: there is
+# no certbot, no cron job, and no renewal that quietly expires on a Sunday.
+
+{$API_DOMAIN} {
+	tls {$ACME_EMAIL}
+
+	# The API is the only thing behind this. The frontend is on Vercel.
+	reverse_proxy api:8000
+
+	encode gzip zstd
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}

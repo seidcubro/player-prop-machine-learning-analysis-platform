@@ -1,0 +1,50 @@
+# One refresh, in whichever mode the instance names.
+#
+#   systemctl start priorline@closing
+#   systemctl start priorline@daily
+#
+# The instance is the mode without its dashes, so priorline@weekly runs
+# `scheduled_update.sh --weekly`.
+#
+# Credits are opt-in per mode through /etc/priorline/<mode>.env, so a mode with
+# no file for it cannot spend anything. Only daily.env sets ODDS=1.
+
+[Unit]
+Description=PriorLine refresh (%i)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/priorline
+# The shared secrets and the Odds key.
+EnvironmentFile=/etc/priorline/env
+# Per-mode overrides. The leading dash means "skip if absent", so a mode with no
+# file simply runs without odds.
+EnvironmentFile=-/etc/priorline/%i.env
+# Serialised across every mode, not just against itself.
+#
+# Type=oneshot stops one unit running twice, but priorline@daily,
+# priorline@closing and priorline@weekly are different units and systemd will
+# happily run them at once. The weekly retrain starts at 01:00 and runs about
+# fifty minutes; the closing capture fires at 01:05 and 02:05. Both call
+# build_prop_edges.py, which truncates prop_edges and rebuilds it, so an overlap
+# is two jobs clearing and refilling the same table at the same time. Running
+# two rebuilds by hand did exactly that during development and left the board
+# empty.
+#
+# flock takes a lock shared by every mode. -w 3600 waits rather than failing,
+# because a closing capture that skips is a price gone for good, while one that
+# starts a few minutes late is usually still inside its window.
+ExecStart=/usr/bin/flock -w 3600 /var/lock/priorline.lock /bin/sh scripts/scheduled_update.sh --%i
+# The weekly retrain is the long one, about an hour. This is a ceiling, not a
+# target, and it exists so a wedged run cannot block the next timer forever.
+TimeoutStartSec=4h
+User=priorline
+Group=docker
+StandardOutput=append:/var/log/priorline/%i.log
+StandardError=append:/var/log/priorline/%i.log
+
+[Install]
+WantedBy=multi-user.target

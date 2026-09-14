@@ -1,0 +1,12 @@
+# A free afternoon pass. Injury reports land through Wednesday to Friday and a
+# player ruled out has to leave the board before somebody bets him.
+
+[Unit]
+Description=PriorLine afternoon board refresh
+
+[Timer]
+OnCalendar=*-*-* 17:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

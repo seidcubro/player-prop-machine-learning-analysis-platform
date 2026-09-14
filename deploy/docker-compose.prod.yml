@@ -1,0 +1,158 @@
+# Production stack for a single small server.
+#
+# Everything the public touches lives here: the API, its database, and a
+# reverse proxy that gets a certificate on its own. The frontend is not here on
+# purpose, it goes to Vercel as a static build.
+#
+#   docker compose -f deploy/docker-compose.prod.yml up -d
+#
+# The dev compose at the repo root stays as it is. This file exists separately
+# because the two differ in ways that matter: no bind mounts of source, no
+# exposed database port, and Postgres data on a named volume rather than
+# wherever Docker Desktop felt like putting it.
+#
+# No Redis either. The dev stack runs one and hands the API a REDIS_URL, and
+# the API has never opened a connection to it: the rate limiter keeps its
+# counters in process, which is the right call when there is exactly one API
+# container. On a box with four gigabytes and an ingest that peaks at 3.6, a
+# container that exists to be ignored is memory and attack surface for
+# nothing.
+
+# Named so the network is deploy-independent of the directory it is run from.
+# scripts/scheduled_update.sh attaches the ingest container to it by name.
+name: priorline
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      # The hostname the API answers on, e.g. api.priorline.example.
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
+      # Used for certificate expiry notices.
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+    depends_on:
+      # Healthy, not merely started.
+      #
+      # The API's healthcheck now touches the database, so waiting on it means
+      # Caddy comes up once there is something behind it. Waiting on "started"
+      # meant Caddy was ready first and asked Let's Encrypt for a certificate
+      # while the API could still be connecting, so the first requests after a
+      # deploy or a reboot hit a proxy with nothing behind it.
+      api:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../services/api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://app:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/app
+      ODDS_API_KEY: ${ODDS_API_KEY:?set ODDS_API_KEY}
+      ODDS_API_BASE_URL: ${ODDS_API_BASE_URL:-https://api.the-odds-api.com/v4}
+      ODDS_API_SPORT: ${ODDS_API_SPORT:-americanfootball_nfl}
+      ODDS_API_REGIONS: ${ODDS_API_REGIONS:-us}
+      ODDS_API_ODDS_FORMAT: ${ODDS_API_ODDS_FORMAT:-american}
+      ODDS_API_BOOKMAKERS: ${ODDS_API_BOOKMAKERS:-draftkings,fanduel,betmgm}
+      ODDS_MIN_CREDITS: ${ODDS_MIN_CREDITS:-500}
+      # Without this every write endpoint answers 503. That is the correct
+      # default for a box on the public internet.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN}
+      WEB_ORIGINS: ${WEB_ORIGINS:?set WEB_ORIGINS to the Vercel origin}
+      WEB_ORIGIN_REGEX: ${WEB_ORIGIN_REGEX:-}
+      # Caddy terminates the connection, so the client address arrives in
+      # X-Forwarded-For. Only trusted because nothing reaches this container
+      # except through the proxy on the same network.
+      TRUST_PROXY_HEADERS: "1"
+      READ_RATE_LIMIT: ${READ_RATE_LIMIT:-60/minute}
+    volumes:
+      - ../services/training/artifacts:/artifacts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Restart policy needs something to restart on. Without this a process that
+    # is up but wedged stays up, and the only symptom is a site that hangs.
+    healthcheck:
+      test: ["CMD-SHELL",
+             "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # No ports. Caddy is the only way in.
+
+  # The pipeline the timers drive.
+  #
+  # Not a long-running service: every script is a one-off that
+  # scripts/scheduled_update.sh starts with `compose run --rm`. It is declared
+  # here because without it the scheduled refresh has nothing to run, and the
+  # timers fail on their first step.
+  #
+  # The artifacts mount is read-write, unlike the API's. This is the side that
+  # writes the models; the API only reads them.
+  training:
+    build:
+      context: ../services/training
+    restart: "no"
+    environment:
+      ARTIFACT_DIR: /artifacts
+      LOOKBACK: "5"
+      POSTGRES_DB: app
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PORT: "5432"
+      ODDS_API_KEY: ${ODDS_API_KEY:?set ODDS_API_KEY}
+      ODDS_API_BASE_URL: ${ODDS_API_BASE_URL:-https://api.the-odds-api.com/v4}
+      ODDS_API_SPORT: ${ODDS_API_SPORT:-americanfootball_nfl}
+      ODDS_API_REGIONS: ${ODDS_API_REGIONS:-us}
+      ODDS_API_BOOKMAKERS: ${ODDS_API_BOOKMAKERS:-draftkings,fanduel,betmgm}
+    volumes:
+      - ../services/training/artifacts:/artifacts
+      # Read-only, so audit_freshness.py can compare this service's market map
+      # against the API's. The two cannot import each other, and when they
+      # drifted the sync quietly stopped buying a market nothing noticed was
+      # missing.
+      - ../services/api/app/odds_market_map.py:/opt/api_odds_market_map.py:ro
+      # The figures the site states as fact, checked against the record.
+      - ../apps/web/src/lib/published-record.json:/opt/published_record.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # The schema, for a box that comes up before the dump is restored.
+      #
+      # Postgres runs this only when the data directory is empty, so it cannot
+      # fight the restore or touch an existing volume. Without it a fresh
+      # server has no tables at all and the API answers every read with an
+      # error until somebody remembers the migration step.
+      - ../db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # Deliberately not published. Reach it with `docker compose exec postgres
+    # psql`, or an SSH tunnel. An open 5432 with a guessable password is how
+    # these boxes get found.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

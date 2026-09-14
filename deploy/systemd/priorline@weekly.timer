@@ -1,0 +1,13 @@
+# Retrain every market, each as the family already in active_models. Takes
+# about an hour, so it runs long before the eight o'clock refresh rather than
+# competing with it for the same containers.
+
+[Unit]
+Description=PriorLine weekly retrain
+
+[Timer]
+OnCalendar=Tue *-*-* 01:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

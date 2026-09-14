@@ -57,3 +57,10 @@ override.tf.json
 # Misc
 *.bak
 *.tmp
+
+# Database dumps from deploy/migrate_db.sh. 55MB of the Odds history is not
+# something to keep in git, and it is regenerated on demand.
+*.dump
+
+# Generated brand assets from scripts/build_brand.py. Build output, not source.
+brand/

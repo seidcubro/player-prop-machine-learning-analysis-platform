@@ -30,6 +30,12 @@ services:
       ODDS_API_REGIONS: ${ODDS_API_REGIONS}
       ODDS_API_ODDS_FORMAT: ${ODDS_API_ODDS_FORMAT}
       ODDS_API_BOOKMAKERS: ${ODDS_API_BOOKMAKERS}
+      # The floor that stops a run draining the account.
+      #
+      # The client defaults this to 0 when unset, so it was only ever enforced
+      # in production, while every credit this project has actually spent was
+      # spent from this stack. Same 500 as the server.
+      ODDS_MIN_CREDITS: ${ODDS_MIN_CREDITS:-500}
       # Shared secret for the four POST endpoints that rewrite the database or
       # spend Odds API credits. Unset means those endpoints return 503, which is
       # the safe default; reads are unaffected. See services/api/app/admin_auth.py
@@ -82,6 +88,11 @@ services:
       # drifted the sync quietly stopped buying a market nothing noticed was
       # missing.
       - ./services/api/app/odds_market_map.py:/opt/api_odds_market_map.py:ro
+      # Read-only so audit_freshness.py can check the figures the site states
+      # as fact against the record they are supposed to describe. They are
+      # written into the pages as text and go stale every time the backfill
+      # rebuilds prop_edge_results.
+      - ./apps/web/src/lib/published-record.json:/opt/published_record.json:ro
     depends_on:
       - postgres
 

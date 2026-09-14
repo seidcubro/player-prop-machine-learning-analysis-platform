@@ -1,0 +1,16 @@
+# Hourly, all day. Costs nothing unless a slate kicks off inside 90 minutes,
+# and then it buys that slate only. This is the job that captures closing
+# lines, which is the evidence that converges fastest and the one price that
+# cannot be bought back later.
+
+[Unit]
+Description=PriorLine closing-line capture, hourly
+
+[Timer]
+OnCalendar=*-*-* *:05:00
+# Run a missed occurrence once the machine is back, rather than skipping it.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
