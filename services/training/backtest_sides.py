@@ -63,7 +63,7 @@ def load_lines(engine, years):
     return pd.read_sql(
         text(f"""
             SELECT s.player_name, s.market_key,
-                   (s.commence_time AT TIME ZONE 'UTC')::date AS game_date,
+                   (s.commence_time AT TIME ZONE 'America/New_York')::date AS game_date,
                    AVG(s.line) FILTER (WHERE lower(s.outcome_name)='over') AS line,
                    AVG(CASE WHEN s.price_american<0 THEN 1+100.0/(-s.price_american)
                             ELSE 1+s.price_american/100.0 END)

@@ -54,6 +54,12 @@ def main():
                        ) AS last_seen
                 FROM odds_snapshots
                 WHERE lower(outcome_name) = 'over' AND line IS NOT NULL
+                  -- 'late' rows were archived after kickoff, from prices left
+                  -- in the live table by a run that missed the game. They are
+                  -- worth keeping and they are not a close, so taking one as
+                  -- the closing line would score a pick against a stale number
+                  -- and call the difference closing line value.
+                  AND source <> 'late'
             )
             SELECT o.provider_event_id, o.player_name, o.market_key,
                    o.bookmaker_key, o.commence_time,

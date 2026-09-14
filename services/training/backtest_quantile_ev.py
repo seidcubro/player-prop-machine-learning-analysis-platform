@@ -77,7 +77,7 @@ def load_prices(engine, season: int) -> pd.DataFrame:
         ),
         ranked AS (
             SELECT *,
-                   (commence_time AT TIME ZONE 'UTC')::date AS game_date,
+                   (commence_time AT TIME ZONE 'America/New_York')::date AS game_date,
                    ROW_NUMBER() OVER (
                      PARTITION BY provider_event_id, market_key, player_name,
                                   lower(outcome_name)

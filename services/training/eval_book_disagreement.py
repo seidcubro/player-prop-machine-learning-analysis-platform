@@ -55,7 +55,7 @@ def main():
         text(f"""
         WITH per_book AS (
             SELECT s.provider_event_id, s.player_name, s.market_key,
-                   (s.commence_time AT TIME ZONE 'UTC')::date AS game_date,
+                   (s.commence_time AT TIME ZONE 'America/New_York')::date AS game_date,
                    s.bookmaker_key,
                    MAX(s.line) FILTER (WHERE lower(s.outcome_name) = 'over') AS line,
                    MAX(CASE WHEN s.price_american < 0

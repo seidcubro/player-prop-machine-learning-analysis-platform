@@ -69,9 +69,20 @@ def american_to_decimal(price):
 
 
 def american_to_prob(price):
-    """Break-even win rate implied by an American price, including the vig."""
+    """Break-even win rate implied by an American price, including the vig.
+
+    Written so neither branch divides by zero. np.where evaluates both sides for
+    every element and only then selects, so the obvious one-liner computes
+    -p / (-p + 100) at a price of +100 and spends the run printing divide by
+    zero warnings about a number it throws away. The answer was right; the log
+    was full of a warning that meant nothing, which is how a warning that means
+    something gets missed.
+    """
     p = np.asarray(price, dtype=float)
-    return np.where(p < 0, (-p) / ((-p) + 100.0), 100.0 / (p + 100.0))
+    neg = p < 0
+    num = np.where(neg, -p, 100.0)
+    den = np.where(neg, -p, p) + 100.0
+    return num / den
 
 
 def profit_units(hit, decimal):
@@ -128,8 +139,16 @@ def main():
         -- silent way to invent profit: on a market like passing TDs the over
         -- can be +150 while the under is -180, so using one for both turns a
         -- losing model into a fake winner.
+        -- Eastern, not UTC.
+        --
+        -- This date is inner-joined against as_of_game_date, which is the
+        -- real local date of the game. A Sunday night kickoff is 00:20 the
+        -- next day in UTC, so every Sunday, Monday and Thursday night game
+        -- failed that join and was dropped without a word: 15.9% of every
+        -- snapshot in the table, and disproportionately the games with the
+        -- biggest names on them.
         SELECT s.player_name, s.market_key,
-               (s.commence_time AT TIME ZONE 'UTC')::date AS game_date,
+               (s.commence_time AT TIME ZONE 'America/New_York')::date AS game_date,
                AVG(s.line) FILTER (WHERE lower(s.outcome_name) = 'over') AS book_line,
                AVG(CASE WHEN s.price_american < 0 THEN 1 + 100.0 / (-s.price_american)
                         ELSE 1 + s.price_american / 100.0 END)

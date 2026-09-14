@@ -70,7 +70,7 @@ def load(engine) -> pd.DataFrame:
         ),
         pergame AS (
             SELECT provider_event_id, bookmaker_key, market_key, player_name,
-                   (commence_time AT TIME ZONE 'UTC')::date AS game_date,
+                   (commence_time AT TIME ZONE 'America/New_York')::date AS game_date,
                    MAX(line) FILTER (WHERE lower(outcome_name) = 'over') AS line,
                    MAX(price_american) FILTER (WHERE lower(outcome_name) = 'over')
                        AS over_am,
