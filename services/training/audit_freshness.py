@@ -18,12 +18,14 @@ can gate a deploy.
 
 import ast
 import json
+import math
 import os
 import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
 
@@ -294,6 +296,10 @@ def check_edges(engine):
         else:
             ok("every edge was built by the market's active model")
 
+        # Matches PROB_FLOOR/PROB_CEILING in build_prop_edges.py. The builder
+        # bounds every published probability to the same range, so this should
+        # now be unreachable rather than merely unobserved; if it ever fires,
+        # something is writing edges around the builder.
         impossible = c.execute(text(
             "SELECT count(*) FROM prop_edges WHERE win_prob > 0.95 OR win_prob < 0.05"
         )).scalar()
@@ -530,6 +536,11 @@ def check_projection_agreement(engine):
     Nothing else caught it. The projections were right, the edges were wrong,
     and the only symptom was two numbers that disagreed in the fourth decimal
     place on a page nobody cross-references.
+
+    Matched on the game as well as the player and the market. Projections run
+    eight days out, so in a week with a Thursday game a player has two rows for
+    the same market while the board only carries the priced slate, and an
+    unscoped join compared Sunday's edge against Thursday's projection.
     """
     print("\n[10] Board and projections agree")
     # Both the mean the two tables store and the median each page prints.
@@ -545,10 +556,14 @@ def check_projection_agreement(engine):
                e.projection_median AS edge_shown,
                p.p50 AS page_shown
         FROM (SELECT DISTINCT player_name, market_code, projection,
-                     projection_median
+                     projection_median,
+                     (commence_time AT TIME ZONE 'America/New_York')::date
+                       AS game_date
               FROM prop_edges) e
         JOIN player_projections p
-          ON p.player_name = e.player_name AND p.market_code = e.market_code
+          ON p.player_name = e.player_name
+         AND p.market_code = e.market_code
+         AND p.game_date   = e.game_date
     """), engine)
     if df.empty:
         warn("no rows in common between prop_edges and player_projections")
@@ -667,10 +682,367 @@ def check_injury_currency(engine):
               f"week; season {stale} data is correctly not being applied")
 
 
+def check_no_dead_features(engine):
+    """Is every feature a model asks for actually present and varying?
+
+    A feature named in `feature_cols` but missing from `extra_features` does not
+    raise. It is read with a default of 0.0, so the model trains on a constant
+    and serving quietly feeds it a real number the model has never seen vary.
+
+    That is exactly how `opp_pos_rush_yds_allowed` sat dead in all 16,274
+    rushing rows for three months. One swallowed newline had merged a SQL
+    comment with the column expression, so the select was commented out. No
+    exception, no warning, and the opponent matchup signal the rushing markets
+    lean on was simply not there.
+
+    The injury flags are the known exception and are allowed to be constant: a
+    player ruled out does not play, so he never produces a feature row, and
+    `injury_out` cannot vary in training by construction. The edge builder
+    excludes those players outright rather than relying on the model to learn
+    from a column that can only ever be zero.
+    """
+    print("\n[13] No model is training on a dead feature")
+    allowed_constant = {"injury_out", "injury_doubtful"}
+    base = {"mean", "stddev", "weighted_mean", "trend", "aux_mean", "aux_trend",
+            "recs_mean", "recs_trend"}
+
+    models = pd.read_sql(text("""
+        SELECT m.code, m.id AS market_id, a.model_name, a.lookback
+        FROM active_models a JOIN prop_markets m ON m.id = a.market_id
+        ORDER BY m.code
+    """), engine)
+
+    absent_total, constant_total, checked = 0, 0, 0
+    for r in models.itertuples():
+        meta_path = ARTIFACTS / f"{r.model_name}_{r.code}_lb{r.lookback}.json"
+        if not meta_path.exists():
+            continue
+        cols = [c for c in json.load(open(meta_path))["feature_cols"]
+                if c not in base]
+        if not cols:
+            continue
+        checked += 1
+
+        stats = pd.read_sql(text("""
+            SELECT k AS feature,
+                   count(*) FILTER (WHERE extra_features ? k) AS present,
+                   -- Measured the way the model sees the column, with a missing
+                   -- key filled as zero, not only over the rows that carry it.
+                   --
+                   -- Those are different questions. Over present rows only,
+                   -- rz_targets_mean is 0.2 on all 44 quarterback rows it
+                   -- appears on and reads as constant; the model is handed 2,135
+                   -- zeros and those 44, which does vary. Failing on the first
+                   -- reading stops the pipeline over a feature that is merely
+                   -- thin, and thin is what the warning below is for. A feature
+                   -- that is genuinely dead, absent everywhere or identical
+                   -- everywhere, is still constant under both readings and
+                   -- still fails.
+                   stddev(COALESCE((extra_features->>k)::float, 0.0)) AS sd
+            FROM player_market_features f,
+                 LATERAL unnest(CAST(:cols AS text[])) AS k
+            WHERE f.market_id = :mid AND f.lookback = :lb
+            GROUP BY k
+        """), engine, params={"cols": cols, "mid": r.market_id,
+                              "lb": r.lookback})
+
+        absent = stats.loc[stats["present"] == 0, "feature"].tolist()
+        # Compared against a tolerance, not against zero.
+        #
+        # Postgres computes stddev over identical values as floating point
+        # noise rather than an exact zero: rz_targets_mean came back as
+        # 5.8e-17. `float(sd) == 0.0` is False for that, so the check written
+        # to catch dead features could not catch a dead feature. Three of them
+        # sat in the active passing models reporting OK.
+        constant = [f for f, sd in zip(stats["feature"], stats["sd"])
+                    if stats.loc[stats["feature"] == f, "present"].iloc[0] > 0
+                    and (sd is None or not math.isfinite(float(sd))
+                         or abs(float(sd)) < 1e-9)
+                    and f not in allowed_constant]
+
+        # Present on almost no rows is the same problem wearing a disguise: the
+        # other 98% are read as a default zero, so the model is fitting a column
+        # that is a constant with a rounding error in it.
+        thin = [f for f, present in zip(stats["feature"], stats["present"])
+                if 0 < int(present) < 0.05 * max(int(stats["present"].max()), 1)
+                and f not in allowed_constant and f not in constant]
+        # One line per market, not one per feature. Eight thin features across
+        # four passing models is 32 warnings saying the same thing, and a
+        # summary nobody reads is the same as no summary.
+        if thin:
+            total = int(stats["present"].max())
+            worst = ", ".join(
+                f"{f} ({int(stats.loc[stats['feature'] == f, 'present'].iloc[0])})"
+                for f in sorted(thin))
+            warn(f"{r.code}: {len(thin)} feature(s) present on almost no rows "
+                 f"out of {total}, so the model sees a default zero nearly "
+                 f"everywhere: {worst}")
+        if absent:
+            absent_total += len(absent)
+            fail(f"{r.code}: model expects {sorted(absent)} but no row carries "
+                 f"them, so they train as a constant zero")
+        if constant:
+            constant_total += len(constant)
+            fail(f"{r.code}: {sorted(constant)} never vary, which a model "
+                 f"cannot learn from")
+
+    if not absent_total and not constant_total:
+        print(f"  OK: every feature across {checked} models is present and varies")
+
+
+def check_box_score_sanity(engine):
+    """Do the counting stats obey the rules that make them counting stats?
+
+    Receptions cannot exceed targets. A player with eight targets and no catches
+    has either had a historically bad afternoon or, far more likely, had
+    something else written into his target column.
+
+    It was the latter for 579 player-games. `pbp_player_game` concatenated a
+    receiving aggregate and a rushing one and then deduplicated to a single row
+    per player-game, and `total_plays` counted targets on a receiving row but
+    carries on a rushing one. Anyone who only ran got his carry count filed as
+    targets, which is how Josh Allen finished a playoff game with twelve targets
+    and no receptions.
+
+    The same dedup kept the receiving row whenever a player had both, so every
+    back who caught a pass lost his rushing half: 3,112 of 4,490 games with five
+    or more carries arrived with a NULL `red_zone_carries` that the feature
+    build read as zero, and the backs it zeroed were the ones good enough to be
+    targeted.
+
+    Both fed live features, `targets_weighted_mean` and yards per target on one
+    side and `rz_carries` on the other, and neither raised anything. A shape
+    check is the only thing that would have caught it.
+    """
+    print()
+    print("[14] Box score stats are internally possible")
+    row = pd.read_sql(text("""
+        SELECT
+          count(*) FILTER (WHERE receptions > targets)                AS impossible,
+          count(*) FILTER (WHERE targets >= 8 AND receptions = 0)     AS dry_spells,
+          -- Three, not one. A quarterback really is thrown at once in a while,
+          -- on a trick play or a batted ball, and there are nine such games
+          -- across four seasons. What does not happen is a quarterback drawing
+          -- his carry count in targets, which is what the bug produced: Josh
+          -- Allen at twelve, Herbert and Nix at ten.
+          count(*) FILTER (WHERE targets >= 3 AND position_group = 'QB'
+                             AND receptions = 0)                      AS qb_targets
+        FROM player_game_stats
+    """), engine).iloc[0]
+
+    if int(row["impossible"]):
+        fail(f"{int(row['impossible'])} player-games have more receptions than "
+             f"targets, which is not a thing that can happen")
+    if int(row["qb_targets"]):
+        fail(f"{int(row['qb_targets'])} quarterback games carry three or more "
+             f"targets and no catch, so something rushing-shaped is landing in "
+             f"the target column again")
+
+    # A real eight-target shutout happens a couple of times a decade, so a
+    # handful across four seasons is the honest number and a hundred is a bug.
+    dry = int(row["dry_spells"])
+    if dry > 20:
+        fail(f"{dry} player-games show eight or more targets and no catches, "
+             f"far past what the sport produces")
+    elif dry:
+        print(f"  ok    {dry} genuine eight-target shutouts, within reason")
+
+    # The rushing half of pbp_player_game, which the old dedup threw away for
+    # anyone who was also targeted.
+    rz = pd.read_sql(text("""
+        SELECT count(*) AS rows,
+               count(*) FILTER (WHERE g.red_zone_carries IS NULL) AS missing
+        FROM pbp_player_game g
+        JOIN player_game_stats s
+          ON s.player_id = g.player_id AND s.game_id = g.game_id
+        WHERE s.carries >= 5
+    """), engine).iloc[0]
+    if int(rz["rows"]) and int(rz["missing"]) > int(rz["rows"]) * 0.05:
+        fail(f"{int(rz['missing'])} of {int(rz['rows'])} games with five or more "
+             f"carries have no red zone carry count, so the rushing half of the "
+             f"play by play is being dropped")
+
+    if not (int(row["impossible"]) or int(row["qb_targets"]) or dry > 20
+            or (int(rz["rows"]) and int(rz["missing"]) > int(rz["rows"]) * 0.05)):
+        print(f"  OK: targets, receptions and carries agree across "
+              f"{int(rz['rows'])} rushing games")
+
+
+def check_kickoff_dates(engine):
+    """Does every board row agree with the schedule about what day it is?
+
+    commence_time is stored as an instant, and turning it into a date needs a
+    timezone. Read in UTC, a Sunday night kickoff at 20:20 Eastern becomes 00:20
+    on Monday, so every Sunday, Monday and Thursday night game is dated a day
+    late. That is 16% of every odds snapshot in the table.
+
+    The consequences were not cosmetic. The edge builder used the UTC date as
+    the key into the scheduled-game context and silently kept stale opponents
+    and venues for those games. The edges endpoint printed the wrong kickoff day
+    on 135 of 842 rows. The season backtest inner-joined on it against the real
+    local game date, so every primetime game failed the join and vanished from a
+    6,736 pick result, and primetime is where the biggest names play.
+
+    Three separate places, one root cause, none of them raising anything. So the
+    dates are checked against the schedule directly.
+    """
+    print()
+    print("[15] Kickoff dates agree with the schedule")
+    row = pd.read_sql(text("""
+        SELECT count(*) AS rows,
+               count(*) FILTER (
+                 WHERE g.game_id IS NULL) AS unmatched
+        FROM (SELECT DISTINCT event_id, home_team, away_team,
+                     (commence_time AT TIME ZONE 'America/New_York')::date AS et_date
+              FROM prop_edges WHERE commence_time IS NOT NULL) e
+        LEFT JOIN nfl_games g ON g.game_date = e.et_date
+    """), engine).iloc[0]
+
+    if not int(row["rows"]):
+        warn("no board rows carry a kickoff time")
+        return
+    if int(row["unmatched"]):
+        fail(f"{int(row['unmatched'])} of {int(row['rows'])} board games have a "
+             f"kickoff date with no scheduled game on it, which is what reading "
+             f"commence_time in UTC does to a night game")
+        return
+
+    shifted = pd.read_sql(text("""
+        SELECT count(*) AS n FROM prop_edges
+        WHERE (commence_time AT TIME ZONE 'UTC')::date
+           <> (commence_time AT TIME ZONE 'America/New_York')::date
+    """), engine).iloc[0]["n"]
+    print(f"  OK: {int(row['rows'])} board games land on a scheduled date, "
+          f"{int(shifted)} of which UTC would have moved")
+
+
+def check_published_figures(engine):
+    """Does the site still state numbers the record supports?
+
+    Every return figure on the dashboard and the FAQ is written into the page as
+    text. The record underneath them is rebuilt whenever the backfill runs, and
+    on the day this check was written that happened three times, each time
+    leaving the site quoting figures that were no longer true. The dashboard
+    claimed best bets returned +7.1% when the record said +4.4%, and claimed the
+    under side returned +4.4% with an interval clearing zero when it had fallen
+    to +1.9% with an interval straddling it.
+
+    Overstating your own returns is the worst kind of stale number on a site
+    like this, and nothing was checking it.
+
+    The figures live in apps/web/src/lib/published-record.json, which the pages
+    import and this recomputes from prop_edge_results. A disagreement fails,
+    because the honest options are to update the file or to stop making the
+    claim.
+    """
+    print()
+    print("[16] Published figures match the record")
+    path = Path("/opt/published_record.json")
+    if not path.exists():
+        warn("published figures not mounted, cannot compare "
+             "(expected at /opt/published_record.json)")
+        return
+
+    claimed = json.loads(path.read_text(encoding="utf-8"))
+    graded = pd.read_sql(text("""
+        SELECT edge_tier, hit, price_american
+        FROM prop_edge_results WHERE hit IS NOT NULL AND price_american IS NOT NULL
+    """), engine)
+    if graded.empty:
+        warn("no graded picks to check the published figures against")
+        return
+
+    n = int(len(graded))
+    if abs(n - int(claimed.get("graded_picks", 0))) > max(50, n * 0.02):
+        fail(f"the site says {claimed.get('graded_picks')} graded picks, "
+             f"the record holds {n}")
+
+    payout = np.where(graded["price_american"] > 0,
+                      graded["price_american"] / 100.0,
+                      100.0 / graded["price_american"].abs())
+    graded["units"] = np.where(graded["hit"].astype(bool), payout, -1.0)
+
+    bad = []
+    for tier, stated in (claimed.get("tiers") or {}).items():
+        rows = graded[graded["edge_tier"] == tier]
+        if len(rows) < 100:
+            continue
+        actual = float(rows["units"].mean())
+        # A point of ROI is a wide tolerance and deliberately so: this is a
+        # guard against a figure going stale, not a test of the third decimal.
+        if abs(actual - float(stated)) > 0.01:
+            bad.append(f"{tier} stated {float(stated):+.1%}, actual {actual:+.1%}")
+    for b in bad:
+        fail(f"published tier return is out of date: {b}")
+
+    if not bad:
+        print(f"  OK: {len(claimed.get('tiers') or {})} published tier returns "
+              f"agree with {n} graded picks")
+
+
+def check_corrections_present(engine):
+    """Is the platform actually applying the corrections it was tuned with?
+
+    Three fitted artifacts sit between the models and what gets published: the
+    probability calibrator, the spread correction and the interval correction.
+    Every one of them is optional by design, because a market that does not
+    improve should ship uncorrected and a brand new deployment has none of them
+    yet.
+
+    That tolerance is also how they go missing without anyone noticing. The
+    artifacts directory is gitignored, so a deploy that skips the rsync in the
+    runbook gets a working site serving numbers that were never corrected: the
+    probability calibrator alone pulls this board down by about nine points, and
+    its absence looks like nothing at all.
+
+    A warning, not a failure. Missing is the correct state before the first
+    weekly run, and the run that fits them would otherwise be unable to finish.
+    """
+    print()
+    print("[17] Published corrections are present")
+    wanted = {
+        "probability_calibrator.joblib": "win probabilities ship uncorrected",
+        "spread_calibrator.json": "projections ship without the level correction",
+        "interval_calibrator.json": "ranges ship without the interval correction",
+    }
+    missing = [(n, why) for n, why in wanted.items()
+               if not (ARTIFACTS / n).exists()]
+    for name, why in missing:
+        warn(f"{name} is not present, so {why}. Run the weekly pipeline, or "
+             f"copy the artifacts directory across if this is a new server.")
+
+    # Present is not the same as doing anything.
+    #
+    # A fitter that finds no market worth correcting writes {}, which is the
+    # correct outcome and indistinguishable from a working correction if all
+    # this checks is that the file exists. Both of these were deliberately
+    # emptied after their gains turned out to be measured on the model's own
+    # training rows, and the check still reported three healthy artifacts.
+    empty = []
+    for name in wanted:
+        path = ARTIFACTS / name
+        if not path.exists() or not name.endswith(".json"):
+            continue
+        try:
+            if not json.loads(path.read_text(encoding="utf-8")):
+                empty.append(name)
+        except Exception:
+            warn(f"{name} is present but could not be read as JSON")
+    for name in empty:
+        warn(f"{name} is present but corrects nothing. That is the right state "
+             f"when no market beat its raw prediction out of sample; it is also "
+             f"what a broken fit looks like, so it is worth knowing which.")
+
+    if not missing and not empty:
+        print(f"  OK: all {len(wanted)} correction artifacts present and active")
+    elif not missing:
+        print(f"  {len(wanted) - len(empty)} of {len(wanted)} corrections active")
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     print("=" * 62)
-    print("PropSignal freshness audit")
+    print("PriorLine freshness audit")
     print("=" * 62)
 
     check_feature_refresh(engine)
@@ -685,6 +1057,11 @@ def main():
     check_projection_agreement(engine)
     check_board_internal_consistency(engine)
     check_injury_currency(engine)
+    check_no_dead_features(engine)
+    check_box_score_sanity(engine)
+    check_kickoff_dates(engine)
+    check_published_figures(engine)
+    check_corrections_present(engine)
 
     print("\n" + "=" * 62)
     if failures:
