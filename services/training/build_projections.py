@@ -29,6 +29,8 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 
 import build_prop_edges as bp
+import spread_calibration as sc
+import interval_calibration as ic
 
 ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 # One slate, not two.
@@ -52,6 +54,10 @@ CREATE TABLE IF NOT EXISTS player_projections (
     game_date     DATE,
     market_code   TEXT NOT NULL,
     projection    DOUBLE PRECISION NOT NULL,
+    -- The same number before the spread correction, carried through to history
+    -- so the correction is never refitted on its own output.
+    projection_raw DOUBLE PRECISION,
+    p50_raw       DOUBLE PRECISION,
     p10           DOUBLE PRECISION,
     p25           DOUBLE PRECISION,
     p50           DOUBLE PRECISION,
@@ -66,6 +72,32 @@ CREATE TABLE IF NOT EXISTS player_projections (
 CREATE INDEX IF NOT EXISTS idx_projections_player ON player_projections (player_id);
 CREATE INDEX IF NOT EXISTS idx_projections_date   ON player_projections (game_date);
 CREATE INDEX IF NOT EXISTS idx_projections_market ON player_projections (market_code);
+
+-- Survives the truncate above, one row per player, market and game. See
+-- db/migrations/add_projection_history.sql for why this is separate.
+CREATE TABLE IF NOT EXISTS player_projection_history (
+    player_id     TEXT NOT NULL,
+    player_name   TEXT,
+    team          TEXT,
+    opponent      TEXT,
+    position      TEXT,
+    market_code   TEXT NOT NULL,
+    game_date     DATE NOT NULL,
+    projection    DOUBLE PRECISION,
+    projection_raw DOUBLE PRECISION,
+    p50_raw       DOUBLE PRECISION,
+    p10           DOUBLE PRECISION,
+    p25           DOUBLE PRECISION,
+    p50           DOUBLE PRECISION,
+    p75           DOUBLE PRECISION,
+    p90           DOUBLE PRECISION,
+    model_name    TEXT,
+    depth_rank    INTEGER,
+    projected_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (player_id, market_code, game_date)
+);
+CREATE INDEX IF NOT EXISTS idx_projection_history_player
+    ON player_projection_history (player_id, game_date DESC);
 """
 
 
@@ -146,6 +178,9 @@ def main():
 
     ctx = bp.load_current_context(engine)
     stale_factors = bp.load_stale_role_factors(ARTIFACT_DIR)
+    last_played = bp.load_last_played(engine)
+    spread_cal = sc.load(ARTIFACT_DIR)
+    interval_cal = ic.load(ARTIFACT_DIR)
 
     print(f"{df['player_id'].nunique()} players, {len(df)} player-market rows, "
           f"{df['game_id'].nunique()} games")
@@ -193,7 +228,11 @@ def main():
 
             # Same freshness contract as the edge builder: everything knowable
             # before kickoff describes THIS game, not the stored row's game.
-            feats["_last_game_date"] = r.as_of_game_date
+            # Not as_of_game_date. On a serving row that is the game being
+            # predicted, so staleness would read zero. See
+            # build_prop_edges.resolve_last_played.
+            feats["_last_game_date"] = bp.resolve_last_played(
+                last_played, r.player_id, r.as_of_game_date, r.game_date)
             bp.apply_current_context(
                 feats, ctx, player_id=r.player_id, team=r.team,
                 event_date=r.game_date, position=r.position,
@@ -215,8 +254,27 @@ def main():
                     factor = float(sf["factor"])
                     pred *= factor
 
+            # Undo the flattening before anything is derived from the point
+            # prediction, which is what the edge builder does.
+            #
+            # Correcting it afterwards put the two out of step on the count
+            # markets: those build their median from a Poisson on the point
+            # rate, so a rate corrected later gave the board a median of 1.00
+            # against the page's 1.45 for the same Mahomes row. The freshness
+            # audit caught it, which is what that check exists for.
+            #
+            # After the stale-role factor, so a demoted player is marked down
+            # first and then read on the corrected scale.
+            # Kept before the correction is applied. fit_spread_calibrator
+            # learns from this history, so writing only the corrected number
+            # would have it fitting a correction on top of its own output every
+            # week. See db/migrations/add_projection_raw.sql.
+            pred_raw = pred
+            pred = sc.apply(spread_cal, market_code, "point", pred)
+
             qs = {}
-            if market_code in bp.COUNT_MARKETS:
+            is_count = market_code in bp.COUNT_MARKETS
+            if is_count:
                 # Small integer counts get a Poisson range built from the point
                 # rate, for the same reason the edge builder does: quantile
                 # regression on a 0-to-4 variable reproduces the population
@@ -233,12 +291,44 @@ def main():
                 cal = bp.calibrated_quantiles(raw, quant.get("calibration"))
                 qs = {q: v * factor for q, v in cal.items()}
 
+            # Re-read the range at the levels that make it honest, measured
+            # on the player-games books actually price. Before the median
+            # correction below, so the median is corrected once and on the
+            # corrected ladder.
+            #
+            # Not on the count markets, for two reasons. Their ladder is a
+            # Poisson built to have the point projection as its mean, so the
+            # quantiles and the point are consistent by construction and
+            # moving one without the other is what put the board's median at
+            # 1.00 against this page's 1.45 on the same Mahomes row. And the
+            # correction was never fitted on a Poisson ladder in the first
+            # place: the rows it learns from carry quantile-regression output.
+            # The edge builder already skips it here; this did not, so pass_td
+            # and rush_att would have shown a corrected range on the player
+            # page and an uncorrected one on the board.
+            if not is_count:
+                qs = ic.apply(interval_cal, market_code, qs)
+
+            p50_raw = qs.get(0.50)
+            if qs.get(0.50) is not None:
+                qs = dict(qs)
+                qs[0.50] = sc.apply(spread_cal, market_code, "median", qs[0.50])
+                # A corrected median must stay inside its own band.
+                lo = qs.get(0.25)
+                hi = qs.get(0.75)
+                if lo is not None and qs[0.50] < lo:
+                    qs[0.50] = lo
+                if hi is not None and qs[0.50] > hi:
+                    qs[0.50] = hi
+
             rows.append({
                 "player_id": r.player_id, "player_name": r.player_name,
                 "position": r.position, "team": r.team, "opponent": r.opponent,
                 "game_id": r.game_id, "game_date": r.game_date,
                 "market_code": market_code,
                 "projection": pred,
+                "projection_raw": pred_raw,
+                "p50_raw": p50_raw,
                 "p10": qs.get(0.10), "p25": qs.get(0.25), "p50": qs.get(0.50),
                 "p75": qs.get(0.75), "p90": qs.get(0.90),
                 "model_name": meta["model_name"],
@@ -257,6 +347,40 @@ def main():
         conn.execute(text("TRUNCATE player_projections"))
         out.to_sql("player_projections", conn, if_exists="append", index=False,
                    method="multi", chunksize=500)
+
+        # Keep a copy that survives the next truncate.
+        #
+        # player_projections is the upcoming slate and nothing else, so the
+        # moment a game is played the number we published for it is gone. The
+        # only other record is prop_edge_results, which needs a posted line and
+        # a pick that cleared the filters, so a player we projected but never
+        # bet leaves no trace at all. One row per player, market and game, last
+        # projection wins.
+        conn.execute(text("""
+            INSERT INTO player_projection_history (
+                player_id, player_name, team, opponent, position, market_code,
+                game_date, projection, projection_raw, p50_raw,
+                p10, p25, p50, p75, p90, model_name,
+                depth_rank, projected_at)
+            SELECT player_id, player_name, team, opponent, position,
+                   market_code, game_date, projection, projection_raw, p50_raw,
+                   p10, p25, p50, p75, p90,
+                   model_name, depth_rank, NOW()
+            FROM player_projections
+            ON CONFLICT (player_id, market_code, game_date) DO UPDATE SET
+                player_name = EXCLUDED.player_name,
+                team        = EXCLUDED.team,
+                opponent    = EXCLUDED.opponent,
+                position    = EXCLUDED.position,
+                projection  = EXCLUDED.projection,
+                projection_raw = EXCLUDED.projection_raw,
+                p50_raw     = EXCLUDED.p50_raw,
+                p10 = EXCLUDED.p10, p25 = EXCLUDED.p25, p50 = EXCLUDED.p50,
+                p75 = EXCLUDED.p75, p90 = EXCLUDED.p90,
+                model_name  = EXCLUDED.model_name,
+                depth_rank  = EXCLUDED.depth_rank,
+                projected_at = NOW()
+        """))
 
     print(f"\nPROJECTIONS BUILT: {len(out)} rows")
     print(f"  players covered : {out['player_id'].nunique()}")

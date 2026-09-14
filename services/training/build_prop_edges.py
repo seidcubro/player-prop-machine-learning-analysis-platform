@@ -28,6 +28,8 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import spread_calibration as spread
+import interval_calibration as interval
 import pandas as pd
 from scipy.stats import norm
 from sqlalchemy import create_engine, text
@@ -186,6 +188,19 @@ def load_current_context(engine) -> dict:
     # the features should say so rather than repeating a stale one. Week 1
     # reports are not published until the Wednesday of game week, so an empty
     # result here is the normal state for most of the preseason and is correct.
+    #
+    # Within the season the bound is the season, not the week, so a player's
+    # latest report carries forward until the next one is published. That is
+    # deliberate rather than an oversight, and it is worth being explicit about
+    # because the board usually spans two weeks: every slate has a Thursday game
+    # belonging to the following week, and reports for that week do not exist
+    # until the Wednesday before it.
+    #
+    # Carrying forward is the safe direction to be wrong in. A player who has
+    # recovered keeps last week's "Out" and is left off the board, which costs a
+    # bet nobody placed. Dropping the report instead would mark a player who is
+    # still injured as healthy and publish a pick on someone who will not dress.
+    # The first error is invisible, the second reaches a reader.
     inj = pd.read_sql(
         text(
             """
@@ -329,6 +344,20 @@ def load_current_context(engine) -> dict:
 # Reported after the build; see the miss branch in apply_current_context.
 CONTEXT_MISSES: list[tuple[str, object]] = []
 
+# Why a priced prop did not become a pick.
+#
+# The board is the end of a funnel: a book posts a prop, the player has to be
+# known, have a model, have a rolling window, be on one of the two teams, not be
+# ruled out, and finally beat the price by enough to earn a tier. Every one of
+# those was a silent `continue`, so a night with 33 priced players and 13
+# published picks looked like the model having no opinion rather than twenty
+# specific, explainable drops. Tallied here and printed at the end.
+SKIPS: dict[str, list[str]] = {}
+
+
+def skip(reason: str, player: str, market: str) -> None:
+    SKIPS.setdefault(reason, []).append(f"{player} {market}")
+
 
 def apply_current_context(
     row_features: dict, ctx: dict, player_id: str, team: str, event_date,
@@ -381,7 +410,9 @@ def apply_current_context(
     # Absence of a listing means healthy: only injured players get reported.
     put("injury_questionable", 1.0 if status == "Questionable" else 0.0)
     put("injury_doubtful", 1.0 if status == "Doubtful" else 0.0)
-    put("injury_out", 1.0 if status == "Out" else 0.0)
+    # Doubtful is folded in here rather than kept separate, because the edge
+    # builder treats both the same way: it does not publish a pick on either.
+    put("injury_out", 1.0 if status in ("Out", "Doubtful") else 0.0)
 
     # Staleness of the rolling window, measured to the game actually being
     # predicted rather than to whatever game the historical row described.
@@ -494,6 +525,37 @@ def apply_current_context(
         put("team_implied_total", (total + team_spread) / 2.0)
 
 
+def load_last_played(engine) -> dict:
+    """Each player's most recent completed game.
+
+    Staleness used to be measured from the feature row's as_of_game_date, which
+    worked only because that date happened to be the last game the player
+    played. It is no longer: the feature build now also emits a row for the game
+    a player has NOT played yet, so that the rolling window includes his most
+    recent game instead of stopping one short. On that row as_of_game_date is
+    the upcoming game, and measuring staleness from it would return zero days
+    for every player on the board, quietly switching off the stale-window
+    features and the stale-role correction that depends on them.
+
+    Reading the last played date from the stat table instead removes the
+    coincidence. There is no row here for a game that has not happened, so the
+    answer is right by construction rather than by luck.
+    """
+    df = pd.read_sql(text(
+        "SELECT player_id, max(game_date) AS last_played "
+        "FROM player_game_stats_app WHERE game_date IS NOT NULL "
+        "GROUP BY player_id"), engine)
+    return {r.player_id: r.last_played for r in df.itertuples(index=False)}
+
+
+def resolve_last_played(last_played: dict, player_id, as_of, event_date):
+    """The last game actually played before the game being predicted."""
+    lp = last_played.get(player_id)
+    if lp is not None and event_date is not None and lp < event_date:
+        return lp
+    return as_of
+
+
 def load_stale_role_factors(artifact_dir: Path) -> dict:
     """Load the measured correction for players returning in a reduced role.
 
@@ -545,20 +607,75 @@ def load_probability_calibrator(artifact_dir: Path):
     return bundle
 
 
+# The widest probability this platform will publish.
+#
+# Three stages clamped to three different bounds and the audit used a fourth:
+# the quantile and count paths allowed 0.02 to 0.98, the calibrator allowed 0.01
+# to 0.99, and audit_freshness.py fails the run outright above 0.95. So the
+# builder could legitimately ship a number the audit then rejected, and the
+# scheduled run would exit non-zero over a single confident row.
+#
+# The audit's bound is the one with an argument behind it. Nothing in a football
+# prop is 99% to happen, the graded record has picks claiming 99% that hit 47%,
+# and the calibration warnings on this board still run ten points optimistic.
+# Bounding here means the number the site prints is the number the audit checks.
+PROB_FLOOR, PROB_CEILING = 0.05, 0.95
+
+
+def _bounded(p: float) -> float:
+    return float(min(max(float(p), PROB_FLOOR), PROB_CEILING))
+
+
 def calibrate_probability(bundle, market_code: str, p: float) -> float:
     """Apply the market's calibrator, falling back to the pooled one.
 
     A market with too little graded history has no curve of its own, and the
     pooled correction is far closer to right than no correction at all.
+
+    Every path returns a bounded probability, including the ones that decline to
+    correct anything. An uncorrected 0.98 ships just as far as a corrected one.
     """
     if not bundle:
-        return p
+        return _bounded(p)
     models = bundle.get("models") or {}
     ir = models.get(market_code) or models.get("__pooled__")
     if ir is None:
-        return p
+        return _bounded(p)
     out = float(ir.predict(np.asarray([p], dtype=float))[0])
-    return float(min(max(out, 0.01), 0.99))
+    return _bounded(out)
+
+
+def decimal_odds(price) -> float:
+    """Total return per unit staked, stake included, from an American price."""
+    if price is None or (isinstance(price, float) and math.isnan(price)):
+        return float("nan")
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return float("nan")
+    if p == 0:
+        return float("nan")
+    return 1.0 + (p / 100.0 if p > 0 else 100.0 / abs(p))
+
+
+def ev_per_unit_staked(prob_edge: float, price) -> float:
+    """Expected profit per unit staked.
+
+    `expected_value` on the board is the model's probability minus the book's
+    implied probability, which is a probability edge. The two are related
+    exactly:
+
+        EV = p*b - (1 - p) = (b + 1) * (p - 1/(b + 1)) = decimal_odds * edge
+
+    so the same probability edge is worth roughly twice as much on a plus price
+    as on a heavy minus one. Board prices run from 1.36 to 2.72 in decimal
+    terms, so ranking on the probability edge quietly under-ranks exactly the
+    prices worth taking.
+    """
+    d = decimal_odds(price)
+    if not math.isfinite(d) or not math.isfinite(prob_edge):
+        return float("nan")
+    return prob_edge * d
 
 
 def implied_prob(price) -> float:
@@ -865,8 +982,12 @@ def main():
 
 
     prob_cal = load_probability_calibrator(artifact_dir)
+    spread_cal = spread.load(artifact_dir)
+    interval_cal = interval.load(artifact_dir)
     ctx = load_current_context(engine)
     stale_factors = load_stale_role_factors(artifact_dir)
+    last_played = load_last_played(engine)
+    ruled_out: set[str] = set()
 
     model_cache = {}
     rows = []
@@ -891,6 +1012,7 @@ def main():
 
         loaded = model_cache[key]
         if loaded is None:
+            skip("no trained model for the market", o["player_name"], market_code)
             continue
 
         meta, model, quant = loaded
@@ -901,6 +1023,7 @@ def main():
         ].copy()
 
         if player_market_rows.empty:
+            skip("no feature row for the player", o["player_name"], market_code)
             continue
 
         # Use the most recent feature snapshot as of (and including) this game's date.
@@ -916,6 +1039,7 @@ def main():
             player_market_rows["as_of_game_date"] <= o["event_date"]
         ].copy()
         if candidates.empty:
+            skip("no feature row on or before kickoff", o["player_name"], market_code)
             continue
 
         candidates = candidates.sort_values("as_of_game_date")
@@ -938,6 +1062,7 @@ def main():
         player_team_norm = current_team_norm or latest_row["team_norm"]
 
         if player_team_norm not in (o["home_team_norm"], o["away_team_norm"]):
+            skip("not on either team in this game", o["player_name"], market_code)
             continue
 
         match = candidates
@@ -999,7 +1124,9 @@ def main():
                 row_features[c] = _num(extra.get(c, 0.0))
 
         # as_of_game_date is the game the rolling window ends on.
-        row_features["_last_game_date"] = frow.get("as_of_game_date")
+        row_features["_last_game_date"] = resolve_last_played(
+            last_played, frow.get("player_id"), frow.get("as_of_game_date"),
+            o["event_date"])
 
         apply_current_context(
             row_features,
@@ -1011,6 +1138,25 @@ def main():
         )
 
         row_features.pop("_last_game_date", None)
+
+        # A player his team has ruled out does not get a pick.
+        #
+        # "Out" was only ever a feature, so a ruled-out player stayed on the
+        # board with a slightly reduced projection. He records zero, and books
+        # void props on inactive players anyway, so the pick is at best
+        # meaningless and at worst a recommendation to bet a player who is not
+        # dressing. The night this was written TreVeyon Henderson was ruled out
+        # with an ankle and the board carried two picks on him for a game
+        # kicking off that evening.
+        #
+        # Doubtful is included: it means unlikely to play, and the same argument
+        # applies to a projection built from a full workload. Questionable is
+        # not, because most questionable players play, and the feature already
+        # carries the information.
+        if row_features.get("injury_out", 0.0) >= 1.0:
+            ruled_out.add(o["player_name"])
+            skip("ruled out or doubtful", o["player_name"], market_code)
+            continue
 
         x = pd.DataFrame([row_features])
 
@@ -1033,6 +1179,15 @@ def main():
             if demoted >= 1 and stale_days > sf.get("stale_days", 60):
                 stale_factor = float(sf["factor"])
                 model_projection *= stale_factor
+
+        # Undo the flattening, on the markets where undoing it validated.
+        #
+        # See fit_spread_calibrator.py. Applied after the stale-role factor so a
+        # demoted player is marked down first and then read on the corrected
+        # scale, and before anything downstream: the side, the edge and the
+        # tier all follow from these two numbers.
+        model_projection = spread.apply(
+            spread_cal, market_code, "point", model_projection)
 
         weighted_mean = float(frow.get("weighted_mean", 0.0) or 0.0)
 
@@ -1079,7 +1234,22 @@ def main():
                 p_under = 1.0 - p_over
             else:
                 cal_q = calibrated_quantiles(qp, quant.get("calibration"))
+                # The second-stage correction, measured on priced player-games
+                # rather than on every game by a priced player. See
+                # fit_interval_calibrator.py.
+                cal_q = interval.apply(interval_cal, market_code, cal_q)
             median_value = float(cal_q.get(0.50, projection))
+            # The median carries its own correction, fitted separately: for the
+            # yardage markets the point projection improves and correcting the
+            # median makes it worse, because the median has already been through
+            # the calibration map above.
+            median_value = spread.apply(
+                spread_cal, market_code, "median", median_value)
+            lo, hi = cal_q.get(0.25), cal_q.get(0.75)
+            if lo is not None and median_value < lo:
+                median_value = float(lo)
+            if hi is not None and median_value > hi:
+                median_value = float(hi)
         else:
             # Fallback for markets with no quantile bundle yet.
             std = float(frow.get("stddev", 0.0) or 0.0)
@@ -1125,8 +1295,23 @@ def main():
         # produced a different way, and pushing it through a correction
         # estimated for the other method would distort a number that is already
         # consistent with the point model it came from.
+        # Held before the correction, and stored alongside it.
+        #
+        # fit_probability_calibrator fits its next map on the probability this
+        # writes, so storing only the corrected one would have it learning from
+        # its own output. See db/migrations/add_win_prob_raw.sql.
+        p_over_raw = float(p_over)
+
         if market_code not in COUNT_MARKETS:
             p_over = calibrate_probability(prob_cal, market_code, float(p_over))
+            p_under = 1.0 - p_over
+        else:
+            # Skipping the isotonic correction is deliberate, per the note
+            # above. Skipping the bound is not: a Poisson survival probability
+            # is clamped to 0.98 upstream, the audit fails the run above 0.95,
+            # and a touchdown market is the likeliest place to produce an
+            # extreme number in the first place. Bound it without correcting it.
+            p_over = _bounded(float(p_over))
             p_under = 1.0 - p_over
 
         ev_over = float(p_over) - implied_prob(o["over_price"])
@@ -1141,6 +1326,7 @@ def main():
         only_over = not math.isfinite(ev_under)
         only_under = not math.isfinite(ev_over)
         if only_under and only_over:
+            skip("no usable price on either side", o["player_name"], market_code)
             continue
 
         # The side the model actually favours, not the side with the better
@@ -1173,11 +1359,13 @@ def main():
         if only_over or (not only_under and prefer_over):
             recommended_side = "over"
             win_prob = float(p_over)
+            win_prob_raw = p_over_raw
             chosen_price = o["over_price"]
             expected_value = ev_over
         else:
             recommended_side = "under"
             win_prob = float(p_under)
+            win_prob_raw = 1.0 - p_over_raw
             chosen_price = o["under_price"]
             expected_value = ev_under
 
@@ -1194,6 +1382,7 @@ def main():
         raw_edge = median_value - line_value
 
         if not math.isfinite(expected_value):
+            skip("expected value could not be computed", o["player_name"], market_code)
             continue
 
         # A pick the model does not think is more likely than not.
@@ -1205,10 +1394,12 @@ def main():
         # invites exactly the question the rest of this work was meant to
         # settle, and six rows are not worth it.
         if win_prob <= 0.5:
+            skip("model gives the pick under 50%", o["player_name"], market_code)
             continue
 
         # Projected, but not offered as a bet. See SUPPRESSED_MARKETS.
         if market_code in SUPPRESSED_MARKETS:
+            skip("market is projected but not offered", o["player_name"], market_code)
             continue
 
         # Tiers re-cut for the calibrated probability.
@@ -1272,6 +1463,7 @@ def main():
 
         # A bet the price already covers is not an edge, so it is not shown.
         if tier == "none":
+            skip("the price already covers the edge", o["player_name"], market_code)
             continue
         
         rows.append({
@@ -1293,7 +1485,14 @@ def main():
             "projection_median": median_value,
             "raw_edge": raw_edge,
             "win_prob": win_prob,
+            "win_prob_raw": win_prob_raw,
+            # The probability edge, which the tier cuts were fitted on.
             "expected_value": expected_value,
+            # The same edge expressed as profit per unit staked, which is what
+            # a bettor actually receives. Stored alongside rather than instead
+            # of: re-pointing the tiers at a different quantity would throw away
+            # the one calibration on this board that has held up out of sample.
+            "ev_per_unit": ev_per_unit_staked(expected_value, chosen_price),
             "recommended_side": recommended_side,
             "edge_tier": tier,
             "market_id": int(frow["market_id"]),
@@ -1371,12 +1570,33 @@ def main():
             & (out["edge_tier"].isin(["elite", "strong"]))
         ]
         if len(eligible):
-            keep = (eligible.sort_values("expected_value", ascending=False)
+            # Ranked on profit per unit, not on the probability edge.
+            #
+            # This only decides which of several rows for the same prop
+            # survives, and those rows differ mostly by book and price. The
+            # probability edge is blind to price by construction, so it kept
+            # whichever book the model liked rather than whichever paid most.
+            # The measured edge here is star unders *at the best price*, so the
+            # price belongs in the ranking that picks the survivor.
+            keep = (eligible.sort_values("ev_per_unit", ascending=False)
                             .drop_duplicates(subset=["player_name", "market_code"])
                             .drop_duplicates(subset=["player_name",
                                                      "commence_time"]))
             out.loc[keep.index, "best_bet"] = True
         print(f"best-bet flagged {int(out['best_bet'].sum())} of {len(out)} edges")
+
+    if ruled_out:
+        print(f"  excluded {len(ruled_out)} player(s) ruled out or doubtful: "
+              f"{', '.join(sorted(ruled_out))}")
+
+    if SKIPS:
+        total = sum(len(v) for v in SKIPS.values())
+        print()
+        print(f"  {total} priced props did not become picks:")
+        for reason, items in sorted(SKIPS.items(), key=lambda kv: -len(kv[1])):
+            sample = ", ".join(sorted(items)[:3])
+            more = f" and {len(items) - 3} more" if len(items) > 3 else ""
+            print(f"    {len(items):>4}  {reason}: {sample}{more}")
 
     if CONTEXT_MISSES:
         teams = sorted({t for t, _ in CONTEXT_MISSES})
