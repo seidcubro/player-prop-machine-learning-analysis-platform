@@ -186,6 +186,30 @@ MODEL_NAME = model_name
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 
 LABEL_COL = "label_actual"
+# Smallest share of rows an extra feature must appear on to be kept.
+#
+# The freshness audit warns that the four passing markets carry eight receiving
+# features present on 22 to 61 quarterback rows out of 1,660: rz_targets,
+# rz_target_rate, third_down_targets and yac. A missing extra is filled with
+# 0.0, so these arrive as 98% zero columns with a few real values, which the
+# zero-variance drop below does not catch because they are not constant.
+#
+# Trained with and without them, every market comes out bit for bit identical:
+#
+#     pass_yds          R2 0.38901764606593725 either way
+#     pass_att          R2 0.4076893027898848
+#     pass_completions  R2 0.3940413756086947
+#     pass_td           R2 0.1742698438460516
+#
+# So they are inert rather than harmful, and dropping them is free: the same
+# predictions from eight fewer columns, and an audit warning that goes quiet
+# because the condition is gone rather than because it was silenced. The five
+# receiving and rushing markets drop nothing at this threshold and are also
+# unchanged, which is what makes it safe as a default.
+#
+# Set to 0 to keep every feature regardless of coverage.
+MIN_FEATURE_COVERAGE = float(os.getenv("MIN_FEATURE_COVERAGE", "0.05"))
+
 BASE_FEATURE_COLS = [
     "mean",
     "stddev",
@@ -278,6 +302,59 @@ def _build_feature_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]
 
     # Remove duplicate columns safely
     X = X.loc[:, ~X.columns.duplicated()]
+
+    # Drop columns that do not vary, outside the base set.
+    #
+    # A missing extra feature is filled with 0.0 above, so a feature that only
+    # exists on a handful of rows arrives as a column of zeros with a few real
+    # values in it, and one that exists nowhere arrives as a column of zeros.
+    # Neither carries information, both cost a split point, and the models were
+    # carrying them: rz_targets_mean and third_down_targets_mean are receiving
+    # statistics and sat in the active passing models, present on 44 of 2,179
+    # quarterback rows and identical on all 44.
+    #
+    # The tolerance is deliberate. Postgres returns the standard deviation of a
+    # constant column as around 5e-17 rather than zero, which is how these got
+    # past the freshness audit for as long as they did.
+    extra = [c for c in X.columns if c not in BASE_FEATURE_COLS]
+    dead = [c for c in extra
+            if not float(pd.to_numeric(X[c], errors="coerce").std(ddof=0) or 0.0) > 1e-9]
+    if dead:
+        print(f"  dropping {len(dead)} feature(s) that never vary: {sorted(dead)}")
+        X = X.drop(columns=dead)
+
+    # Drop extras that are present on almost no rows.
+    #
+    # The variance test above only catches a column that is constant. A feature
+    # attached to 44 rows out of 2,213 is not constant, it is 98% default zero
+    # with a few real values, and it survives. The passing markets were carrying
+    # eight of those, all receiving statistics: rz_targets, rz_target_rate,
+    # third_down_targets and yac, present on 36 to 72 quarterback rows each.
+    #
+    # Sparsity like that is not a small amount of signal, it is a liability. A
+    # random forest with max_features="sqrt" draws a random subset of columns at
+    # every split, so eight columns that are zero for 98% of rows crowd out
+    # eight real ones every time they are drawn, and on the rows where they are
+    # not zero the tree can carve out a leaf that fits a handful of games.
+    #
+    # Presence is read from the raw feature dicts, before the zero fill, so a
+    # feature that is genuinely zero for most players keeps its column. Absent
+    # and zero are different things and only the first one is being dropped.
+    if not extra_df.empty and MIN_FEATURE_COVERAGE > 0:
+        n = len(extras_series)
+        keep_cols = set(X.columns)
+        sparse = sorted(
+            k for k in extra_keys
+            if k in keep_cols
+            and sum(1 for d in extras_series if k in d) < MIN_FEATURE_COVERAGE * n
+        )
+        if sparse:
+            covered = {k: sum(1 for d in extras_series if k in d) for k in sparse}
+            print(f"  dropping {len(sparse)} feature(s) present on under "
+                  f"{MIN_FEATURE_COVERAGE:.0%} of {n} rows: "
+                  + ", ".join(f"{k} ({covered[k]})" for k in sparse))
+            X = X.drop(columns=sparse)
+
     feature_cols = list(X.columns)
 
     return X.astype(float), feature_cols
