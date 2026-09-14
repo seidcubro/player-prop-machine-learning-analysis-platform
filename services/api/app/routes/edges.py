@@ -443,7 +443,38 @@ def edges_summary(db: Session = Depends(get_db)):
                 WHERE e.commence_time >= NOW()) AS games_priced,
               (SELECT COUNT(DISTINCT market_key) FROM odds_player_props p
                  JOIN odds_events e ON e.provider_event_id = p.provider_event_id
-                WHERE e.commence_time >= NOW()) AS markets_priced
+                WHERE e.commence_time >= NOW()) AS markets_priced,
+              -- How many priced players can produce a signal at all.
+              --
+              -- A sportsbook posts yardage and reception lines on starters and
+              -- little else. On a typical slate a large share of the players it
+              -- prices carry nothing but an anytime touchdown, which this site
+              -- does not publish because the market runs a 37% overround. Those
+              -- players are fully projected and have a profile page; they just
+              -- have no line to beat.
+              --
+              -- Without this the board looks like it is missing people. Troy
+              -- Franklin was priced at +1200 to score and at nothing else, and
+              -- the only honest way to say so is to count it.
+              (SELECT COUNT(*) FROM (
+                 SELECT p.player_name
+                   FROM odds_player_props p
+                   JOIN odds_events e ON e.provider_event_id = p.provider_event_id
+                  WHERE e.commence_time >= NOW()
+                    AND p.player_name NOT ILIKE '%Defense%'
+                    AND p.player_name NOT ILIKE '%D/ST%'
+                  GROUP BY p.player_name
+               ) q) AS players_priced,
+              (SELECT COUNT(*) FROM (
+                 SELECT p.player_name
+                   FROM odds_player_props p
+                   JOIN odds_events e ON e.provider_event_id = p.provider_event_id
+                  WHERE e.commence_time >= NOW()
+                    AND p.market_key <> 'player_anytime_td'
+                    AND p.player_name NOT ILIKE '%Defense%'
+                    AND p.player_name NOT ILIKE '%D/ST%'
+                  GROUP BY p.player_name
+               ) q) AS players_with_market
             """
         )
     ).mappings().first()

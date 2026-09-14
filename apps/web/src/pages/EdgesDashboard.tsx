@@ -291,6 +291,27 @@ export default function EdgesDashboard() {
           number nobody can interpret is worse than no number. */}
       <Glossary />
 
+      {/*
+        Say why the board is the size it is.
+
+        A sportsbook posts yardage and reception lines on starters and little
+        else, so a large share of the players it prices carry nothing but an
+        anytime touchdown, which this site does not publish into a 37%
+        overround. Those players are projected in full and have a profile; they
+        have no line to beat. Without saying so the board reads as though the
+        model has never heard of half the offence.
+      */}
+      {cov && cov.players_priced > cov.players_with_market && (
+        <p className="ps-coverage-note">
+          Books posted a line on <b>{cov.players_priced}</b> players tonight, and
+          only <b>{cov.players_with_market}</b> of them on a market worth
+          publishing. The other {cov.players_priced - cov.players_with_market}{" "}
+          carry an anytime touchdown and nothing else, so there is no line to
+          beat. Every one of them still has a number on{" "}
+          <Link to="/projections">Projections</Link>.
+        </p>
+      )}
+
       <section className="ps-statgrid" aria-label="Signal summary">
         {/*
           The tier cards are filters, not decoration.

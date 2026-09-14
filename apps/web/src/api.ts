@@ -174,6 +174,10 @@ export type EdgeCoverage = {
   games_upcoming: number;
   games_priced: number;
   markets_priced: number;
+  /** Players a book posted anything on, defenses excluded. */
+  players_priced: number;
+  /** Of those, how many carry a market this site publishes. */
+  players_with_market: number;
 };
 
 export type EdgesSummary = {

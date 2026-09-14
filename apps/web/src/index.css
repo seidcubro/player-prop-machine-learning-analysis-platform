@@ -341,17 +341,49 @@ h3 {
 }
 @media (max-width: 420px) { .ps-statgrid { grid-template-columns: minmax(0, 1fr); } }
 
+/* Why the board is the size it is. Sits above the summary cards, styled as a
+   quiet aside so it explains without competing with the numbers. */
+.ps-coverage-note {
+  margin: 0 0 var(--s4);
+  padding: var(--s3) var(--s4);
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+.ps-coverage-note b { color: var(--text); font-variant-numeric: tabular-nums; }
+.ps-coverage-note a { color: var(--cyan); }
+
 .ps-stat {
   position: relative;
   overflow: hidden;
+  /*
+   * The faint wash under the brand hairline is a background layer, not a
+   * pseudo-element.
+   *
+   * It was ::after, which is already the "active filter" badge on a pressed
+   * card. An element only gets one ::after, so the two rules merged: the
+   * badge kept its text but inherited inset:0 from the wash, stretched across
+   * the whole card, and printed ACTIVE FILTER on top of the card's label.
+   * ::before is the hairline, so neither pseudo-element was ever free.
+   */
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 7%, transparent),
+    transparent 58%
+  );
   /* Padding and type scale with the viewport so a card gets smaller before the
      grid has to reflow. This is what lets four stay in a row for longer. */
   padding: clamp(12px, 1.4vw, 18px) clamp(14px, 1.8vw, 24px);
-  background: var(--bg-raised);
+  /* background-color, not the shorthand: the shorthand resets background-image
+     and would wipe the wash declared above it. */
+  background-color: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   transition: transform 0.28s var(--ease), border-color 0.28s var(--ease),
-              background 0.28s var(--ease);
+              background-color 0.28s var(--ease);
   min-width: 0;
 }
 /* A hairline of brand along the top edge. Reads as instrumentation. */
@@ -363,20 +395,6 @@ h3 {
   background: var(--brand-grad);
   opacity: 0.65;
 }
-/* A very faint wash from the top edge, so the card has some depth under the
-   brand hairline instead of being a flat rectangle. */
-.ps-stat::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent) 7%, transparent),
-    transparent 58%
-  );
-}
-.ps-stat > * { position: relative; }
 .ps-stat:hover { transform: translateY(-3px); border-color: var(--border-strong); }
 .ps-stat .label {
   font-size: clamp(0.62rem, 0.78vw, 0.7rem);
@@ -385,6 +403,12 @@ h3 {
   text-transform: uppercase;
   color: var(--text-faint);
   margin-bottom: var(--s2);
+  /* One line, like the subtitle. With the badge reserving 78px on a card that
+     can shrink to 190px, a label that wraps makes its card taller than the
+     three beside it and breaks the row. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ps-stat .value {
   font-family: var(--font-display);
@@ -416,14 +440,18 @@ button.ps-stat {
   width: 100%;
 }
 button.ps-stat:hover {
-  background: var(--bg-raised-2);
+  background-color: var(--bg-raised-2);
   border-color: var(--border-strong);
   transform: translateY(-3px);
 }
 button.ps-stat[aria-pressed="true"] {
   border-color: var(--accent);
-  background: var(--accent-soft);
+  background-color: var(--accent-soft);
 }
+/* Reserve room for the badge rather than hoping the label is short enough.
+   The badge is absolutely positioned, so it does not push anything aside on its
+   own, and at four cards across a card is only about 230px wide. */
+button.ps-stat[aria-pressed="true"] .label { padding-right: 78px; }
 button.ps-stat[aria-pressed="true"]::after {
   content: "active filter";
   position: absolute;
