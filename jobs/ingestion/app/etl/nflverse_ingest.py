@@ -16,6 +16,8 @@ Sources:
 - load_players            : player directory
 """
 
+import ctypes
+import gc
 import os
 from typing import Iterable
 import pandas as pd
@@ -48,6 +50,100 @@ def _season_range(start: int, end: int) -> list[int]:
     return list(range(start, end + 1))
 
 
+# Where nflverse publishes each dataset, for the fallback below.
+#
+# Release tag and file stem, which do not always match the loader's name.
+_NFLVERSE_FILES = {
+    "load_injuries": ("injuries", "injuries"),
+    "load_pbp": ("pbp", "play_by_play"),
+    "load_participation": ("pbp_participation", "pbp_participation"),
+    "load_ftn_charting": ("ftn_charting", "ftn_charting"),
+    "load_ff_opportunity": ("ff_opportunity", "ff_opportunity"),
+    "load_depth_charts": ("depth_charts", "depth_charts"),
+    "load_snap_counts": ("snap_counts", "snap_counts"),
+    "load_player_stats": ("player_stats", "player_stats"),
+}
+_NFLVERSE_BASE = "https://github.com/nflverse/nflverse-data/releases/download"
+
+
+def _load_season_parquet(loader_name: str, season: int) -> pd.DataFrame | None:
+    """Read a season's file straight from nflverse, ignoring the library's calendar.
+
+    `nflreadpy.get_current_season()` decides the newest season it will accept
+    from the Thursday after Labor Day. The NFL opened the 2026 season on
+    Wednesday 9 September, the first Wednesday opener since 2012, so for one day
+    the library refused a 2026 file that was already published and already had
+    players ruled out for that night's game.
+
+    A hardcoded calendar in a dependency is not something to be at the mercy of
+    once a year, so when the loader refuses a season this checks whether the
+    file exists anyway. A 404 means the season really has not been published and
+    the caller skips it exactly as before.
+    """
+    spec = _NFLVERSE_FILES.get(loader_name)
+    if spec is None:
+        return None
+    release, stem = spec
+    url = f"{_NFLVERSE_BASE}/{release}/{stem}_{season}.parquet"
+    try:
+        return pd.read_parquet(url)
+    except Exception:
+        return None
+
+
+def _release_memory(stage: str = "") -> None:
+    """Hand freed memory back to the operating system between stages.
+
+    Peak RSS climbed across the run rather than within any one stage: 2.9GB by
+    the charting step, 4.1GB by participation, even though no single stage needs
+    close to that. The frames are dropped correctly; glibc simply keeps the
+    arenas it has already obtained, so resident memory only ever goes up and the
+    whole ingest needs as much as the sum of its parts.
+
+    `malloc_trim` releases the unused top of the heap. Without it this wants a
+    server twice the size it has any business needing, for memory that is not
+    being used.
+
+    Best effort: not glibc, no malloc_trim, and the collect alone still helps.
+    """
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
+def _shrink(df: pd.DataFrame) -> pd.DataFrame:
+    """Make a season cheap enough to hold five of at once.
+
+    A season of play-by-play is 372 columns and 194MB in pandas, and 119MB of
+    that is object-dtype strings: stadium names, coach names, the full text
+    description of every play. Five seasons concatenated, with `pd.concat`
+    holding both its inputs and its output, peaked the ingest at 4.2GB and put
+    the daily refresh out of reach of a 4GB server.
+
+    Repeated strings become categories, which store one copy plus an integer
+    code per row. Columns where nearly every value is distinct are left alone,
+    because a category of mostly-unique values is larger than the strings were.
+
+    Nothing is dropped. A column projection would be a bigger saving and a worse
+    idea: `_col` returns a default Series for a missing column rather than
+    raising, so an allowlist that forgot one would feed silent zeros into the
+    models instead of failing.
+    """
+    for col in df.columns:
+        if df[col].dtype != object:
+            continue
+        try:
+            n = len(df[col])
+            if n and df[col].nunique(dropna=False) / n < 0.5:
+                df[col] = df[col].astype("category")
+        except (TypeError, ValueError):
+            # Unhashable or mixed content: leave it as it is.
+            continue
+    return df
+
+
 def _load_by_season(loader, seasons: Iterable[int], **kwargs) -> pd.DataFrame:
     """Load an nflverse dataset one season at a time, skipping unavailable seasons.
 
@@ -63,15 +159,26 @@ def _load_by_season(loader, seasons: Iterable[int], **kwargs) -> pd.DataFrame:
         try:
             df = _as_pandas(loader([season], **kwargs))
         except Exception as exc:
-            print(f"    skip {name} {season}: {type(exc).__name__}: {str(exc)[:120]}")
-            continue
+            df = _load_season_parquet(name, season)
+            if df is None or len(df) == 0:
+                print(f"    skip {name} {season}: "
+                      f"{type(exc).__name__}: {str(exc)[:120]}")
+                continue
+            print(f"    {name} {season}: loader refused "
+                  f"({type(exc).__name__}), read the published file directly, "
+                  f"{len(df)} rows")
         if df is None or len(df) == 0:
             print(f"    skip {name} {season}: 0 rows")
             continue
-        frames.append(df)
+        frames.append(_shrink(df))
+        del df
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    out = pd.concat(frames, ignore_index=True)
+    # concat has copied everything it needs; holding the originals as well is
+    # what doubled the peak.
+    frames.clear()
+    return out
 
 
 def ensure_tables():
@@ -519,6 +626,8 @@ def ensure_tables():
             avg_xyac                FLOAT,
             avg_vegas_wp            FLOAT,
             total_plays             INT,
+            pbp_targets             INT,
+            pbp_carries             INT,
             PRIMARY KEY (player_id, game_id)
         )
         """,
@@ -1181,7 +1290,13 @@ def ingest_ftn_charting(seasons: Iterable[int]):
         print("  pbp: nothing loaded, leaving existing rows")
         return
     print(f"  pbp raw: {len(pbp)} rows")
-    pbp_pass = pbp[pbp["pass_attempt"] == 1][["game_id", "play_id", "receiver_player_id", "season", "week"]].copy()
+    # Five columns of 372, so the rest goes before the merge. Same reasoning as
+    # ingest_participation.
+    pbp_pass = pbp.loc[pbp["pass_attempt"] == 1,
+                       ["game_id", "play_id", "receiver_player_id",
+                        "season", "week"]].copy()
+    del pbp
+    _release_memory()
     # season and week come from PBP since FTN only has season/week at file level
     if "season" not in ftn.columns:
         ftn = ftn.drop(columns=["season", "week"], errors="ignore")
@@ -1253,13 +1368,26 @@ def ingest_participation(seasons: Iterable[int]):
     if len(pbp) == 0:
         print("  pbp: nothing loaded, leaving existing rows")
         return
-    pbp = pbp[pbp["play_type"].isin(["pass", "run"])].copy()
+    # Take the eight columns wanted and let the rest go.
+    #
+    # This used to filter the full frame to a copy, then project that copy, so
+    # five seasons of play-by-play were resident three times over: the raw
+    # frame, the filtered copy, and the merge result. Play-by-play is 372
+    # columns and this step reads eight of them. Holding the other 364 across
+    # the merge is what made the ingest need more than 4GB, which is more than
+    # the whole rest of the platform put together.
+    _CTX = ["game_id", "play_id", "shotgun", "pass_attempt", "rush_attempt",
+            "yardline_100", "season", "week"]
+    pbp_ctx = pbp.loc[pbp["play_type"].isin(["pass", "run"]), _CTX].copy()
+    del pbp
+    _release_memory()
 
     df = df.rename(columns={"nflverse_game_id": "game_id"})
 
-    pbp_ctx = pbp[["game_id", "play_id", "shotgun", "pass_attempt", "rush_attempt",
-                   "yardline_100", "season", "week"]].copy()
-    df_joined = df.merge(pbp_ctx, left_on=["game_id", "play_id"], right_on=["game_id", "play_id"], how="left")
+    df_joined = df.merge(pbp_ctx, left_on=["game_id", "play_id"],
+                         right_on=["game_id", "play_id"], how="left")
+    del df, pbp_ctx
+    _release_memory()
 
     rows = []
     for _, play in df_joined.iterrows():
@@ -1362,8 +1490,6 @@ def ingest_pbp_aggregated(seasons: Iterable[int]):
     pbp["third_down"]   = (c("down") == 3).astype(int)
     pbp["shotgun_f"]    = pd.to_numeric(c("shotgun"), errors="coerce").fillna(0)
 
-    rows = []
-
     # receiver aggregation
     rec = pbp[pbp["pass_attempt"] == 1].copy()
     rec["air_yards_n"] = pd.to_numeric(_col(rec, "air_yards"), errors="coerce")
@@ -1399,14 +1525,9 @@ def ingest_pbp_aggregated(seasons: Iterable[int]):
     rec_agg["target_left_pct"]   = rec_agg["target_left"] / tgt_total.replace(0, float("nan"))
     rec_agg["target_middle_pct"] = rec_agg["target_middle"] / tgt_total.replace(0, float("nan"))
     rec_agg["target_right_pct"]  = rec_agg["target_right"] / tgt_total.replace(0, float("nan"))
-    rec_agg = rec_agg.rename(columns={"receiver_player_id": "player_id", "posteam": "team"})
-    rec_agg["shotgun_pct"] = None
-    rec_agg["run_left_pct"] = None
-    rec_agg["run_middle_pct"] = None
-    rec_agg["run_right_pct"] = None
-    rec_agg["red_zone_carries"] = None
-    rec_agg["red_zone_carry_rate"] = None
-    rows.append(rec_agg)
+    rec_agg = rec_agg.rename(columns={"receiver_player_id": "player_id",
+                                      "posteam": "team",
+                                      "total_plays": "pbp_targets"})
 
     # rusher aggregation
     rush = pbp[pbp["rush_attempt"] == 1].copy()
@@ -1434,19 +1555,52 @@ def ingest_pbp_aggregated(seasons: Iterable[int]):
     rush_agg["run_middle_pct"] = rush_agg["run_middle"] / rl_total.replace(0, float("nan"))
     rush_agg["run_right_pct"]  = rush_agg["run_right"] / rl_total.replace(0, float("nan"))
     rush_agg["shotgun_pct"]    = rush_agg["shotgun_snaps_rush"] / rush_agg["total_plays"].replace(0, float("nan"))
-    rush_agg = rush_agg.rename(columns={"rusher_player_id": "player_id", "posteam": "team"})
-    for col in ["avg_air_yards_target", "avg_yac", "avg_cp", "avg_cpoe", "avg_xyac",
-                "red_zone_targets", "third_down_targets", "red_zone_target_rate",
-                "third_down_target_rate", "target_left_pct", "target_middle_pct", "target_right_pct",
-                "target_left", "target_middle", "target_right"]:
-        rush_agg[col] = None
-    shared_cols = [c for c in rec_agg.columns if c in rush_agg.columns]
-    rows.append(rush_agg[shared_cols])
+    rush_agg = rush_agg.rename(columns={"rusher_player_id": "player_id",
+                                        "posteam": "team",
+                                        "total_plays": "pbp_carries"})
 
-    out = pd.concat(rows, ignore_index=True).dropna(subset=["player_id", "game_id"])
-    # deduplicate: receiver rows have more columns, keep them over rusher rows
-    out = out.sort_values("avg_air_yards_target", na_position="last")
-    out = out.drop_duplicates(subset=["player_id", "game_id"], keep="first")
+    # Merged side by side, one row per player-game holding both halves.
+    #
+    # These used to be concatenated and then deduplicated on the player and the
+    # game, keeping whichever row sorted first. That threw away a row per
+    # player-game and broke two things at once.
+    #
+    # The kept row was the receiving one whenever a player had both, so every
+    # back who caught a pass lost his rushing play context: 3,112 of 4,490
+    # games with five or more carries came through with a NULL red_zone_carries
+    # that the feature build then read as zero. The backs it silently zeroed
+    # were the ones good enough to be targeted.
+    #
+    # And total_plays counted targets on a receiving row but carries on a
+    # rushing one, so sync_targets_from_pbp wrote a carry count into targets for
+    # anyone who only ran: Josh Allen came out of a playoff game with twelve
+    # targets and no catches. 579 rows had eight or more targets and zero
+    # receptions. targets feeds targets_weighted_mean and yards per target, so
+    # every one of them dragged a receiving projection down.
+    keys = ["player_id", "game_id", "season", "week", "team"]
+    both = ["avg_epa_per_play", "avg_vegas_wp"]
+    out = rec_agg.merge(
+        rush_agg, on=keys, how="outer", suffixes=("_rec", "_rush"),
+    ).dropna(subset=["player_id", "game_id"])
+
+    for col in ["pbp_targets", "pbp_carries"]:
+        out[col] = out[col].fillna(0)
+
+    # The two averages both halves produce are recombined by play count rather
+    # than by picking a side, so a back who ran twelve times and caught two
+    # passes gets an EPA over all fourteen.
+    for col in both:
+        rec_v, rush_v = out[col + "_rec"], out[col + "_rush"]
+        w = out["pbp_targets"] + out["pbp_carries"]
+        out[col] = (
+            (rec_v.fillna(0) * out["pbp_targets"]
+             + rush_v.fillna(0) * out["pbp_carries"])
+            / w.replace(0, float("nan"))
+        ).where(rec_v.notna() | rush_v.notna())
+        out = out.drop(columns=[col + "_rec", col + "_rush"])
+    # Kept meaning what the feature build already assumes: how much this player
+    # touched the ball, which is both halves rather than whichever one survived.
+    out["total_plays"] = out["pbp_targets"] + out["pbp_carries"]
 
     final_cols = ["player_id", "game_id", "season", "week", "team",
                   "avg_air_yards_target", "avg_yac", "avg_epa_per_play",
@@ -1455,7 +1609,8 @@ def ingest_pbp_aggregated(seasons: Iterable[int]):
                   "third_down_targets", "third_down_target_rate",
                   "target_left_pct", "target_middle_pct", "target_right_pct",
                   "run_left_pct", "run_middle_pct", "run_right_pct",
-                  "shotgun_pct", "avg_xyac", "avg_vegas_wp", "total_plays"]
+                  "shotgun_pct", "avg_xyac", "avg_vegas_wp", "total_plays",
+                  "pbp_targets", "pbp_carries"]
 
     out = out[[c for c in final_cols if c in out.columns]].copy()
 
@@ -1467,10 +1622,16 @@ def ingest_pbp_aggregated(seasons: Iterable[int]):
 
 def sync_targets_from_pbp():
     """
-    Permanent target fix:
-    Use aggregated play-by-play receiver rows as the source of truth for targets.
-    In pbp_player_game, receiver rows use total_plays = number of pass targets for that player-game.
-    Merge those targets back into player_game_stats, then refresh player_game_stats_app.
+    Use the play by play as the source of truth for targets.
+
+    Reads pbp_targets, which counts pass plays this player was thrown at and
+    nothing else. It used to read total_plays, which was targets on a receiving
+    row but carries on a rushing one, so every player who only ran had his carry
+    count written into his target column.
+
+    The write covers any player-game the play by play saw at all, including the
+    ones where the honest answer is zero, because those are exactly the rows the
+    old version got wrong and left wrong.
     """
     with _engine().begin() as conn:
         updated = conn.execute(text("""
@@ -1480,12 +1641,14 @@ def sync_targets_from_pbp():
                 SELECT
                     player_id,
                     game_id,
-                    CAST(total_plays AS FLOAT) AS targets
+                    CAST(pbp_targets AS FLOAT) AS targets
                 FROM pbp_player_game
                 WHERE player_id IS NOT NULL
                   AND game_id IS NOT NULL
-                  AND total_plays IS NOT NULL
-                  AND total_plays > 0
+                  AND pbp_targets IS NOT NULL
+                  -- Proof the play by play actually covered this player-game,
+                  -- so a gap in it cannot zero out a real target count.
+                  AND COALESCE(pbp_targets, 0) + COALESCE(pbp_carries, 0) > 0
             ) AS src
             WHERE pgs.player_id = src.player_id
               AND pgs.game_id = src.game_id
@@ -1745,57 +1908,137 @@ def build_crosswalk():
     print(f"  crosswalk: {count} players, {pfr_count} with pfr_id")
 
 
+def _refuse_to_narrow(seasons: list[int]) -> None:
+    """Stop a narrow season range from deleting seasons already loaded.
+
+    Every ingest here is a full replace: `ingest_player_game_stats` truncates
+    the table before writing, and a dozen other loaders do the same. So the
+    season range is not "which seasons to add", it is "which seasons will exist
+    afterwards". Running SEASON_START=2025 to pick up one new week silently
+    dropped 2022, 2023 and 2024 and left the models training on a third of the
+    history, which the freshness audit only caught afterwards.
+
+    Set ALLOW_NARROW_RANGE=1 when the truncation is genuinely wanted, such as
+    rebuilding from scratch.
+    """
+    if os.getenv("ALLOW_NARROW_RANGE") == "1":
+        return
+    try:
+        with _engine().begin() as conn:
+            have = conn.execute(text(
+                "SELECT min(season), max(season) FROM player_game_stats"
+            )).first()
+    except Exception:
+        return
+    if not have or have[0] is None:
+        return
+    lo, hi = int(have[0]), int(have[1])
+    if min(seasons) > lo or max(seasons) < hi:
+        raise SystemExit(
+            f"refusing to ingest seasons {min(seasons)}-{max(seasons)}: the "
+            f"database currently holds {lo}-{hi} and every loader truncates "
+            f"before writing, so this run would delete the seasons outside the "
+            f"requested range. Widen the range, or set ALLOW_NARROW_RANGE=1 if "
+            f"that is what you want."
+        )
+
+
 def run():
     season_start = int(os.getenv("SEASON_START", "2022"))
     season_end   = int(os.getenv("SEASON_END",   "2025"))
     seasons = _season_range(season_start, season_end)
+    _refuse_to_narrow(seasons)
     print(f"Running full ingestion for seasons {season_start}-{season_end}")
 
     ensure_tables()
 
+    # A subset, for the runs that happen often.
+    #
+    # The full ingest re-downloads every season of every dataset, which is
+    # minutes of transfer and the right thing to do once a day. Between those
+    # runs the only source that moves is the injury report, published through
+    # Wednesday to Friday, and a player ruled out has to come off the board
+    # before somebody bets him. `ONLY=injuries,depth_charts` makes the frequent
+    # run cheap enough to mean it.
+    only = {x.strip() for x in os.getenv("ONLY", "").split(",") if x.strip()}
+    if only:
+        print(f"Partial ingestion: {', '.join(sorted(only))}")
+        steps = {
+            "injuries": lambda: ingest_injuries(seasons),
+            "depth_charts": lambda: ingest_depth_charts(seasons),
+            "schedules": lambda: ingest_schedules(seasons),
+            "players": lambda: (ingest_players(), sync_players_dimension()),
+        }
+        unknown = only - set(steps)
+        if unknown:
+            raise SystemExit(
+                f"ONLY does not recognise {sorted(unknown)}; "
+                f"choose from {sorted(steps)}"
+            )
+        for name in sorted(only):
+            print(f"--- {name} ---")
+            steps[name]()
+        print("Partial ingestion complete.")
+        return
+
+    _release_memory()
     print("--- players ---")
     ingest_players()
     sync_players_dimension()
 
+    _release_memory()
     print("--- schedules ---")
     ingest_schedules(seasons)
 
+    _release_memory()
     print("--- player_game_stats ---")
     ingest_player_game_stats(seasons)
 
+    _release_memory()
     print("--- rosters_weekly (needed for crosswalk) ---")
     ingest_rosters_weekly(seasons)
 
+    _release_memory()
     print("--- crosswalk ---")
     build_crosswalk()
 
+    _release_memory()
     print("--- snap_counts ---")
     ingest_snap_counts(seasons)
 
+    _release_memory()
     print("--- NGS ---")
     ingest_ngs(seasons)
 
+    _release_memory()
     print("--- PFR advanced stats ---")
     ingest_pfr_advstats(seasons)
 
+    _release_memory()
     print("--- ff_opportunity ---")
     ingest_ff_opportunity(seasons)
 
+    _release_memory()
     print("--- depth_charts ---")
     ingest_depth_charts(seasons)
 
+    _release_memory()
     print("--- injuries ---")
     ingest_injuries(seasons)
 
+    _release_memory()
     print("--- FTN charting (loads PBP internally) ---")
     ingest_ftn_charting(seasons)
 
+    _release_memory()
     print("--- participation (loads PBP internally) ---")
     ingest_participation(seasons)
 
+    _release_memory()
     print("--- PBP aggregated ---")
     ingest_pbp_aggregated(seasons)
 
+    _release_memory()
     print("--- sync targets from PBP into player_game_stats ---")
     sync_targets_from_pbp()
 
