@@ -33,10 +33,10 @@ AUTH="X-Admin-Token: ${ADMIN_TOKEN}"
 
 if [ "$1" != "--skip-ingest" ]; then
   echo "==> 1/7 nflverse ingestion"
-  docker build -q -f jobs/ingestion/Dockerfile -t propsignal-ingest . >/dev/null
+  docker build -q -f jobs/ingestion/Dockerfile -t priorline-ingest . >/dev/null
   docker run --rm --network player-prop-platform_default \
     -e DATABASE_URL="postgresql://app:app@postgres:5432/app" \
-    -e SEASON_START=2022 -e SEASON_END="$(date +%Y)" propsignal-ingest
+    -e SEASON_START=2022 -e SEASON_END="$(date +%Y)" priorline-ingest
 fi
 
 echo "==> 2/7 team backfill (new rows arrive with NULL team)"

@@ -54,10 +54,19 @@ INSERT INTO odds_snapshots
 SELECT p.provider_event_id, p.sport_key, e.commence_time, e.home_team, e.away_team,
        p.bookmaker_key, p.bookmaker_title, p.market_key, p.player_name,
        p.outcome_name, p.line, p.price_american, p.last_update,
-       date_trunc('hour', NOW()), 'live'
+       date_trunc('hour', NOW()),
+       -- Anything already kicked off is archived as 'late'.
+       --
+       -- This used to be filtered to upcoming games only, so a price for a game
+       -- that started since the last run was never archived at all: 300 rows
+       -- across the Thursday opener and Wednesday night sat in the live table
+       -- with nothing behind them, one props sync from gone. They are still
+       -- worth keeping and they are not closing prices, so they are labelled
+       -- rather than dropped and eval_clv can ignore them.
+       CASE WHEN e.commence_time >= NOW() THEN 'live' ELSE 'late' END
 FROM odds_player_props p
 LEFT JOIN odds_events e ON e.provider_event_id = p.provider_event_id
-WHERE e.commence_time >= NOW()
+WHERE e.commence_time IS NOT NULL
 ON CONFLICT (provider_event_id, bookmaker_key, market_key,
              player_name, outcome_name, observed_at) DO NOTHING;
 SQL
@@ -69,15 +78,17 @@ fi
 
 # ---------------------------------------------------------------- data
 log "ingest nflverse (last week's results land here)"
-docker build -q -f jobs/ingestion/Dockerfile -t propsignal-ingest . >/dev/null
+docker build -q -f jobs/ingestion/Dockerfile -t priorline-ingest . >/dev/null
 docker run --rm --network player-prop-platform_default \
   -e DATABASE_URL="postgresql://app:app@postgres:5432/app" \
-  -e SEASON_START=2022 -e SEASON_END="$(date +%Y)" propsignal-ingest
-
-log "team backfill (new rows arrive with a NULL team)"
-docker compose exec -T postgres psql -U app -d app -q -f - < db/backfills/fix_team_final.sql
+  -e SEASON_START=2022 -e SEASON_END="$(date +%Y)" priorline-ingest
 
 # ---------------------------------------------------------------- features
+# The feature build reads three materialized views and nothing refreshed
+# them, so they had stopped at the Super Bowl while the source ran current.
+log "refresh materialized views"
+docker compose exec -T postgres psql -U app -d app -q -f - < db/views/refresh_matviews.sql
+
 log "rebuild features"
 for m in $MARKETS; do
   curl -sf -X POST -H "$AUTH" "$API/jobs/build_features?market_code=$m&lookback=5" >/dev/null || {
@@ -85,6 +96,11 @@ for m in $MARKETS; do
   curl -sf -X POST -H "$AUTH" "$API/jobs/attach_labels?market_code=$m&lookback=5" >/dev/null
   printf '    %s\n' "$m"
 done
+
+# The backfill patches player_market_features, the table the rebuild writes,
+# so it has to run after it or this run's new rows keep their NULL team.
+log "team backfill (new rows arrive with a NULL team)"
+docker compose exec -T postgres psql -U app -d app -q -f - < db/backfills/fix_team_final.sql
 
 # ---------------------------------------------------------------- models
 # Retraining weekly is deliberate. Each week adds real games, and the whole
