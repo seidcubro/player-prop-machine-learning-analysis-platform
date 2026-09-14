@@ -1,5 +1,5 @@
 /**
- * PropSignal design system.
+ * PriorLine design system.
  *
  * The look is a trading terminal that reads like a research tool: cool blue-black
  * surfaces, a cyan-to-violet brand, and numbers set in mono so columns line up
@@ -238,7 +238,7 @@ body {
  * Page titles follow the wordmark: plain lead, gradient noun.
  *
  * Gradienting the whole heading competed with the logo instead of echoing it.
- * "PropSignal" is white then gradient, so "Today's Signals" is too, and the
+ * "PriorLine" is white then gradient, so "Today's Signals" is too, and the
  * emphasis lands on the word that names the page.
  *
  * `background-clip: text` needs a guard. Without one, an unsupported browser
@@ -323,14 +323,23 @@ h3 {
  * they cannot shrink further without the numbers clipping does the grid step
  * down to 2x2, then to a single column.
  */
+/*
+ * Fits the number of cards, rather than assuming four.
+ *
+ * This was `repeat(4, ...)`. The signals page has four summary cards so it
+ * looked right there, and the player page has three, which left a quarter of
+ * the row as a hole on the right hand side and made the group read as though a
+ * card had failed to load. `auto-fit` collapses the empty track so three cards
+ * share the full width, and the same rule handles the narrow window without a
+ * separate breakpoint.
+ */
 .ps-statgrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: var(--s4);
   margin-bottom: var(--s5);
 }
-@media (max-width: 1240px) { .ps-statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px)  { .ps-statgrid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 420px) { .ps-statgrid { grid-template-columns: minmax(0, 1fr); } }
 
 .ps-stat {
   position: relative;
@@ -354,6 +363,20 @@ h3 {
   background: var(--brand-grad);
   opacity: 0.65;
 }
+/* A very faint wash from the top edge, so the card has some depth under the
+   brand hairline instead of being a flat rectangle. */
+.ps-stat::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 7%, transparent),
+    transparent 58%
+  );
+}
+.ps-stat > * { position: relative; }
 .ps-stat:hover { transform: translateY(-3px); border-color: var(--border-strong); }
 .ps-stat .label {
   font-size: clamp(0.62rem, 0.78vw, 0.7rem);
@@ -1014,6 +1037,136 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-propcard.over { border-left-color: var(--green); }
 .ps-propcard.under { border-left-color: var(--red); }
 
+/*
+ * Prop card internals.
+ *
+ * The card had a shell -- background, radius, coloured left edge -- and nothing
+ * inside it, so Line, Model and Edge rendered as six stacked unstyled divs and
+ * the recommendation ran on as a sentence. The shell made it look deliberate,
+ * which is why it survived so long.
+ *
+ * The layout is the same one the board uses: label above number, numbers in
+ * mono so they line up across cards, and the only colour is the one that
+ * carries meaning.
+ */
+.ps-propcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.ps-propcard .market {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+.ps-propcard .market h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  letter-spacing: -0.01em;
+}
+
+/* Three equal columns, so Line, Model and Edge sit under each other across
+   every card in the grid regardless of how wide the numbers run. */
+.ps-propcard .nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s2);
+  padding: var(--s3) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.ps-propcard .nums .label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+.ps-propcard .nums .value {
+  font-family: var(--font-mono);
+  font-size: 1.22rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.ps-propcard .nums .value.green { color: var(--green); }
+.ps-propcard .nums .value.red { color: var(--red); }
+
+.ps-propcard .rec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.ps-propcard .rec .side-over,
+.ps-propcard .rec .side-under {
+  display: inline-block;
+  padding: 2px var(--s2);
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.ps-propcard .rec .side-over {
+  color: var(--green);
+  background: var(--green-dim);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+}
+.ps-propcard .rec .side-under {
+  color: var(--red);
+  background: var(--red-dim);
+  border: 1px solid color-mix(in srgb, var(--red) 32%, transparent);
+}
+.ps-propcard .rec .prob {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* Recent form sits on its own shelf so the sparkline has room to read. */
+.ps-propcard .form {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--border);
+}
+.ps-propcard .form .caption {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-faint);
+}
+.ps-propcard .form .hits { font-size: 0.82rem; color: var(--text-dim); }
+.ps-propcard .form .hits b {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+/* Line shopping is reference, not headline. */
+.ps-propcard .rec.books {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  line-height: 1.45;
+}
+
+@media (max-width: 420px) {
+  .ps-propcard .nums .value { font-size: 1.05rem; }
+  .ps-propcard .form { flex-direction: column; align-items: flex-start; gap: var(--s2); }
+}
+
+
 .ps-playercard {
   display: flex;
   align-items: center;
@@ -1040,6 +1193,71 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   overflow: hidden;
 }
 .ps-playercard .meta { font-size: 0.76rem; color: var(--text-faint); margin-top: 3px; }
+
+/*
+ * The card reads as a link, and the position reads at a glance.
+ *
+ * It was an avatar next to a name with the position, team and number run
+ * together as one line of faint grey text, which is the same visual weight for
+ * three things a reader uses differently. The position is what you scan a grid
+ * of six hundred players for, so it gets a badge in the colour its group uses
+ * elsewhere on the site, and the card gets an edge that lights on hover so it
+ * is obviously clickable rather than an inert tile.
+ */
+.ps-playercard {
+  position: relative;
+  overflow: hidden;
+}
+.ps-playercard::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--brand-grad);
+  opacity: 0;
+  transition: opacity 0.26s var(--ease);
+}
+.ps-playercard:hover::before { opacity: 1; }
+
+.ps-playercard .meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+}
+.ps-playercard .meta .team { color: var(--text-dim); }
+.ps-playercard .meta .pos {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border: 1px solid transparent;
+}
+/* Same four groups the markets are organised around. */
+.ps-playercard .meta .pos-qb {
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 30%, transparent);
+}
+.ps-playercard .meta .pos-rb {
+  color: var(--green);
+  background: var(--green-dim);
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
+}
+.ps-playercard .meta .pos-wr {
+  color: var(--violet);
+  background: var(--tier-elite-bg);
+  border-color: var(--tier-elite-bd);
+}
+.ps-playercard .meta .pos-te {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-color: color-mix(in srgb, var(--amber) 30%, transparent);
+}
+
 
 /* ================================================================== profile */
 .ps-profilehead {
@@ -1135,6 +1353,70 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
  * page as the profile header did, which made "no props posted" read as
  * something having gone wrong. It gets a panel sized to its content instead.
  */
+/* Says what a merged view is made of, where the page would otherwise imply a
+   live record that is almost entirely reconstructed. Quiet on purpose: it is
+   a caveat, not a warning. */
+/* The game-log date, which opens the projection-against-result drill-down.
+   Styled as text rather than a button so the table still reads as a table. */
+.ps-linkbtn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-bottom: 1px dotted var(--border-strong);
+}
+.ps-linkbtn:hover { color: var(--accent); }
+.ps-linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.ps-row-open > td { background: var(--bg-raised); }
+
+/* The expanded panel. No side padding on the cell so the nested table lines
+   up with the columns above it. */
+/* The expanded panel under a game-log row.
+
+   It is a footnote to the row above it, not a second dataset, so it does not
+   get the full table treatment: tighter rows, smaller type, no heavy header.
+   At the inherited row height four markets pushed the next game off screen,
+   which made the log feel like it had lost the other games. */
+.ps-row-detail > td {
+  padding: 0 0 var(--s3);
+  background: var(--bg-raised);
+  border-left: 2px solid var(--accent);
+}
+.ps-row-detail .ps-table { font-size: 0.82rem; }
+.ps-row-detail .ps-table th {
+  padding: var(--s2) var(--s3);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  background: none;
+  border-bottom: 1px solid var(--border);
+}
+.ps-row-detail .ps-table td {
+  padding: var(--s2) var(--s3);
+  border-bottom: 0;
+}
+.ps-row-detail .ps-tablewrap { border: 0; background: none; margin: 0; }
+
+/* Marks a projection built on football that is months old. Quiet: it is a
+   qualifier on the number, not a warning about it. */
+.ps-staleflag { color: var(--amber, var(--text-faint)); }
+
+.ps-dim { color: var(--text-faint); }
+
+.ps-note {
+  margin: 0 0 var(--s4);
+  padding: var(--s3) var(--s4);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background: var(--bg-raised);
+  border-left: 2px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
 .ps-empty {
   padding: var(--s5);
   text-align: center;

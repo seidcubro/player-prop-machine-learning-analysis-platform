@@ -247,7 +247,7 @@ export default function PropCards({
               })()}
 
               {others.length > 0 && (
-                <div className="rec" style={{ borderTop: "none", paddingTop: 4 }}>
+                <div className="rec books">
                   <span>
                     Other books:{" "}
                     {others

@@ -133,10 +133,16 @@ export default function PlayersSearch() {
                         taller than every other card in the row and pull the
                         whole grid out of line. */}
                     <div className="name" title={name}>{name}</div>
+                    {/* Position is a badge rather than the first word of a run
+                        of dot-separated text. It is the thing a reader scans a
+                        grid of players for, and as plain grey copy it carried
+                        no more weight than the jersey number. */}
                     <div className="meta">
-                      {p.position ?? "-"}
-                      {p.team ? ` · ${p.team}` : ""}
-                      {p.jersey_number ? ` · #${p.jersey_number}` : ""}
+                      <span className={`pos pos-${(p.position ?? "na").toLowerCase()}`}>
+                        {p.position ?? "-"}
+                      </span>
+                      {p.team ? <span className="team">{p.team}</span> : null}
+                      {p.jersey_number ? <span>#{p.jersey_number}</span> : null}
                     </div>
                   </div>
                 </Link>

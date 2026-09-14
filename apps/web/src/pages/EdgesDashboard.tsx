@@ -1,5 +1,5 @@
 /**
- * Edges dashboard, the core PropSignal screen.
+ * Edges dashboard, the core PriorLine screen.
  *
  * Answers one question per row: "should I bet this or not?"
  * Line vs. model projection vs. edge vs. win probability, color-coded,
@@ -17,6 +17,7 @@ import Glossary from "../components/Glossary";
 import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { fullDateTime, kickoff, price as fmtOdds } from "../lib/format";
+
 import { MARKET_ORDER, isYesNo, marketLabel, sideLabel } from "../lib/markets";
 import {
   fetchEdges,
@@ -71,6 +72,19 @@ function fmtMatchup(e: PropEdge): string {
  * yet. Saying so on the page is the difference between a research tool and a
  * tout.
  */
+/**
+ * A headline count, distinguishing "still loading" from "none".
+ *
+ * These read `count ?? "..."`, and the summary endpoint leaves a tier out
+ * entirely when nothing is in it. So a night with no strong signals showed the
+ * loading ellipsis under the Strong card forever, which looks like the page is
+ * broken rather than like the honest answer, which is zero.
+ */
+function statValue(n: number | null | undefined, loading: boolean) {
+  if (n !== null && n !== undefined) return n;
+  return loading ? "…" : 0;
+}
+
 function CalibrationNotice() {
   const [open, setOpen] = useState(false);
   return (
@@ -97,20 +111,23 @@ function CalibrationNotice() {
             number on screen, because expected value is the probability minus
             the price&rsquo;s break-even, so an inflated probability meant the
             &ldquo;highest EV&rdquo; filter was quietly selecting losing bets.
-            They now run through a calibration fitted on 5,791 graded results.
+            They now run through a calibration fitted on 7,125 graded results.
           </p>
           <p>
             <strong>The tiers rank.</strong> On out-of-sample graded picks,
-            elite returns +4.7% per unit, down through strong, medium and small
-            at &minus;4.5%. Before the fix elite made money while strong and
-            medium each lost more than 5%, which is not a ranking.
+            elite returns +4.0% per unit, then strong at &minus;0.3%, medium at
+            &minus;5.2% and small at &minus;4.3%. The top tier is the only one
+            that makes money, which is what a tier is for.
           </p>
           <p>
             <strong>The under side is where the money is.</strong> Choosing on
             2023&ndash;24 and verifying on a 2025 season never used to choose,
-            unders returned +4.4% per unit with a slate-clustered 95% interval
-            of [+1.8%, +7.2%]. Elite unders, one per player-game, returned
-            +7.1%. The over side lost in both periods and no slice of it
+            unders returned +2.0% per unit with a slate-clustered 95% interval
+            of [&minus;0.6%, +4.2%], which does not clear zero on its own.
+            Narrowing to elite and strong unders returns +3.0% with an interval
+            of [+0.4%, +5.5%], and elite unders one per player-game returns
+            +4.4% at [+0.3%, +8.2%]. Those two clear zero; the broad under side
+            does not. The over side lost in both periods and no slice of it
             survived, so overs are held to roughly double the bar before they
             can reach a top tier. Books shade props toward the over because that
             is what the public buys, which is exactly where the price is worst.
@@ -135,6 +152,8 @@ export default function EdgesDashboard() {
 
   const [market, setMarket] = useState("");
   const [minTier, setMinTier] = useState<EdgeTier | "">("");
+  // One game at a time, which is how a card for tonight gets built.
+  const [eventId, setEventId] = useState("");
   const [side, setSide] = useState<"over" | "under" | "">("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("featured");
@@ -168,6 +187,7 @@ export default function EdgesDashboard() {
     fetchEdges({
       market_code: market || null,
       min_tier: (minTier || null) as EdgeTier | null,
+      event_id: eventId || null,
       side: (side || null) as "over" | "under" | null,
       search: debouncedSearch || null,
       sort,
@@ -187,12 +207,12 @@ export default function EdgesDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [market, minTier, side, debouncedSearch, sort, order, page, bestOnly, exactTier]);
+  }, [market, minTier, side, debouncedSearch, sort, order, page, bestOnly, exactTier, eventId]);
 
   // Reset to page 0 whenever a filter changes.
   useEffect(() => {
     setPage(0);
-  }, [market, minTier, side, debouncedSearch, bestOnly, exactTier]);
+  }, [market, minTier, side, debouncedSearch, bestOnly, exactTier, eventId]);
 
   const markets = useMemo(
     () => summary?.by_market.map((m) => m.market_code) ?? [...MARKET_ORDER],
@@ -278,7 +298,26 @@ export default function EdgesDashboard() {
           a number labelled "Elite" sitting above a filterable table implies it
           should do.
         */}
-        <div className="ps-stat">
+        {/*
+          Total Signals is the way back.
+
+          The tier cards each clear themselves on a second click, but once a
+          filter is on there was nothing that said "show me everything again"
+          except finding the dropdown that set it. The headline count is the
+          obvious thing to press, so it clears every filter the cards can set
+          and reads as pressed whenever none of them are.
+        */}
+        <button
+          type="button"
+          className="ps-stat"
+          aria-pressed={!exactTier && !bestOnly && !minTier}
+          onClick={() => {
+            setExactTier("");
+            setBestOnly(false);
+            setMinTier("");
+            setEventId("");
+          }}
+        >
           <div className="label">Total Signals</div>
           {/*
             The summary count, not `total`.
@@ -288,7 +327,7 @@ export default function EdgesDashboard() {
             "Elite 17" and looked like every signal on the board was elite. The
             summary endpoint is unfiltered, which is what a headline should be.
           */}
-          <div className="value">{allTiersTotal ?? "..."}</div>
+          <div className="value">{statValue(allTiersTotal, summary === null)}</div>
           {/*
             Say how much of the slate is priced.
             A count with no denominator is a mystery: 57 reads as a thin week
@@ -302,7 +341,7 @@ export default function EdgesDashboard() {
                 ? `${cov.games_priced} of ${cov.games_upcoming} games priced`
                 : "across the slate"}
           </div>
-        </div>
+        </button>
 
         <button
           type="button"
@@ -311,7 +350,7 @@ export default function EdgesDashboard() {
           onClick={() => setExactTier(exactTier === "elite" ? "" : "elite")}
         >
           <div className="label">Elite</div>
-          <div className="value green">{summary?.by_tier.elite ?? "..."}</div>
+          <div className="value green">{statValue(summary?.by_tier.elite, summary === null)}</div>
           <div className="sub">highest expected value</div>
         </button>
 
@@ -322,7 +361,7 @@ export default function EdgesDashboard() {
           onClick={() => setExactTier(exactTier === "strong" ? "" : "strong")}
         >
           <div className="label">Strong</div>
-          <div className="value">{summary?.by_tier.strong ?? "..."}</div>
+          <div className="value">{statValue(summary?.by_tier.strong, summary === null)}</div>
           <div className="sub">next tier down</div>
         </button>
 
@@ -333,7 +372,7 @@ export default function EdgesDashboard() {
           onClick={() => setBestOnly((v) => !v)}
         >
           <div className="label">Best Bets</div>
-          <div className="value amber">{bestCount ?? "..."}</div>
+          <div className="value amber">{statValue(bestCount, summary === null)}</div>
           <div className="sub">the verified selection</div>
         </button>
       </section>
@@ -346,6 +385,22 @@ export default function EdgesDashboard() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search player"
+        />
+        {/* Game first, because a parlay is built for one game. Labelled with
+            the signal count so an empty matchup is obvious before selecting
+            it. */}
+        <Select
+          label="Game"
+          value={eventId}
+          onChange={setEventId}
+          minWidth={260}
+          options={[
+            { value: "", label: "All games" },
+            ...(summary?.by_game ?? []).map((g) => ({
+              value: g.event_id,
+              label: `${g.away_team} @ ${g.home_team} (${g.count})`,
+            })),
+          ]}
         />
         <Select
           label="Market"
@@ -419,7 +474,7 @@ export default function EdgesDashboard() {
                   displayed in wherever the two disagreed. */}
               {sortableTh("projection_median", "Model")}
               {sortableTh("edge", "Edge")}
-              {sortableTh("expected_value", "EV")}
+              {sortableTh("ev_per_unit", "EV")}
               {sortableTh("win_prob", "Win %")}
               <th>Pick</th>
               <th>Tier</th>
@@ -516,12 +571,12 @@ export default function EdgesDashboard() {
                   </td>
                   <td
                     data-label="EV"
-                    className={`num ${(e.expected_value ?? 0) > 0 ? "pos" : "neg"}`}
-                    title="Model probability minus the break-even this price demands. Anything at or below zero is a bet the price already covers."
+                    className={`num ${(e.ev_per_unit ?? 0) > 0 ? "pos" : "neg"}`}
+                    title="Expected profit per unit staked, at this price. The column used to print the model's probability minus the break-even instead, which is a probability edge: worth about twice as much on a plus price as on a heavy minus one, and shown as the same number either way. The tiers are still cut on that probability edge, because that is the quantity their thresholds were measured against."
                   >
-                    {e.expected_value === null
+                    {e.ev_per_unit === null
                       ? "-"
-                      : `${e.expected_value > 0 ? "+" : ""}${(e.expected_value * 100).toFixed(1)}%`}
+                      : `${e.ev_per_unit > 0 ? "+" : ""}${(e.ev_per_unit * 100).toFixed(1)}%`}
                   </td>
                   <td data-label="Win %">
                     <span className="prob">
@@ -541,7 +596,7 @@ export default function EdgesDashboard() {
                     {e.best_bet && (
                       <span
                         className="tier best-chip"
-                        title="The one selection verified profitable on a season never used to choose it: top tier, under side, one pick per player-game. +7.1% per unit, 95% interval [+1.6%, +13.2%]."
+                        title="The one selection verified profitable on a season never used to choose it: top tier, under side, one pick per player-game. +4.4% per unit, 95% interval [+0.3%, +8.2%] across 1,540 picks."
                       >
                         Best
                       </span>
@@ -572,7 +627,20 @@ export default function EdgesDashboard() {
         </table>
         </div>
         {!loading && edges.length === 0 && !err && (
-          <div className="ps-empty">No edges match these filters.</div>
+          /* An empty board and an over-narrow filter are different problems and
+             used to give the same message. For most of the week the board is
+             empty because no game is close enough to kickoff to have been
+             priced yet, and telling somebody their filters matched nothing
+             sends them hunting through filters that were never the issue. */
+          <div className="ps-empty">
+            {allTiersTotal === 0
+              ? cov && cov.games_upcoming > 0
+                ? `No prices yet. ${cov.games_upcoming} game${
+                    cov.games_upcoming === 1 ? "" : "s"
+                  } scheduled, none priced. Lines are bought close to kickoff, so the board fills in as each game approaches.`
+                : "No games scheduled in the next eight days."
+              : "No signals match these filters."}
+          </div>
         )}
         {loading && edges.length === 0 && (
           <div style={{ padding: 1 }}>
