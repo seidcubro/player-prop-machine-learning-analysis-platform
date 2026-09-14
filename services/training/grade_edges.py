@@ -40,8 +40,27 @@ GRADE_SQL = """
 INSERT INTO prop_edge_results (
     edge_id, player_id, player_name, game_date, market_code, line, projection,
     projection_median,
-    recommended_side, win_prob, edge_tier, actual, hit,
-    home_team, away_team, bookmaker_title, price_american
+    recommended_side, win_prob, win_prob_raw, edge_tier, actual, hit,
+    home_team, away_team, bookmaker_title, price_american,
+    -- Carried through from the board, not left for the backfill to supply.
+    --
+    -- expected_value was NULL on every live-graded row while all 5,476
+    -- reconstructed rows had it, so the track record's average EV for the
+    -- current season averaged a column of nulls and showed nothing. best_bet
+    -- was worse: NULL on all 5,517 rows, both sources, so the flag for the one
+    -- selection on this board with a verified out-of-sample edge could not be
+    -- scored against results at all.
+    expected_value, ev_per_unit, best_bet,
+    -- Stamp the season, the way the backfill does.
+    --
+    -- This column was left NULL on live grades, so the first real picks of 2026
+    -- landed in the table and then failed every season filter on the track
+    -- record page. The reconstructed rows all carry one, so the live ones
+    -- looked like they had simply not been graded.
+    --
+    -- A season runs into January, so anything before March belongs to the
+    -- previous year.
+    season
 )
 -- One row per player/game/market. Every sportsbook prices the same prop, so an
 -- ungraded join records the identical pick three times and inflates the sample.
@@ -57,6 +76,7 @@ SELECT DISTINCT ON (g.player_id, g.game_date, e.market_code)
     e.projection_median,
     e.recommended_side,
     e.win_prob,
+    e.win_prob_raw,
     e.edge_tier,
     g.actual,
     CASE
@@ -68,7 +88,12 @@ SELECT DISTINCT ON (g.player_id, g.game_date, e.market_code)
     e.home_team,
     e.away_team,
     e.bookmaker_title,
-    e.price_american
+    e.price_american,
+    e.expected_value,
+    e.ev_per_unit,
+    e.best_bet,
+    EXTRACT(YEAR FROM g.game_date)::int
+        - CASE WHEN EXTRACT(MONTH FROM g.game_date) < 3 THEN 1 ELSE 0 END
 FROM prop_edges e
 JOIN LATERAL (
     SELECT
@@ -91,9 +116,30 @@ JOIN LATERAL (
     JOIN prop_markets m ON m.code = e.market_code
     WHERE lower(replace(replace(p.name, '.', ''), '-', ' ')) =
           lower(replace(replace(e.player_name, '.', ''), '-', ' '))
-      AND pgs.game_date BETWEEN (e.commence_time AT TIME ZONE 'UTC')::date - 1
-                            AND (e.commence_time AT TIME ZONE 'UTC')::date + 1
-    ORDER BY abs(pgs.game_date - (e.commence_time AT TIME ZONE 'UTC')::date)
+      AND pgs.game_date BETWEEN (e.commence_time AT TIME ZONE 'America/New_York')::date - 1
+                            AND (e.commence_time AT TIME ZONE 'America/New_York')::date + 1
+      -- Inside the LATERAL, not outside it.
+      --
+      -- The outer query filters g.actual IS NOT NULL, which runs after this
+      -- LIMIT 1 has already chosen a row. Two players normalise to the same
+      -- name in 34 cases (Aaron Brewer, A.J. Green, Connor McGovern and so on),
+      -- and if the wrong one sorts first the pick is dropped entirely rather
+      -- than graded against the right player. No priced player currently has an
+      -- ambiguous name, so this has never fired, but the cost of it firing is a
+      -- silently ungraded pick and the cost of preventing it is one line.
+      AND CASE m.stat_field
+            WHEN 'receiving_yards' THEN pgs.receiving_yards
+            WHEN 'receptions'      THEN pgs.receptions
+            WHEN 'receiving_tds'   THEN pgs.receiving_tds
+            WHEN 'rushing_yards'   THEN pgs.rushing_yards
+            WHEN 'carries'         THEN pgs.carries
+            WHEN 'rushing_tds'     THEN pgs.rushing_tds
+            WHEN 'passing_yards'   THEN pgs.passing_yards
+            WHEN 'attempts'        THEN pgs.attempts
+            WHEN 'completions'     THEN pgs.completions
+            WHEN 'passing_tds'     THEN pgs.passing_tds
+          END IS NOT NULL
+    ORDER BY abs(pgs.game_date - (e.commence_time AT TIME ZONE 'America/New_York')::date)
     LIMIT 1
 ) g ON TRUE
 WHERE e.commence_time IS NOT NULL
@@ -107,6 +153,7 @@ ON CONFLICT (player_id, game_date, market_code) DO UPDATE SET
     projection_median = EXCLUDED.projection_median,
     recommended_side = EXCLUDED.recommended_side,
     win_prob  = EXCLUDED.win_prob,
+    win_prob_raw = EXCLUDED.win_prob_raw,
     edge_tier = EXCLUDED.edge_tier,
     actual    = EXCLUDED.actual,
     hit       = EXCLUDED.hit,
@@ -114,6 +161,11 @@ ON CONFLICT (player_id, game_date, market_code) DO UPDATE SET
     away_team = EXCLUDED.away_team,
     bookmaker_title = EXCLUDED.bookmaker_title,
     price_american  = EXCLUDED.price_american,
+    -- Updated too, so rows graded before these were carried get filled in on
+    -- the next run rather than staying null forever.
+    expected_value  = EXCLUDED.expected_value,
+    ev_per_unit     = EXCLUDED.ev_per_unit,
+    best_bet        = EXCLUDED.best_bet,
     graded_at = NOW();
 """
 
@@ -122,10 +174,21 @@ def main():
     engine = create_engine(DATABASE_URL, future=True)
     with engine.begin() as conn:
         n_edges = conn.execute(text("SELECT count(*) FROM prop_edges")).scalar()
+        before = conn.execute(text(
+            "SELECT count(*) FROM prop_edge_results WHERE source = 'live'")).scalar()
         conn.execute(text(GRADE_SQL))
-        graded = conn.execute(text("SELECT count(*) FROM prop_edge_results")).scalar()
+        live = conn.execute(text(
+            "SELECT count(*) FROM prop_edge_results WHERE source = 'live'")).scalar()
+        total = conn.execute(text("SELECT count(*) FROM prop_edge_results")).scalar()
 
-        print(f"graded {graded}/{n_edges} edges")
+        # Count what this run did, not the size of the whole table.
+        #
+        # This printed the full row count against the size of the current board,
+        # so a routine grade of a 46 row board reported "graded 7125/46 edges",
+        # which is not a ratio of anything. Most of those rows are the
+        # reconstructed backtest and were not graded by this run at all.
+        print(f"{live - before} newly graded, {live} live rows from a board of "
+              f"{n_edges}, {total} in the record including the backtest")
 
         print("\n-- calibration: does a quoted win probability hold up? --")
         rows = conn.execute(text("""

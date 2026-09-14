@@ -128,17 +128,44 @@ def fit_for_season(market: str, season: int):
     return point, quants, cols, df, yr, pit, row["model_name"]
 
 
+
+def _calibrated_level(qcols: dict, pit, level: float) -> np.ndarray:
+    """One published quantile, re-read where the calibration map places it.
+
+    Mirrors calibrated_quantiles() in build_prop_edges.py, vectorised over rows.
+    The level lookup does not depend on the row, so it is done once; the value
+    lookup interpolates inside each row's own sorted quantile ladder.
+    """
+    grid, mapped = pit
+    levels = sorted(qcols)
+    raw_level = float(np.interp(level, mapped, grid))
+    ladder = np.sort(np.column_stack([qcols[q] for q in levels]), axis=1)
+    return np.array([float(np.interp(raw_level, levels, row)) for row in ladder])
+
+
+def _calibrated_median(qcols: dict, pit) -> np.ndarray:
+    """The median, which is the only level the side rule needs."""
+    return _calibrated_level(qcols, pit, 0.5)
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     with engine.begin() as conn:
         for stmt in DDL.strip().split(";"):
             if stmt.strip():
                 conn.execute(text(stmt))
-        if os.getenv("TRUNCATE_BACKTEST", "1") == "1":
-            n = conn.execute(text(
-                "DELETE FROM prop_edge_results WHERE source = 'backtest'"
-            )).rowcount
-            print(f"cleared {n} previous backtest rows (live rows untouched)")
+        # Deliberately NOT deleting here.
+        #
+        # This used to clear the backtested rows up front and rebuild them over
+        # the following twenty minutes. Anything that went wrong in between --
+        # a failure, a second copy of this script started by accident, a
+        # container killed -- left the table holding nothing but live rows, and
+        # the track record on the site went blank. That happened.
+        #
+        # The rebuild now happens in one transaction at the end: the old rows
+        # are replaced by the new ones or nothing changes at all. See the write
+        # in main() below.
+        pass
 
     ids = pd.read_sql(text(
         "SELECT id AS app_id, external_id, name FROM players "
@@ -198,6 +225,20 @@ def main():
                 np.interp(cdf_level(qcols, m["under_line"].to_numpy()), grid, emp),
                 0.01, 0.99)
 
+            # Bounded the way the live board bounds, so the record describes
+            # picks the product can actually make.
+            #
+            # build_prop_edges caps every published probability at
+            # PROB_FLOOR/PROB_CEILING, because nothing in a football prop is 99%
+            # to happen and the audit rejects anything outside that range.
+            # Without the same cap here the reconstruction published 61 picks
+            # claiming over 95%, including a rush_yds under at -2500 quoted at
+            # 99.0% that needed 96.2% to break even, showed a positive edge on
+            # that basis, and lost. The live board would price that as negative
+            # expected value and never show it.
+            p_over = np.clip(p_over, bp.PROB_FLOOR, bp.PROB_CEILING)
+            p_under = np.clip(p_under, bp.PROB_FLOOR, bp.PROB_CEILING)
+
             ev_over = p_over - american_to_prob(m["over_am"])
             ev_under = p_under - american_to_prob(m["under_am"])
 
@@ -210,7 +251,22 @@ def main():
             # longer follows describes a product nobody can bet.
             #
             # See the side selection in build_prop_edges.py.
-            take_over = m["q50"].to_numpy() > m["over_line"].to_numpy()
+            #
+            # The median is read through the calibration map, exactly as the
+            # live builder reads it. Taking the raw q50 was wrong and loudly so
+            # on rush_att: about 15% of running back rows are players who
+            # dressed and never carried, the raw quantile regression at level
+            # 0.5 collapses onto those structural zeros, and q50 came back as 0
+            # for 740 of 740 graded rush_att rows. Every one became "median 0
+            # is below a line of 11.5, so bet the under" with an eleven attempt
+            # edge behind it, and 547 of them were filed as elite. That is 14.5%
+            # of the backtested elite record carrying no model opinion at all.
+            #
+            # The live board never had this because it inverts the map first.
+            # The reconstruction has to do the same or the record describes a
+            # different product from the one that ships.
+            med50 = _calibrated_median(qcols, pit)
+            take_over = med50 > m["over_line"].to_numpy()
 
             m["recommended_side"] = np.where(take_over, "over", "under")
             m["win_prob"] = np.where(take_over, p_over, p_under)
@@ -219,7 +275,24 @@ def main():
             m["price_american"] = np.where(take_over, m["over_am"], m["under_am"])
             m["decimal"] = american_to_decimal(m["price_american"])
             m["projection"] = m["pred"]
-            m["projection_median"] = m["q50"]
+            m["projection_median"] = med50
+            # The rest of the walk-forward ladder, kept rather than discarded.
+            #
+            # These come from models refit on seasons strictly before this one,
+            # which makes them the only honest quantiles in the system. They
+            # were computed and thrown away, so fit_interval_calibrator had to
+            # read the ladder from player_projection_history, whose quantiles
+            # come from the active model refit on every season including this
+            # one. See db/migrations/add_walkforward_quantiles.sql.
+            #
+            # Stored calibrated, not raw. The site does not publish the
+            # quantile regression's own output: build_prop_edges reads every
+            # level through the PIT map first, so the number a reader sees as
+            # p90 comes from somewhere else on the ladder. Storing the raw
+            # prediction here would mean the interval calibrator fitted on
+            # these rows corrected an object the product never shows.
+            for _q in (0.10, 0.25, 0.75, 0.90):
+                m[f"q{int(_q * 100)}"] = _calibrated_level(qcols, pit, _q)
             m["actual"] = m[ev.LABEL_COL].astype(float)
             m["market_code"] = market
             m["season"] = season
@@ -253,14 +326,92 @@ def main():
     cols = ["external_id", "app_id", "name", "game_date", "market_code", "line",
             "projection", "projection_median", "recommended_side", "win_prob",
             "expected_value", "edge_tier", "actual", "hit", "season",
-            "price_american"]
+            "price_american", "q10", "q25", "q75", "q90"]
     w = out[cols].rename(columns={"external_id": "player_id", "name": "player_name"})
     w = w.drop(columns=["app_id"])
     w["source"] = "backtest"
+
+    # Profit per unit staked, the same quantity the live board now records.
+    #
+    # expected_value here is the model's probability minus the book's implied
+    # probability, which is a probability edge. Multiplying by the decimal odds
+    # turns it into what a unit actually returns, and without it the backtested
+    # rows cannot be compared with the live ones on the number the board shows.
+    price = pd.to_numeric(w["price_american"], errors="coerce")
+    dec = 1.0 + np.where(price > 0, price / 100.0, 100.0 / price.abs())
+    w["ev_per_unit"] = w["expected_value"] * dec
+
+    # The Best Bet selection, recorded rather than described.
+    #
+    # This is the rule build_prop_edges applies to the live board: an under, in
+    # the elite or strong tier, one per player and market and one per player and
+    # game, keeping the best paying row. It is the headline number on the FAQ
+    # and it was never written to the results table at all, so the one selection
+    # with a verified out-of-sample edge could not be scored against its own
+    # record.
+    w["best_bet"] = False
+    eligible = w[(w["recommended_side"] == "under")
+                 & (w["edge_tier"].isin(["elite", "strong"]))]
+    if len(eligible):
+        keep = (eligible.sort_values("ev_per_unit", ascending=False)
+                        .drop_duplicates(subset=["player_name", "market_code"])
+                        .drop_duplicates(subset=["player_name", "game_date"]))
+        w.loc[keep.index, "best_bet"] = True
+    print(f"best-bet flagged {int(w['best_bet'].sum())} of {len(w)} backtested picks")
     # Synthetic ids well clear of the live sequence so the two can never collide.
     w["edge_id"] = -(np.arange(len(w)) + 1)
 
+    # Replace in one transaction, so a failure leaves the old record in place
+    # rather than an empty table. The delete and the insert either both happen
+    # or neither does.
     with engine.begin() as conn:
+        # One rebuild at a time, enforced by the database rather than by me
+        # remembering.
+        #
+        # Two copies of this have now been started by accident twice. The write
+        # is a delete followed by an insert, so two of them racing means one
+        # sits blocked for twenty minutes and then replaces rows the other just
+        # wrote, and the first time it happened the track record on the site
+        # went blank. A session-scoped advisory lock is free, is released when
+        # the connection closes however the process dies, and turns the second
+        # copy into an immediate refusal instead of an hour of contention.
+        if not conn.execute(text(
+                "SELECT pg_try_advisory_xact_lock(hashtext('backfill_track_record'))"
+        )).scalar():
+            raise SystemExit(
+                "another backfill_track_record is already writing; refusing to "
+                "run a second one. Wait for it to finish, or kill it first.")
+        if os.getenv("TRUNCATE_BACKTEST", "1") == "1":
+            n = conn.execute(text(
+                "DELETE FROM prop_edge_results WHERE source = 'backtest'"
+            )).rowcount
+            print(f"cleared {n} previous backtest rows (live rows untouched)")
+
+        # Never reconstruct a pick that was actually made.
+        #
+        # The delete above removes backtest rows only, which is deliberate: live
+        # grades are the real record and must survive a rebuild. But the table
+        # has a unique natural key on player, date and market, so the moment
+        # SEASONS includes a season with live rows in it -- next year's default
+        # bump does exactly that -- the append hits a duplicate key and the
+        # whole transaction rolls back, twenty minutes in, with the table left
+        # holding nothing but live rows.
+        #
+        # Reconstructed rows lose to live ones, because a live row is what the
+        # site actually published at a price someone could have taken.
+        live = pd.read_sql(text(
+            "SELECT player_id, game_date, market_code FROM prop_edge_results "
+            "WHERE source = 'live'"), conn)
+        if not live.empty:
+            key = ["player_id", "game_date", "market_code"]
+            w["game_date"] = pd.to_datetime(w["game_date"]).dt.date
+            live["game_date"] = pd.to_datetime(live["game_date"]).dt.date
+            before = len(w)
+            w = w.merge(live.assign(_live=1), on=key, how="left")
+            w = w[w["_live"].isna()].drop(columns=["_live"])
+            if len(w) < before:
+                print(f"dropped {before - len(w)} reconstructed picks that "
+                      f"already have a live graded row")
         w.to_sql("prop_edge_results", conn, if_exists="append", index=False,
                  method="multi", chunksize=500)
 

@@ -10,7 +10,8 @@ current one, per market per region per event, so a careless loop over four
 seasons can burn thousands of credits. Every run therefore:
 
   - reports remaining quota before and after, and records it in odds_api_usage
-  - refuses to start if the estimate exceeds MAX_CREDITS
+  - refuses to start if the estimate exceeds MAX_CREDITS, which defaults to
+    1,000: about one slate, so a forgotten limit cannot spend the month
   - supports --dry-run to price a pull without spending anything
 
 Usage:
@@ -39,7 +40,20 @@ MARKETS = os.getenv(
     "player_rush_attempts,player_pass_yds,player_pass_tds",
 ).split(",")
 
-MAX_CREDITS = int(os.getenv("MAX_CREDITS", "6000"))
+# A ceiling low enough that forgetting to set it cannot cost the month.
+#
+# This defaulted to 6,000, which is most of a 20,000 credit month and, at the
+# balance this account has actually run at, 96% of everything left. A guard
+# whose default permits nearly the whole quota is not a guard, it is a
+# formality. One slate of historical props is around 840 credits, so 1,000
+# covers the normal case of pulling one and refuses anything larger until
+# somebody names a number on purpose:
+#
+#     MAX_CREDITS=3000 python backfill_historical_odds.py --season 2024 ...
+#
+# --dry-run prices any pull without spending, and is the right way to find out
+# what a bigger one would cost.
+MAX_CREDITS = int(os.getenv("MAX_CREDITS", "1000"))
 HIST_MULTIPLIER = 10  # historical requests cost ~10x a current one
 
 DATABASE_URL = os.getenv(
@@ -169,7 +183,12 @@ def main():
                             "mk": market.get("key"), "pn": name,
                             "on": oc.get("name"), "line": oc.get("point"),
                             "price": oc.get("price"),
-                            "lu": book.get("last_update"), "observed": as_of,
+                            # Market first, bookmaker second: the event-odds endpoints put the
+                            # timestamp on the market and the live sync read only the
+                            # bookmaker, so every live row landed with a NULL.
+                            "lu": (market.get("last_update")
+                                   or book.get("last_update")),
+                            "observed": as_of,
                         })
                         rows += 1
             print(f"  [{i}/{len(slate)}] {ev.get('away_team')} @ {ev.get('home_team')}: {rows} rows so far")
