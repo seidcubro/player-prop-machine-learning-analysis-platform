@@ -1,7 +1,7 @@
 /**
  * A page title in the wordmark's own shape: plain text, then the brand gradient.
  *
- * "PropSignal" sets the pattern. "Prop" is white and "Signal" carries the
+ * "PriorLine" sets the pattern. "Prior" is white and "Line" carries the
  * cyan-to-violet ramp, so a heading that gradients every word competes with the
  * logo instead of echoing it. Splitting the title the same way makes the page
  * read as part of the same system, and it keeps the emphasis on the noun that

@@ -9,12 +9,13 @@
  * building the pipeline, meaningless to someone deciding on a bet.
  */
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import PropCards from "../components/PropCards";
 import WeekProjections from "../components/WeekProjections";
 import TrackRecord from "../components/TrackRecord";
+import GameBreakdown from "../components/GameBreakdown";
 import {
   fetchPlayer,
   fetchPlayerGames,
@@ -70,6 +71,9 @@ export default function PlayerDetail() {
 
   const [player, setPlayer] = useState<Player | null>(null);
   const [games, setGames] = useState<PlayerGame[]>([]);
+  // Which game log row is expanded. One at a time: this is a drill-down,
+  // not a second table.
+  const [openGame, setOpenGame] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -154,8 +158,11 @@ export default function PlayerDetail() {
 
       <WeekProjections playerId={playerId} />
 
-      <TrackRecord playerId={playerId} />
+      {/* Recent Games first.
 
+          Track Record lists only the games we actually bet, so the newest game
+          is usually missing from it and the page reads as though the game did
+          not happen. It is the first thing anyone looks for. */}
       <div className="ps-section">
         <h3>Recent Games</h3>
         {games.length === 0 ? (
@@ -177,9 +184,24 @@ export default function PlayerDetail() {
               </thead>
               <tbody>
                 {games.map((g, i) => (
-                  <tr key={`${g.game_date}-${i}`}>
+                  <Fragment key={`${g.game_date}-${i}`}>
+                  <tr
+                    className={openGame === g.game_date ? "ps-row-open" : undefined}
+                  >
                     <td data-label="Date">
-                      <span className="ps-gamedate">{fmtDate(g.game_date)}</span>
+                      {/* The date is the control. A game log row that shows a
+                          result invites the question "what did we say?", so
+                          pressing it answers that rather than doing nothing. */}
+                      <button
+                        type="button"
+                        className="ps-linkbtn"
+                        aria-expanded={openGame === g.game_date}
+                        onClick={() =>
+                          setOpenGame(openGame === g.game_date ? null : g.game_date)
+                        }
+                      >
+                        <span className="ps-gamedate">{fmtDate(g.game_date)}</span>
+                      </button>
                     </td>
                     <td data-label="Opp">{g.opponent ?? "-"}</td>
                     {cols.map((c) => {
@@ -197,12 +219,27 @@ export default function PlayerDetail() {
                       );
                     })}
                   </tr>
+                  {openGame === g.game_date && (
+                    <tr className="ps-row-detail">
+                      <td colSpan={2 + cols.length}>
+                        <GameBreakdown
+                          playerId={playerId}
+                          gameDate={g.game_date}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      <TrackRecord playerId={playerId} />
+
+
     </div>
   );
 }

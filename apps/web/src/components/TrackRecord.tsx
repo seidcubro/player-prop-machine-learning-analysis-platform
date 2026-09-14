@@ -106,7 +106,9 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
       <div className="ps-tablewrap">
         <table className="ps-table">
           <caption className="sr-only">
-            Past picks for this player with results
+            Games we published a pick on. A game missing here is a game we
+            did not bet, not a game that did not happen; the full log with our
+            projection against the result is under Recent Games above.
           </caption>
           <thead>
             <tr>

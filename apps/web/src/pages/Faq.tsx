@@ -33,7 +33,7 @@ export default function Faq() {
   return (
     <>
       <div className="ps-hero">
-        <PageTitle lead="How PropSignal" accent="Works" />
+        <PageTitle lead="How PriorLine" accent="Works" />
         <p>
           Two versions of the same answers. Neither one is the sales pitch: the
           numbers below are what the model has actually done, including where it
@@ -71,7 +71,7 @@ function Plain() {
       <QA q="What is this?">
         <p>
           A sportsbook posts a line for a player, say 4.5 receptions. You bet
-          whether the real number lands over or under. PropSignal predicts what
+          whether the real number lands over or under. PriorLine predicts what
           each player will actually do, compares that to the posted line, and
           shows you where the two disagree.
         </p>
@@ -109,9 +109,17 @@ function Plain() {
             The pick always follows the sign, so the two can never disagree.
           </li>
           <li>
-            <strong>EV</strong> is the one that matters. It is how much better
-            our estimated chance is than the chance the price is charging you
-            for. Zero or below means the price already covers it.
+            <strong>EV</strong> is the one that matters. It is what a unit
+            staked returns on average at this price, so +10% means a dollar bet
+            repeatedly returns ten cents. Zero or below means the price already
+            covers our estimate.
+          </li>
+          <li>
+            EV is not the same as beating the price on probability alone. A
+            three point edge is worth twice as much at +150 as it is at
+            &minus;280, because the winning bets pay twice as much. The tiers
+            are still cut on the probability edge, since that is the quantity
+            their thresholds were measured against.
           </li>
         </ul>
       </QA>
@@ -128,10 +136,18 @@ function Plain() {
 
       <QA q="What is a Best Bet?">
         <p>
-          It is the only selection that has been tested on a season the model
-          had never seen and still made money: the strongest picks, on the under
-          side, one per player per game. Over that test it returned about 6.6%
-          per unit bet.
+          It is the selection that has been tested on a season the model had
+          never seen and still made money: the strongest picks, on the under
+          side, one per player per game. Over that test it returned about 4.4%
+          per unit bet, with a 95% interval of [+0.2%, +8.2%].
+        </p>
+        <p>
+          That number used to read 6.6%, on a sample that quietly excluded night
+          games. Sunday and Monday night kickoffs fall after midnight UTC, and a
+          date conversion elsewhere in the pipeline dropped them from the test
+          set. Putting them back added about a thousand picks and cut the
+          measured return by a third. Night games are not a random sample of
+          football, and the edge is smaller once they count.
         </p>
         <p>
           The rest of the board is research. Best Bets are the part that has
@@ -219,15 +235,18 @@ function Technical() {
           <li>
             <strong>Fitted on the priced population.</strong> An early version
             used a snap-share proxy for &ldquo;players books post lines
-            on&rdquo;, which excluded 43% of players who actually receive a
-            rushing line. rush_yds was claiming 73.4% against an actual 52.1%.
+            on&rdquo;, which excluded half the players who actually receive a
+            rushing line: 49.7% of the 181 players priced on it sit below the
+            threshold that proxy used. rush_yds was claiming 73.4% against an
+            actual 52.1%.
           </li>
           <li>
             <strong>Isotonic regression on graded results.</strong> The
-            published probability still ran fourteen points high, and since EV
-            is probability minus break-even, an inflated probability meant the
-            &ldquo;highest EV&rdquo; filter was selecting negative-EV bets.
-            Out of sample this moved Brier from 0.2706 to 0.2511.
+            published probability still ran fourteen points high, and the filter
+            at the time ranked on probability minus break-even, so an inflated
+            probability meant the &ldquo;highest EV&rdquo; selection was picking
+            negative-EV bets. Out of sample this moved Brier from 0.2706 to
+            0.2511.
           </li>
         </ul>
         <p>
@@ -271,7 +290,9 @@ function Technical() {
       </QA>
 
       <QA q="Results">
-        <p>Verified on the 2025 holdout, slate-clustered 95% intervals:</p>
+        <p>
+          Verified on the 2025 holdout, slate-clustered 95% intervals.
+        </p>
         <div className="ps-tablewrap">
           <table className="ps-table">
             <thead>
@@ -285,27 +306,33 @@ function Technical() {
             <tbody>
               <tr>
                 <td>Board as published</td>
-                <td className="num">4,357</td>
-                <td className="num">+2.2%</td>
-                <td className="num">[&minus;0.4%, +5.0%]</td>
+                <td className="num">5,532</td>
+                <td className="num">+1.0%</td>
+                <td className="num">[&minus;1.5%, +3.3%]</td>
               </tr>
               <tr>
                 <td>Unders only</td>
-                <td className="num">3,170</td>
-                <td className="num pos">+4.9%</td>
-                <td className="num">[+2.5%, +7.4%]</td>
+                <td className="num">4,099</td>
+                <td className="num">+2.0%</td>
+                <td className="num">[&minus;0.6%, +4.2%]</td>
+              </tr>
+              <tr>
+                <td>Elite + strong unders</td>
+                <td className="num">3,133</td>
+                <td className="num pos">+3.0%</td>
+                <td className="num">[+0.4%, +5.5%]</td>
               </tr>
               <tr>
                 <td>Elite unders, one per player-game</td>
-                <td className="num">1,152</td>
-                <td className="num pos">+6.6%</td>
-                <td className="num">[+2.6%, +10.5%]</td>
+                <td className="num">1,540</td>
+                <td className="num pos">+4.4%</td>
+                <td className="num">[+0.3%, +8.2%]</td>
               </tr>
               <tr>
                 <td>Overs only</td>
-                <td className="num">1,187</td>
-                <td className="num neg">&minus;5.0%</td>
-                <td className="num">[&minus;10.8%, +1.0%]</td>
+                <td className="num">1,433</td>
+                <td className="num neg">&minus;1.8%</td>
+                <td className="num">[&minus;8.7%, +5.8%]</td>
               </tr>
             </tbody>
           </table>
@@ -336,14 +363,37 @@ function Technical() {
             sharper looks like.
           </li>
           <li>
+            <strong>The touchdown projections have never been graded.</strong>
+            Not once. Books do not post split rushing or receiving touchdown
+            markets, and the anytime market is held off the board, so there is
+            no line to score those numbers against and no row in the record for
+            any of them. Every other market on the projections page has been
+            checked against outcomes hundreds or thousands of times. The
+            touchdown columns have been checked zero times, and should be read
+            as an untested output of the same pipeline rather than as something
+            with a record behind it.
+          </li>
+          <li>
             <strong>pass_td quantiles are degenerate</strong> below the median,
             because touchdowns are a small integer count. A Poisson survival
             alternative was tested twice and lost on Brier both times.
           </li>
           <li>
+            <strong>Only two markets have a corrected range.</strong> Measured
+            on the player-games a sportsbook actually posted a line for, the
+            published range was too wide at the bottom and its median sat near
+            the 44th percentile rather than the 50th: outcomes fell below the
+            stated 10th percentile about 5% of the time and above the 90th about
+            13%. Receiving yards and receptions are corrected for that, one
+            quantile level at a time, and only where the correction beat the
+            published value on a held-out season. Every other market still shows
+            the uncorrected range, because there are not yet enough priced games
+            in its history to fit one. They join as the record grows.
+          </li>
+          <li>
             <strong>Rush attempt quantiles do not condition on the player at
             the bottom of the range.</strong> The 10th percentile comes out at
-            zero carries for every player, because 15% of running back game rows
+            zero carries for every player, because 12% of running back game rows
             are players who dressed and never touched the ball. Coverage looks
             right in aggregate, 0.098 against a target of 0.10, but that is an
             average of over-covering low usage backs at 0.56 and under-covering

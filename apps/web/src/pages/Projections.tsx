@@ -19,6 +19,7 @@ import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { shortDate as fmtDate } from "../lib/format";
 import { fetchProjections, type Projection } from "../api";
+
 import {
   MARKET_OPTIONS,
   displayProjection,
@@ -66,6 +67,18 @@ function RangeBar({ p: row }: { p: Projection }) {
       </span>
     </span>
   );
+}
+
+/** Describes how long ago a player last played, when that is long enough to
+ *  change how the number beside his name should be read. Returns null inside a
+ *  normal in-season gap, including a bye. */
+function staleSince(last: string | null | undefined): string | null {
+  if (!last) return null;
+  const then = new Date(`${last.slice(0, 10)}T00:00:00`);
+  const days = (Date.now() - then.getTime()) / 86_400_000;
+  if (days < 75) return null;
+  if (days < 400) return `${Math.round(days / 30)} months ago`;
+  return then.getFullYear().toString();
 }
 
 export default function Projections() {
@@ -203,6 +216,18 @@ export default function Projections() {
                       <div className="matchup">
                         {r.position}
                         {r.team ? ` · ${r.team}` : ""}
+                        {staleSince(r.last_game) && (
+                          /* A projection is only as current as the games behind
+                             it. Some listed starters have not played in over a
+                             year, and the number beside their name looks exactly
+                             like one built on last week's football. */
+                          <span
+                            className="ps-staleflag"
+                            title={`Last played ${staleSince(r.last_game)}. This projection is built from that player's most recent games, however old they are.`}
+                          >
+                            {" "}· last played {staleSince(r.last_game)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

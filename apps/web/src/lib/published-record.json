@@ -1,0 +1,53 @@
+{
+  "_comment": "Every performance figure the site states as fact. Generated intent: these are checked against the database by audit_freshness.py check [16], which fails the pipeline when the site and the record disagree. Regenerate with services/training/eval_strategy.py after any rebuild of prop_edge_results, then update here. Do not edit one without the other.",
+  "graded_picks": 7125,
+  "holdout_season": 2025,
+  "tiers": {
+    "elite": 0.04,
+    "strong": -0.003,
+    "medium": -0.052,
+    "small": -0.043
+  },
+  "selections": {
+    "board": {
+      "n": 5532,
+      "roi": 0.01,
+      "ci": [
+        -0.015,
+        0.033
+      ]
+    },
+    "unders": {
+      "n": 4099,
+      "roi": 0.02,
+      "ci": [
+        -0.006,
+        0.042
+      ]
+    },
+    "elite_strong_unders": {
+      "n": 3133,
+      "roi": 0.03,
+      "ci": [
+        0.004,
+        0.055
+      ]
+    },
+    "best_bets": {
+      "n": 1540,
+      "roi": 0.044,
+      "ci": [
+        0.003,
+        0.082
+      ]
+    },
+    "overs": {
+      "n": 1433,
+      "roi": -0.018,
+      "ci": [
+        -0.087,
+        0.058
+      ]
+    }
+  }
+}

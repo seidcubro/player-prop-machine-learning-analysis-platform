@@ -4,7 +4,11 @@
  * This page exists because the old per-player record was two games from one
  * afternoon in December 2023 and still printed a hit rate next to them. The
  * backfill now reconstructs every season we hold closing lines for, using models
- * refit on strictly earlier data, which is 6,529 graded picks instead of 283.
+ * refit on strictly earlier data, which is thousands of graded picks instead of
+ * 283. The exact count moves every time the record is rebuilt, so it is read
+ * from the record rather than written here; apps/web/src/lib/published-record.json
+ * holds the figures the pages state as fact and audit check [16] fails the
+ * pipeline when they drift from the database.
  *
  * The page is built to be checkable rather than flattering:
  *
@@ -26,6 +30,7 @@ import { Link } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import Select from "../components/Select";
 import PageTitle from "../components/PageTitle";
+
 import { marketLabel } from "../lib/markets";
 import {
   fetchCalibration,
@@ -184,6 +189,20 @@ export default function TrackRecord() {
 
   // Totals for the headline row. Summed rather than averaged, because averaging
   // per-season rates would weight a 611-pick season the same as a 5,291-pick one.
+  // The live/backtest split behind whatever is on screen. The season rows
+  // carry a source, so the composition of the merged view is already known
+  // without another request.
+  const sourceSplit = useMemo(() => {
+    const rows = season ? seasons.filter((s) => s.season === season) : seasons;
+    const live = rows
+      .filter((r) => r.source === "live")
+      .reduce((a, r) => a + r.picks, 0);
+    const backtest = rows
+      .filter((r) => r.source !== "live")
+      .reduce((a, r) => a + r.picks, 0);
+    return { live, backtest, total: live + backtest };
+  }, [seasons, season]);
+
   const totals = useMemo(() => {
     const rows = season ? seasons.filter((s) => s.season === season) : seasons;
     const picks = rows.reduce((a, r) => a + r.picks, 0);
@@ -230,6 +249,23 @@ export default function TrackRecord() {
           ]}
         />
       </section>
+
+      {/* What "All picks" is actually made of.
+        *
+        * This page says backtested and live are never silently merged, and then
+        * defaults to the view that merges them. The season table labels each
+        * row, but the tier table, the calibration plot, the market breakdown
+        * and the leaderboards do not, and the mix is nothing like even: the
+        * reconstructed rows outnumber the published ones by more than a hundred
+        * to one, so "All picks" reads as a live record while being almost
+        * entirely a backtest. Saying so is cheaper than removing the view. */}
+      {source === "all" && !loading && sourceSplit.total > 0 && (
+        <p className="ps-note">
+          All picks is {sourceSplit.backtest.toLocaleString()} backtested and{" "}
+          {sourceSplit.live.toLocaleString()} published live. The two are
+          different claims; use the source selector to see either on its own.
+        </p>
+      )}
 
       {err && <div className="ps-empty">Could not load the record: {err}</div>}
 
