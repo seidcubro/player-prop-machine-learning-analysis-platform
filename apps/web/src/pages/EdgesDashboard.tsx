@@ -28,7 +28,14 @@ import {
   type PropEdge,
 } from "../api";
 
-const TIERS: EdgeTier[] = ["elite", "strong", "medium", "small"];
+// Tiers the board publishes, matching PUBLISHED_TIERS in routes/edges.py.
+//
+// Medium and small are still computed, stored and graded, and the tier table on
+// the track record page needs them there to show why they are not published:
+// across 7,125 graded picks medium returned -5.1% and small -4.3%, against
+// elite's +4.0%. Offering them as filters here would just be four options, two
+// of which always come back empty.
+const TIERS: EdgeTier[] = ["elite", "strong"];
 const PAGE_SIZE = 50;
 
 function fmtGameDate(e: PropEdge): string {

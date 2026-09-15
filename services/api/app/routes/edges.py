@@ -7,6 +7,8 @@ table (see docs/API.md "The gap"). The frontend edges dashboard is the
 primary consumer.
 """
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -80,6 +82,26 @@ def _split_keys(expr: str) -> list[str]:
 
 _TIER_ORDER = ["small", "medium", "strong", "elite"]
 
+# Tiers the site actually publishes as picks.
+#
+# Every tier is still computed, stored and graded, because the tier table on the
+# track record page is only meaningful if the losing tiers are in it. What
+# changes is what the board offers as a bet. Measured across 7,125 graded picks:
+#
+#     elite    3,942 picks   +4.0% ROI
+#     strong     932 picks   -0.3%
+#     medium   1,026 picks   -5.1%
+#     small    1,225 picks   -4.3%
+#
+# Publishing a tier that returns -5% is not a smaller edge, it is a losing bet
+# with a label on it. Elite is the only tier that has earned its place; strong
+# is kept because it is roughly break-even and gives the board enough rows to be
+# useful, and it is the first thing to drop if that stops being true.
+PUBLISHED_TIERS = [
+    t.strip() for t in
+    os.getenv("PUBLISHED_TIERS", "elite,strong").split(",") if t.strip()
+]
+
 
 @router.get("/edges")
 def list_edges(
@@ -145,6 +167,10 @@ def list_edges(
     if market_code:
         pre.append("market_code = :market_code")
         params["market_code"] = market_code
+    # Only publishable tiers reach the board, whatever else is asked for.
+    post.append("edge_tier = ANY(:published_tiers)")
+    params["published_tiers"] = PUBLISHED_TIERS
+
     if min_tier:
         allowed = _TIER_ORDER[_TIER_ORDER.index(min_tier):]
         post.append("edge_tier = ANY(:tiers)")
@@ -363,10 +389,15 @@ def edges_summary(db: Session = Depends(get_db)):
     # toward DraftKings, so the summary counted 12 best bets above a 13-row
     # board. Preferring the flagged row makes the tie deterministic and keeps
     # the two queries agreeing. `id` last so the result is stable run to run.
+    TIER_PARAMS = {"published_tiers": PUBLISHED_TIERS}
+
+    # Same published-tier restriction the board applies, or the cards count
+    # picks the table will not show.
     DEDUPED = """
         SELECT DISTINCT ON (player_name, market_code, commence_time) *
         FROM prop_edges
         WHERE commence_time >= NOW()
+          AND edge_tier = ANY(:published_tiers)
         ORDER BY player_name, market_code, commence_time,
                  best_bet DESC, expected_value DESC NULLS LAST, id
     """
@@ -380,12 +411,12 @@ def edges_summary(db: Session = Depends(get_db)):
             GROUP BY market_code
             ORDER BY market_code
             """
-        )
+        ), TIER_PARAMS
     ).mappings().all()
 
     by_tier = db.execute(
         text(f"SELECT edge_tier, COUNT(*) AS count FROM ({DEDUPED}) d "
-             "GROUP BY edge_tier")
+             "GROUP BY edge_tier"), TIER_PARAMS
     ).mappings().all()
 
     # The slate, so the board can be filtered to one game.
@@ -407,7 +438,7 @@ def edges_summary(db: Session = Depends(get_db)):
             GROUP BY event_id
             ORDER BY MIN(commence_time), MIN(away_team)
             """
-        )
+        ), TIER_PARAMS
     ).mappings().all()
 
     # Counted here, not in the browser.
@@ -416,7 +447,7 @@ def edges_summary(db: Session = Depends(get_db)):
     # be holding, so the card read 12 above a 13-row filtered board. Every other
     # number on that row comes from the server; this one has to as well.
     best_bets = db.execute(
-        text(f"SELECT COUNT(*) FROM ({DEDUPED}) d WHERE d.best_bet")
+        text(f"SELECT COUNT(*) FROM ({DEDUPED}) d WHERE d.best_bet"), TIER_PARAMS
     ).scalar_one()
 
     last_updated = db.execute(
