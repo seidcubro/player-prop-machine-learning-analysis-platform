@@ -31,6 +31,7 @@ from sqlalchemy import create_engine, text
 import build_prop_edges as bp
 import spread_calibration as sc
 import interval_calibration as ic
+import median_anchor as ma
 
 ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 # One slate, not two.
@@ -181,6 +182,7 @@ def main():
     last_played = bp.load_last_played(engine)
     spread_cal = sc.load(ARTIFACT_DIR)
     interval_cal = ic.load(ARTIFACT_DIR)
+    anchor_cal = ma.load(ARTIFACT_DIR)
 
     print(f"{df['player_id'].nunique()} players, {len(df)} player-market rows, "
           f"{df['game_id'].nunique()} games")
@@ -308,6 +310,13 @@ def main():
             # page and an uncorrected one on the board.
             if not is_count:
                 qs = ic.apply(interval_cal, market_code, qs)
+
+            # Same anchor the edge builder applies, in the same place, or the
+            # two pages disagree on the number they both call the median.
+            if qs.get(0.50) is not None:
+                qs = dict(qs)
+                qs[0.50] = ma.apply(anchor_cal, market_code, pred, qs[0.50],
+                                    qs.get(0.25), qs.get(0.75))
 
             p50_raw = qs.get(0.50)
             if qs.get(0.50) is not None:

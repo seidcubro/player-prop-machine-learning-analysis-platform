@@ -30,6 +30,7 @@ import joblib
 import numpy as np
 import spread_calibration as spread
 import interval_calibration as interval
+import median_anchor as anchor
 import pandas as pd
 from scipy.stats import norm
 from sqlalchemy import create_engine, text
@@ -1015,6 +1016,7 @@ def main():
     prob_cal = load_probability_calibrator(artifact_dir)
     spread_cal = spread.load(artifact_dir)
     interval_cal = interval.load(artifact_dir)
+    anchor_cal = anchor.load(artifact_dir)
     ctx = load_current_context(engine)
     stale_factors = load_stale_role_factors(artifact_dir)
     last_played = load_last_played(engine)
@@ -1270,6 +1272,38 @@ def main():
                 # fit_interval_calibrator.py.
                 cal_q = interval.apply(interval_cal, market_code, cal_q)
             median_value = float(cal_q.get(0.50, projection))
+            # Re-read the median off the point projection where that was shown
+            # to help. A tree cannot extrapolate and the point model can, so on
+            # a player at the edge of the data the ladder's median lags badly:
+            # Gibbs at a 91.0 point projection carried a 73.7 median, the ratio
+            # of a committee back. See fit_median_anchor.py.
+            anchored = anchor.apply(
+                anchor_cal, market_code, projection, median_value,
+                cal_q.get(0.25), cal_q.get(0.75))
+            if abs(anchored - median_value) > 1e-9:
+                # Move the probability with the median, or the row states two
+                # different distributions at once.
+                #
+                # p_over above is read off the ladder, and the comment beside it
+                # is the rule: the number shown has to come from the same
+                # distribution as the side. Anchoring only the median broke
+                # exactly that, and it showed. Gibbs came back as "median 83.9,
+                # line 88.5, edge -4.6" while still claiming the 57.4% that
+                # belonged to a median of 73.7, which is a strong best bet built
+                # on a number the row no longer publishes.
+                #
+                # So the anchored median is written back into the ladder and the
+                # CDF is re-read through it. The tails are untouched, because
+                # they were already honest: rush_yds covers 0.096 below p10 and
+                # 0.901 below p90 against a nominal 0.10 and 0.90.
+                cal_q = dict(cal_q)
+                cal_q[0.50] = anchored
+                levels = sorted(cal_q)
+                values = [float(cal_q[q]) for q in levels]
+                p_under_line = float(np.interp(line_value, values, levels))
+                p_over = 1.0 - min(0.99, max(0.01, p_under_line))
+                p_under = 1.0 - p_over
+            median_value = anchored
             # The median carries its own correction, fitted separately: for the
             # yardage markets the point projection improves and correcting the
             # median makes it worse, because the median has already been through
