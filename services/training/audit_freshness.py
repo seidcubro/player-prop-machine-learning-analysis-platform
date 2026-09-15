@@ -574,11 +574,23 @@ def check_projection_agreement(engine):
     bad = df[(gap > 0.001) | (shown_gap > 0.001)]
     if len(bad):
         worst = bad.assign(gap=gap.combine(shown_gap, max)).nlargest(3, "gap")
-        detail = ", ".join(
-            f"{r.player_name} {r.market_code} board {r.edge_shown:.3f} "
-            f"vs page {r.page_shown:.3f}"
-            for r in worst.itertuples()
-        )
+
+        # Name the number that actually differs.
+        #
+        # This always printed the median, so a run where only the mean had
+        # drifted reported "board 3.958 vs page 3.958" and looked like a bug in
+        # the check rather than a real disagreement. Two numbers are compared
+        # here; the message has to say which one moved.
+        def _detail(r):
+            mean_gap = abs((r.edge_projection or 0) - (r.page_projection or 0))
+            med_gap = abs((r.edge_shown or 0) - (r.page_shown or 0))
+            if mean_gap > med_gap:
+                return (f"{r.player_name} {r.market_code} mean board "
+                        f"{r.edge_projection:.4f} vs page {r.page_projection:.4f}")
+            return (f"{r.player_name} {r.market_code} median board "
+                    f"{r.edge_shown:.4f} vs page {r.page_shown:.4f}")
+
+        detail = ", ".join(_detail(r) for r in worst.itertuples())
         fail(f"{len(bad)} of {len(df)} rows disagree between the board and the "
              f"projections page: {detail}")
     else:
