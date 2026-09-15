@@ -28,6 +28,7 @@ import math
 from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -535,6 +536,19 @@ def main():
         )
         joblib.dump(shipped, artifact_path)
 
+        # Linear models get their coefficients recorded, not an empty dict.
+        #
+        # `feature_importances_` only exists on tree ensembles. Three of the
+        # markets that matter most are linear -- rush_att is ridge, rush_yds and
+        # recs are elastic net -- so every one of them shipped with an empty
+        # importances block, and there was no way to answer whether the model
+        # was leaning on opponent strength and usage or just on the player's own
+        # rolling average. That is the first question anyone should ask of a
+        # projection, and the artifact could not answer it.
+        #
+        # Coefficients are scaled by each feature's standard deviation so they
+        # are comparable to one another: a raw coefficient on a feature measured
+        # in hundreds of yards is not comparable to one measured in shares.
         feature_importances = {}
         if hasattr(shipped, "feature_importances_"):
             feature_importances = {
@@ -545,6 +559,22 @@ def main():
                     reverse=True,
                 )
             }
+        else:
+            est = shipped
+            if hasattr(est, "steps"):
+                est = est.steps[-1][1]
+            coefs = getattr(est, "coef_", None)
+            if coefs is not None:
+                coefs = np.ravel(coefs)
+                sds = X_all.reindex(columns=feature_cols).astype(float).std(ddof=0)
+                if len(coefs) == len(feature_cols):
+                    feature_importances = {
+                        col: float(c) * float(sds.get(col, 0.0) or 0.0)
+                        for col, c in zip(feature_cols, coefs)
+                    }
+                    feature_importances = dict(sorted(
+                        feature_importances.items(),
+                        key=lambda kv: -abs(kv[1])))
 
         meta = {
             "model_name": MODEL_NAME,
