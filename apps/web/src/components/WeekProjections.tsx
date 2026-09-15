@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import { fetchPlayerProjections, type Projection } from "../api";
 import { fullDate as fmtDate } from "../lib/format";
+
 import { displayProjection, marketLabel } from "../lib/markets";
 
 /** Counting stats read better with a decimal, yardage as whole numbers. */
@@ -72,7 +73,7 @@ export default function WeekProjections({ playerId }: { playerId: number }) {
   if (loading) {
     return (
       <div className="ps-section">
-        <h3>This Week</h3>
+        <h2>This Week</h2>
         <div className="ps-empty">Loading projections...</div>
       </div>
     );
@@ -80,7 +81,7 @@ export default function WeekProjections({ playerId }: { playerId: number }) {
   if (err) {
     return (
       <div className="ps-section">
-        <h3>This Week</h3>
+        <h2>This Week</h2>
         <div className="ps-empty">Could not load projections: {err}</div>
       </div>
     );
@@ -88,7 +89,7 @@ export default function WeekProjections({ playerId }: { playerId: number }) {
   if (rows.length === 0) {
     return (
       <div className="ps-section">
-        <h3>This Week</h3>
+        <h2>This Week</h2>
         <div className="ps-empty">
           No game scheduled for this player in the next two weeks.
         </div>
@@ -100,7 +101,7 @@ export default function WeekProjections({ playerId }: { playerId: number }) {
 
   return (
     <div className="ps-section">
-      <h3>This Week</h3>
+      <h2>This Week</h2>
       <p className="ps-tagline">
         The model's projection for every market this player's position can
         produce, whether or not a sportsbook has posted a line.

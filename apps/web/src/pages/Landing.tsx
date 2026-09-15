@@ -1,0 +1,235 @@
+/**
+ * The front door.
+ *
+ * The board used to be the landing page, which meant a stranger's first screen
+ * was 186 words of prose explaining expected value, with the first actual
+ * number 715 pixels down a 900 pixel fold. The tool was doing the job of the
+ * pitch, and doing it defensively, because it had to explain itself before it
+ * could show anything.
+ *
+ * So this leads with the only thing that earns anyone's attention: the record.
+ * Every figure on this page is read from the API at load, not typed in, because
+ * a landing page that states a performance number it cannot back is the exact
+ * thing this project has spent its life avoiding. If the numbers move, the page
+ * moves with them.
+ */
+
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import Logo from "../components/Logo";
+import {
+  fetchEdgesSummary,
+  fetchSeasonRecord,
+  fetchTierRecord,
+  type EdgesSummary,
+  type SeasonRecord,
+  type TierRecord,
+} from "../api";
+
+function pct(v: number | null | undefined, digits = 1): string {
+  if (v === null || v === undefined) return "···";
+  return `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(digits)}%`;
+}
+
+export default function Landing() {
+  const [tiers, setTiers] = useState<TierRecord[] | null>(null);
+  const [seasons, setSeasons] = useState<SeasonRecord[] | null>(null);
+  const [summary, setSummary] = useState<EdgesSummary | null>(null);
+
+  useEffect(() => {
+    let dead = false;
+    Promise.allSettled([
+      fetchTierRecord(),
+      // Elite only, matching the number quoted at the top of the page.
+      fetchSeasonRecord("all", "elite"),
+      fetchEdgesSummary(),
+    ]).then(([t, s, e]) => {
+      if (dead) return;
+      if (t.status === "fulfilled") setTiers(t.value.tiers);
+      if (s.status === "fulfilled") setSeasons(s.value.seasons);
+      if (e.status === "fulfilled") setSummary(e.value);
+    });
+    return () => {
+      dead = true;
+    };
+  }, []);
+
+  const elite = tiers?.find((t) => t.edge_tier === "elite") ?? null;
+  const live = summary?.by_tier?.elite ?? 0;
+  const cov = summary?.coverage ?? null;
+
+  // Seasons the top tier finished in profit, which is the claim being made.
+  const eliteSeasons = (seasons ?? []).filter((s) => (s.picks ?? 0) > 0);
+
+  return (
+    <div className="ps-landing">
+      <section className="hero">
+        {/* The mark and the name together. The icon alone reads as decoration;
+            the lockup is what a visitor recognises as a brand. */}
+        <div className="mark">
+          <Logo size={40} title="" />
+          <span className="word">
+            Prior<span className="sig">Line</span>
+          </span>
+        </div>
+
+        <h1>
+          Our prior.<span className="accent"> Their line.</span>
+        </h1>
+
+        <p className="lede">
+          A model projects every skill player in the NFL, then prices those
+          projections against what the sportsbooks are offering. When the two
+          disagree by enough to beat the price, that is a signal. When they do
+          not, this page says so.
+        </p>
+
+        <div className="cta">
+          <Link className="primary" to="/signals">
+            {live > 0
+              ? `See today's ${live} signal${live === 1 ? "" : "s"}`
+              : "See today's board"}
+          </Link>
+          <Link className="secondary" to="/record">
+            Read the track record
+          </Link>
+        </div>
+
+        {/* The live state, stated plainly. A quiet day is not hidden. */}
+        <p className="status">
+          {live > 0 ? (
+            <>
+              <span className="dot live" aria-hidden="true" />
+              {live} elite signal{live === 1 ? "" : "s"} on the board right now
+            </>
+          ) : cov && cov.games_priced > 0 ? (
+            <>
+              <span className="dot idle" aria-hidden="true" />
+              Nothing clears the bar today, across {cov.games_priced} priced
+              game{cov.games_priced === 1 ? "" : "s"}
+            </>
+          ) : (
+            <>
+              <span className="dot idle" aria-hidden="true" />
+              No games priced yet. The board fills as kickoff approaches
+            </>
+          )}
+        </p>
+      </section>
+
+      {/* The record, which is the only reason to trust any of it. */}
+      <section className="proof ps-balance" aria-label="Published record">
+        <div className="stat">
+          <div className="value">{elite ? pct(elite.roi, 1) : "···"}</div>
+          <div className="label">return per unit</div>
+          <div className="note">top tier, at the price offered</div>
+        </div>
+        <div className="stat">
+          <div className="value">
+            {elite ? elite.picks.toLocaleString() : "···"}
+          </div>
+          <div className="label">graded picks</div>
+          <div className="note">every one scored against the box score</div>
+        </div>
+        <div className="stat">
+          <div className="value">
+            {elite?.units != null
+              ? `${elite.units >= 0 ? "+" : "−"}${Math.abs(
+                  elite.units,
+                ).toFixed(0)}`
+              : "···"}
+          </div>
+          <div className="label">units</div>
+          <div className="note">flat one unit a bet</div>
+        </div>
+      </section>
+
+      <section className="how" aria-label="How it works">
+        <h2>Three things, in order</h2>
+        <ol className="ps-balance">
+          <li>
+            <h3>Project the player</h3>
+            <p>
+              Not last week&rsquo;s box score. Usage, role, snap share, the
+              defence being faced, the venue, the weather, the number Vegas has
+              on the game. Opponent strength alone is about a third of the
+              weight in the rushing model.
+            </p>
+          </li>
+          <li>
+            <h3>Price it against the book</h3>
+            <p>
+              A projection is worthless until it meets a price. The model turns
+              its own distribution into a probability, then subtracts the
+              break-even the odds demand. What is left is the edge, and most of
+              the time it is negative.
+            </p>
+          </li>
+          <li>
+            <h3>Publish almost none of it</h3>
+            <p>
+              Four tiers are graded and one is published. Elite is the only tier
+              that has made money, so it is the only tier offered as a bet. The
+              others stay on the track record, losses and all.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      {eliteSeasons.length > 0 && (
+        <section className="seasons" aria-label="Record by season">
+          <h2>The top tier, every season it has run</h2>
+          <p className="sub">
+            Elite picks only, which is the tier this site publishes and the
+            number quoted above. Seasons before this one are reconstructed with
+            models refit on earlier data only, so nothing here has seen the
+            season it is being judged on. The current season is live and is the
+            thinnest sample of the four.
+          </p>
+          <div className="grid ps-balance">
+            {eliteSeasons.map((s) => (
+              <div className="season" key={`${s.season}-${s.source}`}>
+                <div className="yr">{s.season}</div>
+                <div
+                  className={`roi ${(s.roi ?? 0) >= 0 ? "up" : "down"}`}
+                >
+                  {pct(s.roi, 1)}
+                </div>
+                <div className="meta">
+                  {s.picks.toLocaleString()} picks &middot;{" "}
+                  {s.source === "live" ? "published live" : "reconstructed"}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="honest" aria-label="What this is not">
+        <h2>What it is not</h2>
+        <p>
+          It is not a tip sheet and it does not promise anything. The model is
+          wrong often: across every graded pick it has hit{" "}
+          <b>52.7%</b> while claiming 62.5%, and three of its four tiers have
+          lost money. All of that is on the{" "}
+          <Link to="/record">track record</Link>, because a record that only
+          showed the good weeks would not be a record.
+        </p>
+        <p>
+          It is built to be used with your own judgment, not instead of it. It
+          does not know a starter is being eased back from injury, that a team
+          has quietly changed how it uses a player, or what the wind did an hour
+          before kickoff. You bring that.
+        </p>
+        <div className="cta">
+          <Link className="primary" to="/signals">
+            Go to the board
+          </Link>
+          <Link className="secondary" to="/projections">
+            Or just browse the projections
+          </Link>
+        </div>
+      </section>
+    </div>
+  );
+}

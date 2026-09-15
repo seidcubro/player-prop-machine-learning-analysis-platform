@@ -33,14 +33,28 @@ def _rows(sql: str, params: dict) -> list[dict]:
 
 
 @router.get("/record/seasons")
-def record_seasons(source: str = Query("all", pattern="^(all|live|backtest)$")):
+def record_seasons(
+    source: str = Query("all", pattern="^(all|live|backtest)$"),
+    tier: str | None = Query(
+        None, pattern="^(elite|strong|medium|small)$",
+        description="Restrict to one tier, so a page can show the record for "
+                    "the tier it actually publishes."),
+):
     """Headline numbers per season, plus a combined row.
 
     ROI is in units per 1-unit stake at the price actually offered, which is the
     only honest summary: a 55% hit rate at -200 loses money and a 48% hit rate at
     +150 makes it, so hit rate alone says very little.
+
+    `tier` matters for anywhere that quotes a headline. The board publishes elite
+    only, so a season breakdown across all four tiers describes a product nobody
+    can bet: the landing page was showing +4.1% for elite beside a season grid
+    where two of four years were negative, which is two different populations
+    wearing one heading.
     """
     where = "hit IS NOT NULL" + ("" if source == "all" else " AND source = :src")
+    if tier:
+        where += " AND edge_tier = :tier"
     rows = _rows(f"""
         SELECT season,
                source,
@@ -59,7 +73,7 @@ def record_seasons(source: str = Query("all", pattern="^(all|live|backtest)$")):
         WHERE {where} AND season IS NOT NULL
         GROUP BY season, source
         ORDER BY season DESC
-    """, {"src": source})
+    """, {"src": source, "tier": tier})
     for r in rows:
         r["roi"] = (r["units"] / r["picks"]) if r["picks"] else None
     return {"ok": True, "seasons": rows}

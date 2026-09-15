@@ -36,7 +36,7 @@ const stroke = {
 
 const NAV: Item[] = [
   {
-    to: "/",
+    to: "/signals",
     label: "Signals",
     end: true,
     icon: (
@@ -99,11 +99,21 @@ export default function App() {
         which is not a state a brand should ever be in. Hidden on desktop, where
         the rail already shows it.
       */}
-      <header className="ps-topbar" aria-hidden="true">
-        <Logo size={26} title="" />
-        <span className="ps-topbar-word">
-          Prior<span className="sig">Line</span>
-        </span>
+      {/*
+        A link, and not hidden from assistive tech.
+        
+        This was a plain header marked aria-hidden. On a phone the rail collapses
+        to a bottom bar carrying no brand, so this was the only PriorLine mark on
+        screen: unclickable, and invisible to a screen reader. Tapping the logo
+        to get home is the one navigation convention every site has.
+      */}
+      <header className="ps-topbar">
+        <NavLink to="/" className="ps-topbar-brand" aria-label="PriorLine home">
+          <Logo size={26} title="" />
+          <span className="ps-topbar-word">
+            Prior<span className="sig">Line</span>
+          </span>
+        </NavLink>
       </header>
 
       <aside className="ps-rail" aria-label="Main">

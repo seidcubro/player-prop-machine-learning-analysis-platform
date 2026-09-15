@@ -355,7 +355,6 @@ h3 {
   line-height: 1.6;
 }
 .ps-coverage-note b { color: var(--text); font-variant-numeric: tabular-nums; }
-.ps-coverage-note a { color: var(--cyan); }
 
 .ps-stat {
   position: relative;
@@ -1318,6 +1317,319 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 
 
 
+
+
+/* ========================================================= balanced grids */
+/*
+ * A grid should not leave an orphan on the last row.
+ *
+ * `repeat(auto-fit, minmax(...))` fits as many columns as the width allows and
+ * says nothing about how many items there are, so four cards in a container
+ * wide enough for three render as a row of three and a lonely fourth. That
+ * reads as a layout bug even though every card is the size it asked for.
+ *
+ * These rules pick a column count that divides the item count evenly: four goes
+ * 2x2, six goes 3x2, eight goes 4x2, nine goes 3x3. Counts that do not divide
+ * neatly, five and seven, keep auto-fit, because any fixed choice leaves a gap
+ * anyway and auto-fit at least fills the width.
+ *
+ * The class is doubled so the utility outranks the page-level grid rule it
+ * is overriding. `.ps-landing .seasons .grid` and a single `.ps-balance:has()`
+ * tie on specificity, and the page rule happened to come later in the file,
+ * so four season cards stayed in a row of four.
+ *
+ * :has() does the counting. `> :nth-child(4):last-child` is "the fourth child
+ * is also the last", which is only true when there are exactly four.
+ */
+.ps-balance.ps-balance:has(> :nth-child(2):last-child),
+.ps-balance.ps-balance:has(> :nth-child(4):last-child) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.ps-balance.ps-balance:has(> :nth-child(3):last-child),
+.ps-balance.ps-balance:has(> :nth-child(6):last-child),
+.ps-balance.ps-balance:has(> :nth-child(9):last-child) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.ps-balance.ps-balance:has(> :nth-child(8):last-child) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* Narrow screens ignore all of it and stack, which is always balanced. */
+@media (max-width: 720px) {
+  .ps-balance.ps-balance:has(> :nth-child(2):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(3):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(4):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(6):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(8):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(9):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 440px) {
+  .ps-balance.ps-balance:has(> :nth-child(2):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(3):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(4):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(6):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(8):last-child),
+  .ps-balance.ps-balance:has(> :nth-child(9):last-child) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ============================================================== landing */
+/*
+ * The front door. Same tokens as everything else, arranged to be read rather
+ * than worked: fewer things per screen, bigger type, and the record stated
+ * before anything is explained.
+ */
+.ps-landing { max-width: 960px; margin: 0 auto; padding-bottom: var(--s8); }
+
+.ps-landing .hero {
+  position: relative;
+  text-align: center;
+  padding: clamp(40px, 7vw, 88px) var(--s4) clamp(32px, 5vw, 64px);
+}
+/* One soft pool of brand light behind the mark, so the top of the page has a
+   focal point without a hero image to load. */
+.ps-landing .hero::before {
+  content: "";
+  position: absolute;
+  inset: -10% 10% auto 10%;
+  height: 340px;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    transparent 68%
+  );
+  filter: blur(46px);
+  pointer-events: none;
+  z-index: 0;
+}
+.ps-landing .hero > * { position: relative; z-index: 1; }
+
+.ps-landing .mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-bottom: var(--s5);
+}
+.ps-landing .mark .word {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.ps-landing .mark .word .sig {
+  background: var(--brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.ps-landing h1 {
+  margin: 0 0 var(--s4);
+  font-family: var(--font-display);
+  font-size: clamp(2.3rem, 6vw, 4rem);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+}
+.ps-landing h1 .accent {
+  background: var(--brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.ps-landing .lede {
+  margin: 0 auto;
+  max-width: 60ch;
+  font-size: clamp(0.98rem, 1.5vw, 1.12rem);
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+
+.ps-landing .cta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s3);
+  margin-top: var(--s5);
+}
+.ps-landing .cta a {
+  padding: var(--s3) var(--s5);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  font-size: 0.92rem;
+  text-decoration: none;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease),
+              border-color 0.2s var(--ease);
+}
+.ps-landing .cta a:hover { transform: translateY(-2px); }
+.ps-landing .cta .primary {
+  color: #05070e;
+  background: var(--brand-grad);
+  box-shadow: 0 10px 30px -12px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.ps-landing .cta .secondary {
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+}
+.ps-landing .cta .secondary:hover { border-color: var(--accent); }
+
+.ps-landing .status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s5) auto 0;
+  font-size: 0.82rem;
+  color: var(--text-faint);
+}
+.ps-landing .status .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-faint);
+}
+.ps-landing .status .dot.live {
+  background: var(--green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 18%, transparent);
+}
+
+/* ------------------------------------------------------------ the record */
+.ps-landing .proof {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: var(--s4);
+  margin: 0 var(--s4);
+  padding: var(--s5);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.ps-landing .proof .stat { text-align: center; }
+.ps-landing .proof .value {
+  font-family: var(--font-mono);
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  background: var(--brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.ps-landing .proof .label {
+  margin-top: var(--s2);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ps-landing .proof .note {
+  margin-top: 2px;
+  font-size: 0.76rem;
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------ sections */
+.ps-landing section + section { margin-top: clamp(48px, 7vw, 88px); }
+.ps-landing h2 {
+  margin: 0 0 var(--s3);
+  font-family: var(--font-display);
+  font-size: clamp(1.35rem, 2.6vw, 1.8rem);
+  letter-spacing: -0.02em;
+}
+.ps-landing .how, .ps-landing .seasons, .ps-landing .honest {
+  padding: 0 var(--s4);
+}
+.ps-landing .sub {
+  margin: 0 0 var(--s5);
+  max-width: 68ch;
+  font-size: 0.88rem;
+  line-height: 1.65;
+  color: var(--text-faint);
+}
+
+.ps-landing .how ol {
+  counter-reset: step;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: var(--s4);
+  margin: var(--s4) 0 0;
+  padding: 0;
+}
+.ps-landing .how li {
+  position: relative;
+  padding: var(--s5) var(--s4) var(--s4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.ps-landing .how li::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  top: var(--s3); right: var(--s4);
+  font-family: var(--font-mono);
+  font-size: 1.6rem;
+  color: var(--border-strong);
+}
+.ps-landing .how h3 {
+  margin: 0 0 var(--s2);
+  font-size: 0.98rem;
+  font-family: var(--font-display);
+}
+.ps-landing .how p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+.ps-landing .seasons .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: var(--s3);
+}
+.ps-landing .season {
+  padding: var(--s4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+.ps-landing .season .yr {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+.ps-landing .season .roi {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0;
+}
+.ps-landing .season .roi.up { color: var(--green); }
+.ps-landing .season .roi.down { color: var(--red); }
+.ps-landing .season .meta { font-size: 0.72rem; color: var(--text-faint); }
+
+.ps-landing .honest p {
+  max-width: 68ch;
+  font-size: 0.92rem;
+  line-height: 1.75;
+  color: var(--text-dim);
+}
+.ps-landing .honest b { color: var(--text); }
+.ps-landing .honest .cta { justify-content: flex-start; }
+
+@media (max-width: 560px) {
+  .ps-landing .cta { flex-direction: column; }
+  .ps-landing .cta a { text-align: center; }
+}
+
 /* ========================================================== empty board */
 /*
  * A quiet day should read as a decision, not a failure. The old empty state was
@@ -1480,7 +1792,6 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   color: var(--text-dim);
 }
 .ps-disclaimer b { color: var(--text); }
-.ps-disclaimer a { color: var(--cyan); }
 .ps-disclaimer .fine {
   margin-bottom: 0;
   font-size: 0.78rem;
@@ -1845,6 +2156,28 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   .ps-table td[data-label="Win %"],
   .ps-table td[data-label="Tier"] { grid-column: span 2; }
   .ps-table td[data-label="Book"] { grid-column: 1 / -1; }
+
+  /*
+   * Projections pairs its cells two to a row as well.
+   *
+   * Its four values, Game, the market, Range and Depth, had no span rule, so
+   * they each took one column of four and were 68px wide on a 375px phone.
+   * That is narrower than the content: the range read "29-1" where the number
+   * is 29-129, silently truncated, which is worse than wrapping because it
+   * looks like a value rather than a clipped one.
+   */
+  .ps-table td[data-label="Game"],
+  .ps-table td[data-label="Range"],
+  .ps-table td[data-label="Depth"],
+  .ps-table td[data-label="Receiving Yards"],
+  .ps-table td[data-label="Rushing Yards"],
+  .ps-table td[data-label="Receptions"],
+  .ps-table td[data-label="Rush Attempts"],
+  .ps-table td[data-label="Passing Yards"],
+  .ps-table td[data-label="Passing TDs"],
+  .ps-table td[data-label="Completions"],
+  .ps-table td[data-label="Pass Attempts"],
+  .ps-table td[data-label="Anytime TD"] { grid-column: span 2; }
 
   /*
    * Reading order, which is not the column order.
@@ -2296,7 +2629,15 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-qa a,
 .ps-tagline a,
 .ps-notice-body a,
-.ps-glossary-item dd a {
+.ps-glossary-item dd a,
+.ps-coverage-note a,
+.ps-disclaimer a,
+.ps-noboard p a,
+.ps-landing .lede a,
+.ps-landing .sub a,
+.ps-landing .honest a,
+.ps-nextslate .head p a,
+a.ps-link {
   position: relative;
   color: var(--text);
   font-weight: 600;
@@ -2309,7 +2650,15 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-qa a::after,
 .ps-tagline a::after,
 .ps-notice-body a::after,
-.ps-glossary-item dd a::after {
+.ps-glossary-item dd a::after,
+.ps-coverage-note a::after,
+.ps-disclaimer a::after,
+.ps-noboard p a::after,
+.ps-landing .lede a::after,
+.ps-landing .sub a::after,
+.ps-landing .honest a::after,
+.ps-nextslate .head p a::after,
+a.ps-link::after {
   content: "";
   position: absolute;
   left: 0;
@@ -2325,7 +2674,15 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-qa a:hover::after,
 .ps-tagline a:hover::after,
 .ps-notice-body a:hover::after,
-.ps-glossary-item dd a:hover::after { transform: scaleX(1); }
+.ps-glossary-item dd a:hover::after,
+.ps-coverage-note a:hover::after,
+.ps-disclaimer a:hover::after,
+.ps-noboard p a:hover::after,
+.ps-landing .lede a:hover::after,
+.ps-landing .sub a:hover::after,
+.ps-landing .honest a:hover::after,
+.ps-nextslate .head p a:hover::after,
+a.ps-link:hover::after { transform: scaleX(1); }
 
 /* ================================================== switch */
 /*
@@ -2390,6 +2747,14 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
     backdrop-filter: blur(16px) saturate(140%);
     -webkit-backdrop-filter: blur(16px) saturate(140%);
     border-bottom: 1px solid var(--border);
+  }
+  /* The brand is now an anchor, so it needs the layout the header used to do. */
+  .ps-topbar-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    text-decoration: none;
+    border-radius: var(--radius-sm);
   }
   .ps-topbar-word {
     font-family: var(--font-display);
@@ -2480,11 +2845,11 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 
 /* h3 gets the same brand rule as h2, so a subsection on the player page reads
    as part of the same system rather than as plain bold text. */
-.ps-section > h3 {
+.ps-section > h2 {
   position: relative;
   padding-top: var(--s4);
 }
-.ps-section > h3::before {
+.ps-section > h2::before {
   content: "";
   position: absolute;
   top: 0;

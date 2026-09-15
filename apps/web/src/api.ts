@@ -582,9 +582,13 @@ export type CalibrationBucket = {
   actual: number;
 };
 
-export async function fetchSeasonRecord(source: RecordSource = "all") {
+export async function fetchSeasonRecord(
+  source: RecordSource = "all",
+  /** Restrict to one tier. The landing page quotes elite, so it asks for elite. */
+  tier?: string | null,
+) {
   return http<{ ok: boolean; seasons: SeasonRecord[] }>(
-    `${API_BASE}/record/seasons?${qs({ source })}`,
+    `${API_BASE}/record/seasons?${qs({ source, tier: tier ?? undefined })}`,
   );
 }
 

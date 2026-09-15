@@ -20,7 +20,7 @@ export default function NotFound() {
           The link may be out of date, or the address may have a typo in it.
         </p>
         <p style={{ marginTop: "0.75rem" }}>
-          <Link to="/">Signals</Link> · <Link to="/projections">Projections</Link>{" "}
+          <Link to="/">Home</Link> · <Link to="/signals">Signals</Link> · <Link to="/projections">Projections</Link>{" "}
           · <Link to="/record">Track Record</Link> ·{" "}
           <Link to="/players">Players</Link> · <Link to="/faq">How It Works</Link>
         </p>

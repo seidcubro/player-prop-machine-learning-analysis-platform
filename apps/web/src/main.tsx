@@ -6,6 +6,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import App from './App'
+import Landing from './pages/Landing'
 import EdgesDashboard from './pages/EdgesDashboard'
 import Projections from './pages/Projections'
 import TrackRecord from './pages/TrackRecord'
@@ -20,7 +21,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <Routes>
         <Route element={<App />}>
-          <Route path="/" element={<EdgesDashboard />} />
+          <Route path="/" element={<Landing />} />
+          <Route path="/signals" element={<EdgesDashboard />} />
           <Route path="/projections" element={<Projections />} />
           <Route path="/record" element={<TrackRecord />} />
           <Route path="/faq" element={<Faq />} />

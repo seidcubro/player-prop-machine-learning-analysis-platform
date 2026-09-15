@@ -105,7 +105,7 @@ export default function PropCards({
   if (loading) {
     return (
       <div className="ps-section">
-        <h3>Live Props</h3>
+        <h2>Live Props</h2>
         <div className="ps-empty">Loading props...</div>
       </div>
     );
@@ -114,7 +114,7 @@ export default function PropCards({
   if (err) {
     return (
       <div className="ps-section">
-        <h3>Live Props</h3>
+        <h2>Live Props</h2>
         <div className="ps-empty">Could not load props: {err}</div>
       </div>
     );
@@ -125,7 +125,7 @@ export default function PropCards({
   if (byMarket.size === 0) {
     return (
       <div className="ps-section">
-        <h3>Live Props</h3>
+        <h2>Live Props</h2>
         <div className="ps-empty">
           No sportsbook props posted for this player in the current odds snapshot.
         </div>
@@ -135,7 +135,7 @@ export default function PropCards({
 
   return (
     <div className="ps-section">
-      <h3>Live Props</h3>
+      <h2>Live Props</h2>
       <div className="ps-propgrid">
         {[...byMarket.entries()].map(([market, list]) => {
           const top = list[0];

@@ -325,7 +325,7 @@ export default function EdgesDashboard() {
         </p>
       )}
 
-      <section className="ps-statgrid" aria-label="Signal summary">
+      <section className="ps-statgrid ps-balance" aria-label="Signal summary">
         {/*
           The tier cards are filters, not decoration.
           Clicking one applies it and clicking it again clears it, which is what

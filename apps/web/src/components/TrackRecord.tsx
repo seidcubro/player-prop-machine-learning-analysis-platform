@@ -44,7 +44,7 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
   if (loading) {
     return (
       <div className="ps-section">
-        <h3>Track Record</h3>
+        <h2>Track Record</h2>
         <div className="ps-empty">Loading history...</div>
       </div>
     );
@@ -53,7 +53,7 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
   if (err) {
     return (
       <div className="ps-section">
-        <h3>Track Record</h3>
+        <h2>Track Record</h2>
         <div className="ps-empty">Could not load history: {err}</div>
       </div>
     );
@@ -65,7 +65,7 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
   if (!s || s.graded === 0) {
     return (
       <div className="ps-section">
-        <h3>Track Record</h3>
+        <h2>Track Record</h2>
         <div className="ps-empty">
           No graded picks for this player yet. Results appear once a game we
           posted an edge on has been played.
@@ -79,7 +79,7 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
 
   return (
     <div className="ps-section">
-      <h3>Track Record</h3>
+      <h2>Track Record</h2>
 
       <div className="ps-statgrid">
         <div className="ps-stat">

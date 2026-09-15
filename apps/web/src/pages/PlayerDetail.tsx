@@ -164,7 +164,7 @@ export default function PlayerDetail() {
           is usually missing from it and the page reads as though the game did
           not happen. It is the first thing anyone looks for. */}
       <div className="ps-section">
-        <h3>Recent Games</h3>
+        <h2>Recent Games</h2>
         {games.length === 0 ? (
           <div className="ps-empty">No recent games on record.</div>
         ) : (
