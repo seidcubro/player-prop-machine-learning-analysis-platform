@@ -178,6 +178,49 @@ ON CONFLICT (player_id, game_date, market_code) DO UPDATE SET
 """
 
 
+# Fill in results for rows that are already in the record but ungraded.
+#
+# The main statement grades by joining the board. That cannot reach a row which
+# has no board behind it any more: a pick recovered by recover_live_picks.py,
+# or one whose game was rebuilt away before prop_edges_history existed. Those
+# sit in the record with a NULL actual and would stay there forever.
+#
+# Same matching rule as the main statement, including the plus or minus one day
+# window, because a Sunday night kickoff lands on the Monday in UTC.
+PENDING_SQL = """
+UPDATE prop_edge_results r
+SET actual = g.actual,
+    hit = CASE
+            WHEN g.actual = r.line THEN NULL
+            WHEN r.recommended_side = 'over'  THEN g.actual > r.line
+            WHEN r.recommended_side = 'under' THEN g.actual < r.line
+          END,
+    graded_at = NOW()
+FROM (
+    SELECT pgs.player_id, pgs.game_date, m.code AS market_code,
+           CASE m.stat_field
+             WHEN 'receiving_yards' THEN pgs.receiving_yards
+             WHEN 'receptions'      THEN pgs.receptions
+             WHEN 'receiving_tds'   THEN pgs.receiving_tds
+             WHEN 'rushing_yards'   THEN pgs.rushing_yards
+             WHEN 'carries'         THEN pgs.carries
+             WHEN 'rushing_tds'     THEN pgs.rushing_tds
+             WHEN 'passing_yards'   THEN pgs.passing_yards
+             WHEN 'attempts'        THEN pgs.attempts
+             WHEN 'completions'     THEN pgs.completions
+             WHEN 'passing_tds'     THEN pgs.passing_tds
+           END::float8 AS actual
+    FROM player_game_stats_app pgs
+    CROSS JOIN prop_markets m
+) g
+WHERE r.actual IS NULL
+  AND g.actual IS NOT NULL
+  AND g.player_id = r.player_id
+  AND g.market_code = r.market_code
+  AND g.game_date BETWEEN r.game_date - 1 AND r.game_date + 1;
+"""
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     with engine.begin() as conn:
@@ -185,6 +228,9 @@ def main():
         before = conn.execute(text(
             "SELECT count(*) FROM prop_edge_results WHERE source = 'live'")).scalar()
         conn.execute(text(GRADE_SQL))
+        pending = conn.execute(text(PENDING_SQL)).rowcount
+        if pending:
+            print(f"filled in {pending} previously ungraded row(s)")
         live = conn.execute(text(
             "SELECT count(*) FROM prop_edge_results WHERE source = 'live'")).scalar()
         total = conn.execute(text("SELECT count(*) FROM prop_edge_results")).scalar()
