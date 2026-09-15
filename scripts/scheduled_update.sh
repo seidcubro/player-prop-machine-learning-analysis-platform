@@ -226,8 +226,21 @@ if [ "${ODDS:-0}" = "1" ]; then
   curl -sf -X POST -H "$AUTH" "$API/odds/sync/events" >/dev/null || {
     echo "FAILED: events sync"; exit 1; }
 
-  log "odds: player props"
-  props=$(curl -sf -X POST -H "$AUTH" "$API/odds/sync/player_props?days_ahead=8") || {
+  # Three days, not eight.
+  #
+  # Billing is per event per market, and a sportsbook does not post the markets
+  # this site uses until the game is close. Bought on the Monday, Sunday's
+  # twelve games returned 243 rows of anytime touchdown and not one reception or
+  # yardage line: one market out of the nine we paid to ask for. The daily job
+  # then bought the same twelve games again the next morning, and the next.
+  #
+  # Inside three days the full board comes back. The Thursday game, two days
+  # out, returned all nine markets. So the window is the point at which the data
+  # exists rather than the furthest ahead the schedule can see, and --early
+  # handles anything that needs to be live sooner.
+  DAYS="${ODDS_DAYS_AHEAD:-3}"
+  log "odds: player props for the next ${DAYS} day(s)"
+  props=$(curl -sf -X POST -H "$AUTH" "$API/odds/sync/player_props?days_ahead=$DAYS") || {
     echo "FAILED: props sync"; exit 1; }
   echo "    $props"
 

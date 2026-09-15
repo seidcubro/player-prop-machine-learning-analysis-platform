@@ -10,7 +10,7 @@ only entry point anything automated should call.
 | `--closing` | buys prices for a slate kicking off inside 90 minutes, rebuilds the board | 9 per game, nothing when no slate is near | under a minute |
 | `--early` | buys prices for everything inside 72 hours, so the board is live days ahead | 9 per game, nothing when the window is already bought | under a minute |
 | `--board` | injuries and depth charts, projections, board, audit | free | about 5 minutes |
-| `--daily` | the above plus full ingest, features, grading, recalibration | free, or a full sync with `ODDS=1` | about 10 minutes |
+| `--daily` | the above plus full ingest, features, grading, recalibration | free, or `ODDS=1` buys the next 3 days | about 10 minutes |
 | `--weekly` | the above plus retraining every market | free | about an hour |
 
 Exits non-zero if `audit_freshness.py` fails, so a scheduler can alert on it.
@@ -36,6 +36,19 @@ half at 144 a day.
 Closing line value converges far faster than win and loss does, and a price not
 captured before kickoff cannot be bought back at anything like the same cost.
 That is why the cheap job is the one that matters.
+
+### Why the odds window is three days
+
+Billing is per event per market, and a sportsbook does not post reception or
+yardage props until a game is close. Sunday's twelve games, bought on the
+Monday, came back with 243 rows of anytime touchdown and nothing else: one
+market out of the nine the call paid to ask for. The Thursday game, two days
+out, returned all nine.
+
+So `--daily` asks for three days rather than eight. Past that the money buys a
+market this site does not publish, and the daily job would re-buy the same games
+every morning until the week catches up with them. `ODDS_DAYS_AHEAD` overrides
+it when a deliberate wider pull is wanted.
 
 ### Why --early exists
 
@@ -76,7 +89,8 @@ score a pick against one.
 Credits are only spent when the second argument is the word `odds`:
 
 ```
-schtasks /Create /TN "PriorLine Early"   /TR "...un_update.cmd --early odds"  /SC WEEKLY /D FRI /ST 09:00 /F
+schtasks /Create /TN "PriorLine Early"   /TR "...
+un_update.cmd --early odds"  /SC WEEKLY /D FRI /ST 09:00 /F
 schtasks /Create /TN "PriorLine Daily"   /TR "...\run_update.cmd --daily odds" /SC DAILY  /ST 08:00 /F
 schtasks /Create /TN "PriorLine Closing" /TR "...\run_update.cmd --closing"    /SC HOURLY /ST 08:05 /F
 schtasks /Create /TN "PriorLine Board PM" /TR "...\run_update.cmd --board"   /SC DAILY  /ST 17:00 /F
