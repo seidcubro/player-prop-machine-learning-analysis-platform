@@ -69,7 +69,7 @@ export default function NextSlate() {
     <div className="ps-nextslate">
       <div className="head">
         <div>
-          <h3>Next up</h3>
+          <h2>Next up</h2>
           <p>
             {/* Careful not to claim nothing is priced. This panel shows whenever
                 the board is empty, and that happens both before prices arrive

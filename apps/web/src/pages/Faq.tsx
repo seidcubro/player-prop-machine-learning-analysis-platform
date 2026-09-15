@@ -21,7 +21,7 @@ type Audience = "plain" | "technical";
 function QA({ q, children }: { q: string; children: React.ReactNode }) {
   return (
     <div className="ps-qa">
-      <h3>{q}</h3>
+      <h2>{q}</h2>
       {children}
     </div>
   );

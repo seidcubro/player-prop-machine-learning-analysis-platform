@@ -335,7 +335,8 @@ h3 {
  */
 .ps-statgrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  /* min() so the floor cannot exceed the container. See .ps-split. */
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
   gap: var(--s4);
   margin-bottom: var(--s5);
 }
@@ -637,10 +638,30 @@ button:focus-visible, a:focus-visible, [role="option"]:focus-visible {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  /*
+   * The wrapper scrolls, so a table can never widen the page.
+   *
+   * This was `overflow: hidden`, which relies on every caller also wrapping the
+   * table in .ps-tablescroll. Two of them did not, and on a 375px phone the
+   * track record's tier table rendered 418px wide inside a box that clipped it:
+   * the columns were unreachable and the whole document scrolled sideways by
+   * 61px instead. Putting the scroll on the wrapper means a table added later
+   * cannot reintroduce it by forgetting an inner div.
+   */
+  overflow-x: auto;
+  /*
+   * Lets the box shrink below its content, which is what makes the scroll
+   * actually engage.
+   *
+   * A flex or grid item defaults to min-width:auto, so the wrapper grew to its
+   * table's 418px instead of scrolling it, and overflow-x had nothing to do.
+   * Its siblings that happened to sit in a plain block container were fine at
+   * 343px, which is why only one of three tables broke the page.
+   */
+  min-width: 0;
   box-shadow: var(--shadow);
 }
-/* Wide tables scroll inside their own box. The page body never scrolls sideways. */
+/* Kept for the tables that already nest one. Harmless either way. */
 .ps-tablescroll { overflow-x: auto; }
 
 .ps-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
@@ -1039,7 +1060,9 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   display: grid;
   gap: var(--s4);
 }
-.ps-propgrid { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+/* min() so a 320px phone cannot end up with a 290px track it has no room
+   for. See .ps-split for the version of this that reached production. */
+.ps-propgrid { grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr)); }
 
 /*
  * Player cards: a fixed column count per breakpoint, not `auto-fill`.
@@ -1307,7 +1330,7 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   text-align: center;
   border-top: 1px solid var(--border);
 }
-.ps-noboard h3 {
+.ps-noboard h2 {
   margin: 0 0 var(--s2);
   font-family: var(--font-display);
   font-size: 1.15rem;
@@ -1362,7 +1385,7 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   padding: var(--s4) var(--s5);
   border-bottom: 1px solid var(--border);
 }
-.ps-nextslate .head h3 {
+.ps-nextslate .head h2 {
   margin: 0 0 var(--s2);
   font-family: var(--font-display);
   font-size: 1.02rem;
@@ -1377,7 +1400,17 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-nextslate .rows { display: flex; flex-direction: column; }
 .ps-nextslate .row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(0, 0.9fr) auto;
+  /*
+   * The player on the left, the number on the right, and the market label
+   * tucked against the number rather than floating between them.
+   *
+   * Two flexible columns split the row down the middle, so on a wide screen the
+   * name sat at x=343 and its own market label began at x=790, with the figure
+   * marooned another 400px away. Nothing lined up and every row read as three
+   * unrelated things. One flexible column does the spacing and the two values
+   * travel together.
+   */
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(64px, auto);
   align-items: center;
   gap: var(--s3);
   padding: var(--s3) var(--s5);
@@ -1401,12 +1434,18 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   font-size: 0.72rem;
   color: var(--text-faint);
 }
-.ps-nextslate .market { font-size: 0.82rem; color: var(--text-dim); }
+.ps-nextslate .market {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  text-align: right;
+  white-space: nowrap;
+}
 .ps-nextslate .num {
   font-family: var(--font-mono);
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
+  color: var(--text);
 }
 
 @media (max-width: 620px) {
@@ -1886,7 +1925,16 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
    whenever the screen allows it. */
 .ps-split {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  /*
+   * min() so the track can go narrower than its floor on a small screen.
+   *
+   * `minmax(420px, 1fr)` reads as "never below 420", which a 375px phone cannot
+   * honour, so the grid laid out a single 420px column inside a 343px parent
+   * and the whole document scrolled sideways by 61px. Everything downstream
+   * looked like the culprit in turn, the table, its wrapper, then the fixed
+   * bottom nav stretching to the widened page, and none of them were.
+   */
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
   gap: var(--s6);
   align-items: start;
 }

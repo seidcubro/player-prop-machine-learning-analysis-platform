@@ -123,10 +123,14 @@ function CalibrationNotice() {
             They now run through a calibration fitted on 7,125 graded results.
           </p>
           <p>
-            <strong>The tiers rank.</strong> On out-of-sample graded picks,
-            elite returns +4.0% per unit, then strong at &minus;0.3%, medium at
-            &minus;5.2% and small at &minus;4.3%. The top tier is the only one
-            that makes money, which is what a tier is for.
+            <strong>Only the top tier is published.</strong> On out-of-sample
+            graded picks elite returns +4.0% per unit, and it is the only tier
+            that does: strong sits at &minus;0.3%, medium at &minus;5.2% and
+            small at &minus;4.3%. Week 1 said the same thing on live picks,
+            elite at +1.1% against strong at &minus;16.2%. The lower tiers are
+            still graded and still on the track record, because a tier table
+            that hid its losers would not be worth reading, but they are not
+            offered here as bets.
           </p>
           <p>
             <strong>The under side is where the money is.</strong> Choosing on
@@ -672,7 +676,10 @@ export default function EdgesDashboard() {
              priced yet, and telling somebody their filters matched nothing
              sends them hunting through filters that were never the issue. */
           <div className="ps-noboard">
-            <h3>
+            {/* h2, not h3. These sit directly under the page h1, and skipping a
+                level makes a screen reader's heading outline claim a missing
+                section above them. */}
+            <h2>
               {allTiersTotal !== 0
                 ? "No signals match these filters"
                 : cov && cov.games_in_progress > 0
@@ -680,7 +687,7 @@ export default function EdgesDashboard() {
                 : cov && cov.games_priced > 0
                 ? "No elite picks today"
                 : "No prices posted yet"}
-            </h3>
+            </h2>
             <p>
               {allTiersTotal === 0
                 ? cov && cov.games_in_progress > 0
@@ -733,6 +740,9 @@ export default function EdgesDashboard() {
         )}
       </div>
 
+      {/* No pager under an empty board. "0 signals" beside a Prev and a Next
+          that go nowhere reads as a broken table rather than a quiet day. */}
+      {total > 0 && (
       <Pager
         total={total}
         page={page}
@@ -741,6 +751,7 @@ export default function EdgesDashboard() {
         onPage={setPage}
         updatedAt={summary?.last_updated ? fullDateTime(summary.last_updated) : null}
       />
+      )}
 
       {/*
         The honesty panel lives at the bottom.
