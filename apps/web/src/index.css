@@ -1366,6 +1366,35 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   .ps-nextslate .market { grid-column: 2 / 3; font-size: 0.74rem; }
 }
 
+
+/* ============================================================ disclaimer */
+/*
+ * Sits under every page. Quiet, but not hidden: the point is that somebody who
+ * reads the board also reads what the board is and is not, so it uses the same
+ * text ramp as body copy rather than the faint grey that legal boilerplate
+ * usually gets buried in.
+ */
+.ps-disclaimer {
+  margin-top: var(--s7);
+  padding: var(--s5) var(--s5) var(--s6);
+  border-top: 1px solid var(--border);
+  max-width: 86ch;
+}
+.ps-disclaimer p {
+  margin: 0 0 var(--s3);
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+.ps-disclaimer b { color: var(--text); }
+.ps-disclaimer a { color: var(--cyan); }
+.ps-disclaimer .fine {
+  margin-bottom: 0;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+.ps-disclaimer .fine b { color: var(--text-dim); }
+
 /* ================================================================== profile */
 .ps-profilehead {
   display: flex;

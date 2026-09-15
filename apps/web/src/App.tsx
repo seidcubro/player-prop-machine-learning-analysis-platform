@@ -14,7 +14,7 @@
  */
 
 import type { ReactElement } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import Logo from "./components/Logo";
 
 type Item = { to: string; label: string; icon: ReactElement; end?: boolean };
@@ -132,6 +132,47 @@ export default function App() {
 
       <main className="ps-main">
         <Outlet />
+
+        {/*
+          On every page, not buried in a FAQ nobody opens.
+
+          This is a research tool. It publishes a model's opinion next to a
+          sportsbook's price and it is wrong a great deal of the time, which the
+          track record says out loud. Anyone reading it as a tip sheet is using
+          it in the one way that will lose them money, and saying so plainly is
+          both the honest thing and the thing that keeps this an analysis site
+          rather than a tipster service.
+        */}
+        <footer className="ps-disclaimer">
+          <p>
+            <b>PriorLine is a research tool, not a tip sheet.</b> Every number
+            here is a model estimate against a sportsbook&rsquo;s price. Nothing
+            on this site is a prediction, a guarantee, or advice to place a bet,
+            and no outcome is promised. The model is wrong often: it has hit{" "}
+            <b>52.7%</b> of its graded picks while claiming 62.5%, and whole
+            tiers of it have lost money. The{" "}
+            <Link to="/record">track record</Link> shows all of it, including
+            the parts that do not flatter it.
+          </p>
+          <p>
+            It is built to be used with your own judgment, not instead of it. It
+            does not know that a starter is being eased back from injury, that a
+            team has changed how it uses a player, or what the weather turned
+            into an hour before kickoff. Those are yours to bring.
+          </p>
+          <p className="fine">
+            21+ where legal. Nothing here is financial advice. Not affiliated
+            with, endorsed by, or partnered with any sportsbook. Odds are shown
+            as last retrieved and move constantly; always check the current
+            price at the book. If gambling stops being fun, call{" "}
+            <b>1-800-522-4700</b> or visit{" "}
+            <a href="https://www.ncpgambling.org/help-treatment/"
+               target="_blank" rel="noopener noreferrer">
+              ncpgambling.org
+            </a>
+            . Bet only what you can afford to lose.
+          </p>
+        </footer>
       </main>
     </div>
   );
