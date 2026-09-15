@@ -339,8 +339,9 @@ export default function EdgesDashboard() {
 
         A sportsbook posts yardage and reception lines on starters and little
         else, so a large share of the players it prices carry nothing but an
-        anytime touchdown, which this site does not publish into a 37%
-        overround. Those players are projected in full and have a profile; they
+        anytime touchdown, which this site projects but does not price. The
+        market's own number predicts scorers better than the model does, so
+        there is nothing there to beat.
         have no line to beat. Without saying so the board reads as though the
         model has never heard of half the offence.
       */}

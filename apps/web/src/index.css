@@ -3122,3 +3122,17 @@ a.ps-link:hover::after { transform: scaleX(1); }
  */
 .ps-table tbody tr.is-context { opacity: 0.72; }
 .ps-table tbody tr.is-context:hover { opacity: 1; }
+
+/* The plain-English key under the ledger's opening line. Quieter than the
+   statement above it, because it is there for the first reader rather than
+   every reader. */
+.ps-ledger-key {
+  margin: 0 0 var(--s4);
+  max-width: 78ch;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: var(--text-faint);
+  padding-left: var(--s3);
+  border-left: 2px solid var(--border);
+}
+.ps-ledger-key b { color: var(--text-dim); font-weight: 600; }

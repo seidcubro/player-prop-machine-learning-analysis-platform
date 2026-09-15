@@ -79,6 +79,23 @@ export default function TierLedger({
         because {context.length === 1 ? "it is" : "they are"} worth backing.
         Every figure below is the graded record, wins and losses included.
       </p>
+      {/*
+        The terms get defined here rather than in the glossary.
+        "+4.1% per unit" is unreadable to anyone who has not priced a bet
+        before, and this table is the one place on the site where a number
+        being misread costs somebody money. The glossary is for looking
+        something up; this is for not needing to.
+      */}
+      <p className="ps-ledger-key">
+        <b>Return per unit</b> is profit on every 1 unit staked, so elite&rsquo;s
+        figure means a 100 dollar bet came back as 104 on average, across
+        thousands of them. <b>Won</b> is how often the pick actually landed.{" "}
+        <b>Model said</b> is how often it predicted it would. The distance
+        between those last two is the whole reason only one tier here is
+        offered as a bet: roughly 52 to 53% is break even once the
+        sportsbook&rsquo;s cut is paid, so a tier winning half its picks is
+        losing money.
+      </p>
 
       <div className="ps-ledger-rows">
         {rows.map((r) => {
@@ -98,15 +115,15 @@ export default function TierLedger({
                 <b className={(r.roi ?? 0) >= 0 ? "pos" : "neg"}>
                   {signed(r.roi)}
                 </b>
-                <small>per unit</small>
+                <small>per unit staked</small>
               </span>
               <span className="fig">
                 <b>{pct(r.hit_rate)}</b>
-                <small>hit, claimed {pct(r.model_predicted)}</small>
+                <small>won, model said {pct(r.model_predicted)}</small>
               </span>
               <span className="fig">
                 <b>{r.picks.toLocaleString()}</b>
-                <small>graded</small>
+                <small>picks settled</small>
               </span>
             </div>
           );

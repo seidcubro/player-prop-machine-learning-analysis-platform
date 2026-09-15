@@ -117,6 +117,21 @@ def normalize_team(name: str) -> str:
 # how a board of backup running backs at +800 came to be presented as the best
 # available value.
 #
+# Since measured, and the margin is not the real reason. That 37% is the sum of
+# every price a book posts across a slate, which is the right way to read a
+# market where you pick one scorer from many and the wrong way to read a single
+# yes-or-no bet. Taking the best of the three books per player, implied
+# probability came to 0.2086 against 0.2073 that actually scored, on 328 player
+# games: a house margin of roughly a tenth of a point, not thirty-seven.
+#
+# The reason to withhold it is simpler and worse. Scored against the same 278
+# player games, the market's own prices rank scorers better than this model
+# does, AUC 0.769 against 0.758 and log loss 0.4416 against 0.4595, and betting
+# where the model claims a two point edge returned -25% over 57 bets. The
+# market is not merely expensive here, it is better informed. A model zoo was
+# run over this market and every family lands within a hundredth of the same
+# AUC, so that gap is not a modelling choice waiting to be made.
+#
 # The rate model itself is sound and stays on the projections page, where it
 # ranks Derrick Henry at 1.10 and Jahmyr Gibbs at 0.99 and agrees with the
 # devigged market. What is withdrawn is the claim that any of it is a bet.
