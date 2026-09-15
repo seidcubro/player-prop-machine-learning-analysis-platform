@@ -372,6 +372,26 @@ def check_projection_coverage(engine):
     else:
         ok("prediction intervals are ordered")
 
+    # Nobody who cannot take the field.
+    #
+    # A quarter of the projection table was once players on reserve, PUP or
+    # released. A.J. Brown carried a 41.8 yard receiving projection while on
+    # injured reserve, and nothing flagged it: he had no 2026 injury report row
+    # to catch, because a player already on reserve stops appearing on the
+    # weekly report. players.status is the only thing that knows.
+    unavailable = pd.read_sql(text("""
+        SELECT p.status, count(DISTINCT pr.player_name) AS players
+        FROM player_projections pr
+        JOIN players p ON p.external_id = pr.player_id
+        WHERE p.status NOT IN ('ACT', 'DEV')
+        GROUP BY p.status ORDER BY 2 DESC
+    """), engine)
+    if len(unavailable):
+        detail = ", ".join(f"{r.players} {r.status}" for r in unavailable.itertuples())
+        fail(f"projections exist for players who are not on an active roster: {detail}")
+    else:
+        ok("every projected player is on an active roster")
+
 
 def check_quantile_calibration(engine):
     """Do the published probabilities match what actually happened?

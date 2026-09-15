@@ -976,6 +976,15 @@ def main():
             JOIN players p
               ON pmf.player_id = p.external_id
             WHERE pmf.lookback = 5
+              -- Never price a player who is not on an active roster.
+              --
+              -- The injury_out check below catches anyone this week's report
+              -- lists as out, but a player already on reserve has no current
+              -- report row to catch: A.J. Brown sat on injured reserve with no
+              -- 2026 injury entry at all, and the only thing marking him
+              -- unavailable was players.status. See build_projections.py for
+              -- why DEV is kept and everything else is not.
+              AND p.status IN ('ACT', 'DEV')
             """
         ),
         engine,

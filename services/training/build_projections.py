@@ -144,12 +144,27 @@ def slate(engine) -> pd.DataFrame:
                    lf.aux_mean, lf.aux_trend, lf.recs_mean, lf.recs_trend,
                    lf.extra_features
             FROM players p
+            -- Only players who can actually take the field.
+            --
+            -- `players.status` is the roster designation and it is current:
+            -- 1,108 ACT players recorded a touch in Week 1, 8 practice squad
+            -- elevations did, and exactly one RES did, who was placed on
+            -- reserve after the game. Without this filter a quarter of the
+            -- projection table was people who cannot play. A.J. Brown was
+            -- carrying a 41.8 yard receiving projection and a spot on the
+            -- board's own depth listing while on injured reserve, and eight
+            -- released players had a full slate of numbers.
+            --
+            -- DEV is kept because a practice squad player can be elevated on
+            -- game day and some are. Everything else, reserve, PUP, released,
+            -- suspended, retired, exempt, is somebody who will not be there.
             JOIN current_depth cd ON cd.player_id = p.external_id
             JOIN upcoming u ON (u.home_team = p.team OR u.away_team = p.team)
             JOIN prop_markets m2 ON p.position = ANY(m2.eligible_positions)
             JOIN latest_feat lf
               ON lf.player_id = p.external_id AND lf.market_code = m2.code
             WHERE p.position IN ('QB', 'RB', 'WR', 'TE', 'FB')
+              AND p.status IN ('ACT', 'DEV')
         """),
         engine,
         params={"days": DAYS_AHEAD},
