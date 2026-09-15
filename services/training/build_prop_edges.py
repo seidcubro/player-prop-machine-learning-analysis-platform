@@ -419,7 +419,12 @@ def apply_current_context(
     # predicted rather than to whatever game the historical row described.
     last_played = row_features.get("_last_game_date")
     if last_played is not None:
-        stale_days = (event_date - last_played).days
+        # Never negative. A window cannot end after the game it is predicting,
+        # and a negative staleness is a number the model has never seen in
+        # training, so it would extrapolate off the end of the feature. The
+        # builder's own candidate filter already prevents it; this is here so a
+        # caller that skips that filter cannot produce one either.
+        stale_days = max(0, (event_date - last_played).days)
         put("days_since_last_game", stale_days)
         # These are derived from the two values above, so they have to be
         # recomputed rather than inherited from the stored row.
