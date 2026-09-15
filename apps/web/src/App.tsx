@@ -16,6 +16,7 @@
 import type { ReactElement } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import Logo from "./components/Logo";
+import { asPct, useHeadlineRecord } from "./lib/headline-record";
 
 type Item = { to: string; label: string; icon: ReactElement; end?: boolean };
 
@@ -89,6 +90,8 @@ const NAV: Item[] = [
 ];
 
 export default function App() {
+  // The two figures the disclaimer quotes about the model's own accuracy.
+  const rec = useHeadlineRecord();
   return (
     <div className="ps-shell">
       {/*
@@ -158,9 +161,18 @@ export default function App() {
             <b>PriorLine is a research tool, not a tip sheet.</b> Every number
             here is a model estimate against a sportsbook&rsquo;s price. Nothing
             on this site is a prediction, a guarantee, or advice to place a bet,
-            and no outcome is promised. The model is wrong often: it has hit{" "}
-            <b>52.7%</b> of its graded picks while claiming 62.5%, and whole
-            tiers of it have lost money. The{" "}
+            and no outcome is promised. The model is wrong often.{" "}
+            {/* Read from the record, not typed in. See lib/headline-record. */}
+            {rec ? (
+              <>
+                It has hit <b>{asPct(rec.hit)}</b> of its graded picks while
+                claiming {asPct(rec.claimed)}, and whole tiers of it have lost
+                money.
+              </>
+            ) : (
+              <>Whole tiers of it have lost money.</>
+            )}{" "}
+            The{" "}
             <Link to="/record">track record</Link> shows all of it, including
             the parts that do not flatter it.
           </p>

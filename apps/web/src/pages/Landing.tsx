@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Logo from "../components/Logo";
+import { asPct, countWord, useHeadlineRecord } from "../lib/headline-record";
 import {
   fetchEdgesSummary,
   fetchSeasonRecord,
@@ -35,6 +36,7 @@ export default function Landing() {
   const [tiers, setTiers] = useState<TierRecord[] | null>(null);
   const [seasons, setSeasons] = useState<SeasonRecord[] | null>(null);
   const [summary, setSummary] = useState<EdgesSummary | null>(null);
+  const rec = useHeadlineRecord();
 
   useEffect(() => {
     let dead = false;
@@ -209,11 +211,21 @@ export default function Landing() {
         <h2>What it is not</h2>
         <p>
           It is not a tip sheet and it does not promise anything. The model is
-          wrong often: across every graded pick it has hit{" "}
-          <b>52.7%</b> while claiming 62.5%, and three of its four tiers have
-          lost money. All of that is on the{" "}
-          <Link to="/record">track record</Link>, because a record that only
-          showed the good weeks would not be a record.
+          wrong often.{" "}
+          {/* Fetched, like every other number on this page. These two were
+              typed in, which made them correct until the next grading run and
+              a false claim after it. */}
+          {rec ? (
+            <>
+              Across every graded pick it has hit <b>{asPct(rec.hit)}</b> while
+              claiming {asPct(rec.claimed)}, and {countWord(rec.losing)} of its{" "}
+              {countWord(rec.tiers)} tiers have lost money.{" "}
+            </>
+          ) : (
+            <>Whole tiers of it have lost money. </>
+          )}
+          All of that is on the <Link to="/record">track record</Link>, because
+          a record that only showed the good weeks would not be a record.
         </p>
         {/* Deliberately not the "use your own judgment" paragraph. The
             site-wide disclaimer renders immediately under this section and
