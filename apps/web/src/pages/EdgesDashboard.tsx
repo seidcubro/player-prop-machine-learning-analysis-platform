@@ -655,7 +655,11 @@ export default function EdgesDashboard() {
              sends them hunting through filters that were never the issue. */
           <div className="ps-empty">
             {allTiersTotal === 0
-              ? cov && cov.games_upcoming > 0
+              ? cov && cov.games_in_progress > 0
+                ? `Tonight's board is done. ${cov.games_in_progress} game${
+                    cov.games_in_progress === 1 ? " is" : "s are"
+                  } under way, and picks come down at kickoff so nothing here is stale. The next slate is priced as it approaches.`
+                : cov && cov.games_upcoming > 0
                 ? `No prices yet. ${cov.games_upcoming} game${
                     cov.games_upcoming === 1 ? "" : "s"
                   } scheduled, none priced. Lines are bought close to kickoff, so the board fills in as each game approaches.`

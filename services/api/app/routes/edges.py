@@ -474,7 +474,19 @@ def edges_summary(db: Session = Depends(get_db)):
                     AND p.player_name NOT ILIKE '%Defense%'
                     AND p.player_name NOT ILIKE '%D/ST%'
                   GROUP BY p.player_name
-               ) q) AS players_with_market
+               ) q) AS players_with_market,
+              -- Priced games that have already kicked off.
+              --
+              -- The board only serves games that have not started, so the
+              -- moment the last game of a slate kicks off the table empties.
+              -- Without this the page reports "no prices yet", which is the
+              -- opposite of what happened: the prices were bought, the game is
+              -- being played, and the next one is days away.
+              (SELECT COUNT(DISTINCT p.provider_event_id)
+                 FROM odds_player_props p
+                 JOIN odds_events e ON e.provider_event_id = p.provider_event_id
+                WHERE e.commence_time < NOW()
+                  AND e.commence_time > NOW() - INTERVAL '6 hours') AS games_in_progress
             """
         )
     ).mappings().first()

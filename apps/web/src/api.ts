@@ -178,6 +178,8 @@ export type EdgeCoverage = {
   players_priced: number;
   /** Of those, how many carry a market this site publishes. */
   players_with_market: number;
+  /** Priced games that have kicked off, so the board has emptied. */
+  games_in_progress: number;
 };
 
 export type EdgesSummary = {
