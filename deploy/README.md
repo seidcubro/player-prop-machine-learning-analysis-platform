@@ -51,6 +51,10 @@ sysctl -w vm.swappiness=10
 echo 'vm.swappiness=10' >> /etc/sysctl.conf
 ```
 
+The repository is public, so the server clones it with no credentials. Push
+before you clone: the box builds from GitHub, not from the laptop, so anything
+uncommitted is not on it.
+
 ```bash
 # on the server, as root
 adduser --disabled-password --gecos "" priorline
@@ -142,11 +146,17 @@ sh deploy/migrate_db.sh restore priorline@your.server.ip
 About 55MB compressed. The script prints row counts afterwards so a half
 restore is obvious rather than discovered a week later.
 
-Model artifacts are 82MB and are not in git:
+Model artifacts are 83MB and are not in git. Copy them **before** the first
+`compose up`: the API mounts that directory, and Docker creates it owned by
+root if it is missing, which then refuses the copy.
 
 ```bash
-rsync -av services/training/artifacts/ priorline@your.server.ip:/opt/priorline/services/training/artifacts/
+scp -r services/training/artifacts/. priorline@your.server.ip:/opt/priorline/services/training/artifacts/
 ```
+
+`rsync` is the better tool for this and is not installed with Git for Windows,
+which is where this gets run from, so `scp -r` it is. It is a one-time copy and
+the weekly retrain writes new artifacts on the server from then on.
 
 ## The schedule
 
