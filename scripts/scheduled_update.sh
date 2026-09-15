@@ -165,7 +165,16 @@ if [ "$MODE" = "--early" ]; then
         AND NOT EXISTS (
           SELECT 1 FROM odds_snapshots s
            WHERE s.provider_event_id = e.provider_event_id
-             AND s.observed_at > NOW() - make_interval(hours => ${EARLY_RECHECK_H:-20}));")
+             AND s.observed_at > NOW() - make_interval(hours => ${EARLY_RECHECK_H:-20})
+             -- A touchdown-only response does not count as bought.
+             --
+             -- Sportsbooks post the anytime touchdown market days before they
+             -- post receptions or yardage. Sunday's thirteen games, fetched on
+             -- the Tuesday, came back with that one market and nothing else,
+             -- and this site does not publish it. Treating those games as
+             -- priced would leave them alone until the window expired and the
+             -- board would stay empty through the week for no reason.
+             AND s.market_key <> 'player_anytime_td');")
   unpriced=$(printf '%s' "$unpriced" | tr -d '[:space:]')
 
   if [ "${unpriced:-0}" -eq 0 ]; then

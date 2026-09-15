@@ -43,12 +43,35 @@ DATABASE_URL = os.getenv(
 # the map that includes them. One definition, in odds_markets.py.
 MARKET_MAP = ALL_ODDS_TO_MARKET
 
+# Market code to the column that actually holds the result.
+#
+# The CASE was built straight from ALL_ODDS_TO_MARKET, which maps an odds key to
+# this project's market code and not to a column, so it emitted `g.rush_yds`
+# where the table has `rushing_yards`. The query raised UndefinedColumn every
+# time, meaning this study has never once run and nothing it concluded was ever
+# computed.
+STAT_COL = {
+    "pass_att": "attempts",
+    "pass_completions": "completions",
+    "pass_yds": "passing_yards",
+    "pass_td": "passing_tds",
+    "rush_att": "carries",
+    "rush_yds": "rushing_yards",
+    "rush_td": "rushing_tds",
+    "recs": "receptions",
+    "rec_yds": "receiving_yards",
+    "rec_td": "receiving_tds",
+    "any_td": "(COALESCE(g.receiving_tds, 0) + COALESCE(g.rushing_tds, 0))",
+}
+
 
 def main():
     engine = create_engine(DATABASE_URL, future=True)
 
     stat_case = "\n".join(
-        f"            WHEN b.market_key = '{k}' THEN g.{v}" for k, v in MARKET_MAP.items()
+        f"            WHEN b.market_key = '{k}' THEN "
+        + (STAT_COL[v] if STAT_COL[v].startswith("(") else f"g.{STAT_COL[v]}")
+        for k, v in MARKET_MAP.items() if v in STAT_COL
     )
 
     df = pd.read_sql(

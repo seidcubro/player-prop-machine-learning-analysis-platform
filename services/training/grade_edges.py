@@ -152,8 +152,19 @@ JOIN LATERAL (
 ) g ON TRUE
 WHERE e.commence_time IS NOT NULL
   AND g.actual IS NOT NULL
+-- Keep the row the site actually shows.
+--
+-- This kept whichever book gave the biggest raw edge, while the board and the
+-- API surface the best expected value, which is a different row whenever the
+-- books disagree on price. So the record was grading a pick nobody was shown:
+-- on 300 graded live picks the stored price was the best available only 74% of
+-- the time, leaving 4.6 cents on average against a board that had already found
+-- the better number. The record has to describe the product.
+--
+-- Same ordering as routes/edges.py, including best_bet first, so a tie between
+-- two books breaks the same way in both places.
 ORDER BY g.player_id, g.game_date, e.market_code,
-         abs(e.projection - e.line) DESC, e.id
+         e.best_bet DESC, e.expected_value DESC NULLS LAST, e.id
 ON CONFLICT (player_id, game_date, market_code) DO UPDATE SET
     edge_id   = EXCLUDED.edge_id,
     line      = EXCLUDED.line,

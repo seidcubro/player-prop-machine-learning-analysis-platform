@@ -91,6 +91,36 @@ def main():
     df["move"] = df["close_line"] - df["open_line"]
     print(f"{len(df)} props with an open and a close\n")
 
+    # Say how many of those are one observation wearing two hats.
+    #
+    # A prop seen once has its single price as both the open and the close, so
+    # the move is zero by construction and every number below is diluted toward
+    # "nothing happens". 90.6% of the archive was in that state when this was
+    # written, which made closing line value, the one measurement that can say
+    # whether these picks find value the market later agrees with, report 4.1%
+    # of lines moving and mean nothing at all. It reads as a finding about the
+    # market. It is a finding about the sampling.
+    #
+    # --early plus --closing is what fixes it: a price bought days out and the
+    # same prop bought again before kickoff is a genuine pair.
+    pairs = pd.read_sql(text("""
+        SELECT count(*) FILTER (WHERE snaps > 1) AS real_pairs,
+               count(*) AS total
+        FROM (SELECT count(DISTINCT observed_at) AS snaps
+              FROM odds_snapshots
+              GROUP BY provider_event_id, player_name, market_key, bookmaker_key) q
+    """), engine).iloc[0]
+    share = float(pairs["real_pairs"]) / max(int(pairs["total"]), 1)
+    print(f"  observed more than once: {int(pairs['real_pairs'])} of "
+          f"{int(pairs['total'])} props ({share:.1%})")
+    if share < 0.25:
+        print("  WARNING: most props were seen exactly once, so their open and")
+        print("  close are the same observation and every figure below is")
+        print("  measuring the sampling rather than the market. Run --early to")
+        print("  buy a slate days out and --closing before kickoff, and this")
+        print("  becomes a real measurement.")
+    print()
+
     print("=== how much do these lines actually move? ===")
     print(f"  moved at all : {(df['move'].abs() > 0).mean():.1%}")
     print(f"  mean |move|  : {df['move'].abs().mean():.2f}")
