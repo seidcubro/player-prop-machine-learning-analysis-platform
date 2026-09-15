@@ -146,7 +146,7 @@ export default function Landing() {
 
       <section className="how" aria-label="How it works">
         <h2>Three things, in order</h2>
-        <ol className="ps-balance">
+        <ol className="ps-balance is-prose">
           <li>
             <h3>Project the player</h3>
             <p>
@@ -215,11 +215,17 @@ export default function Landing() {
           <Link to="/record">track record</Link>, because a record that only
           showed the good weeks would not be a record.
         </p>
+        {/* Deliberately not the "use your own judgment" paragraph. The
+            site-wide disclaimer renders immediately under this section and
+            says exactly that, so writing it here too put the same three
+            sentences on screen twice inside one fold. This says the other
+            half: what the bar costs you on a normal day. */}
         <p>
-          It is built to be used with your own judgment, not instead of it. It
-          does not know a starter is being eased back from injury, that a team
-          has quietly changed how it uses a player, or what the wind did an hour
-          before kickoff. You bring that.
+          Most days it has nothing to say. Thirteen games can be priced and not
+          one of them clear the bar, and on those days the board says so rather
+          than finding you something to bet. That is the whole discipline of
+          it. The filtering is the tool&rsquo;s job; knowing the football is
+          still yours.
         </p>
         <div className="cta">
           <Link className="primary" to="/signals">
