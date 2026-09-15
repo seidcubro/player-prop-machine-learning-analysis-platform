@@ -50,7 +50,7 @@ const MARKET_STAT: Record<string, keyof PlayerGame> = {
   rec_yds: "receiving_yards",
   recs: "receptions",
   rush_yds: "rushing_yards",
-  rush_att: "rush_attempts",
+  rush_att: "carries",
   pass_yds: "passing_yards",
   pass_td: "passing_tds",
 };

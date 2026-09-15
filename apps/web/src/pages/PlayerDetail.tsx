@@ -52,7 +52,7 @@ function statColumns(
   }
   if (pos === "RB" || pos === "FB") {
     return [
-      { key: "rush_attempts", label: "Att" },
+      { key: "carries", label: "Att" },
       { key: "rushing_yards", label: "Rush Yds" },
       { key: "receptions", label: "Rec" },
       { key: "receiving_yards", label: "Rec Yds" },
@@ -61,7 +61,7 @@ function statColumns(
   return [
     { key: "receptions", label: "Rec" },
     { key: "receiving_yards", label: "Rec Yds" },
-    { key: "touchdowns", label: "TD" },
+    { key: "receiving_tds", label: "TD" },
   ];
 }
 
@@ -169,7 +169,7 @@ export default function PlayerDetail() {
           <div className="ps-empty">No recent games on record.</div>
         ) : (
           <div className="ps-tablewrap">
-            <table className="ps-table">
+            <table className="ps-table is-matrix">
               <caption className="sr-only">Recent Game Log</caption>
               <thead>
                 <tr>

@@ -73,17 +73,31 @@ export type Player = {
   rookie_year: number | null;
 };
 
+/*
+ * Field for field, what `/players/{id}/games` actually returns.
+ *
+ * It did not used to be. This carried `rush_attempts` and `touchdowns`, and
+ * the endpoint has never sent either: carries come back as `carries` and
+ * touchdowns are split by how they were scored. Both names type-checked
+ * because every field here is optional, so the game log quietly printed a dash
+ * in the Att column on every running back's page and in the TD column on every
+ * receiver's, and the rush-attempts sparkline drew nothing at all.
+ */
 export type PlayerGame = {
   player_id: number;
   game_date: string;
   opponent: string;
+  targets?: number | null;
   receptions?: number | null;
   receiving_yards?: number | null;
-  rush_attempts?: number | null;
+  receiving_tds?: number | null;
+  carries?: number | null;
   rushing_yards?: number | null;
+  rushing_tds?: number | null;
+  pass_attempts?: number | null;
+  completions?: number | null;
   passing_yards?: number | null;
   passing_tds?: number | null;
-  touchdowns?: number | null;
 };
 
 
