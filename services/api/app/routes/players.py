@@ -168,8 +168,15 @@ def list_players(
                 GROUP BY player_id
             ) lg ON lg.player_id = players.external_id
             {where_sql}
-            ORDER BY lg.last_game DESC NULLS LAST,
-            last_name NULLS LAST, first_name NULLS LAST, name NULLS LAST
+            -- Alphabetical, because this is a directory.
+            --
+            -- It used to lead with lg.last_game DESC, so whichever two teams
+            -- played most recently occupied the top of the list in their own
+            -- alphabetical run, and the page appeared to start at the Broncos
+            -- and Chiefs before restarting at A. Recency is a sensible way to
+            -- rank a feed and a confusing way to sort a phone book. The
+            -- active-only filter already handles relevance.
+            ORDER BY last_name NULLS LAST, first_name NULLS LAST, name NULLS LAST
             LIMIT :limit OFFSET :offset
             """
         ),
