@@ -33,9 +33,10 @@ import {
 // Medium and small are still computed, stored and graded, and the tier table on
 // the track record page needs them there to show why they are not published:
 // across 7,125 graded picks medium returned -5.1% and small -4.3%, against
-// elite's +4.0%. Offering them as filters here would just be four options, two
-// of which always come back empty.
-const TIERS: EdgeTier[] = ["elite", "strong"];
+// elite's +4.0%, and on live Week 1 picks strong returned -16.2% against
+// elite's +1.1%. Offering them as filters here would just be options that
+// always come back empty.
+const TIERS: EdgeTier[] = ["elite"];
 const PAGE_SIZE = 50;
 
 function fmtGameDate(e: PropEdge): string {
@@ -366,33 +367,30 @@ export default function EdgesDashboard() {
           <div className="sub">
             {showingFiltered
               ? `${total} match your filters`
-              : cov
-                ? `${cov.games_priced} of ${cov.games_upcoming} games priced`
-                : "across the slate"}
+              : "elite only, the one tier that has paid"}
           </div>
         </button>
 
-        <button
-          type="button"
-          className="ps-stat"
-          aria-pressed={exactTier === "elite"}
-          onClick={() => setExactTier(exactTier === "elite" ? "" : "elite")}
-        >
-          <div className="label">Elite</div>
-          <div className="value green">{statValue(summary?.by_tier.elite, summary === null)}</div>
-          <div className="sub">highest expected value</div>
-        </button>
+        {/*
+          Games priced, where Elite and Strong used to be.
 
-        <button
-          type="button"
-          className="ps-stat"
-          aria-pressed={exactTier === "strong"}
-          onClick={() => setExactTier(exactTier === "strong" ? "" : "strong")}
-        >
-          <div className="label">Strong</div>
-          <div className="value">{statValue(summary?.by_tier.strong, summary === null)}</div>
-          <div className="sub">next tier down</div>
-        </button>
+          Elite is now the only tier the board publishes, so an Elite card
+          counted the same props as Total Signals beside it and a Strong card
+          read 0 on every slate of the season. What a reader actually needs in
+          that space is the denominator: a thin board on a Tuesday is the
+          sportsbooks not having posted yet, not the model going quiet.
+        */}
+        <div className="ps-stat">
+          <div className="label">Games Priced</div>
+          <div className="value">
+            {cov ? cov.games_priced : statValue(null, summary === null)}
+          </div>
+          <div className="sub">
+            {cov
+              ? `of ${cov.games_upcoming} on the slate`
+              : "waiting on the odds feed"}
+          </div>
+        </div>
 
         <button
           type="button"

@@ -94,12 +94,20 @@ _TIER_ORDER = ["small", "medium", "strong", "elite"]
 #     small    1,225 picks   -4.3%
 #
 # Publishing a tier that returns -5% is not a smaller edge, it is a losing bet
-# with a label on it. Elite is the only tier that has earned its place; strong
-# is kept because it is roughly break-even and gives the board enough rows to be
-# useful, and it is the first thing to drop if that stops being true.
+# with a label on it.
+#
+# Strong was kept at first on the backtest's -0.3%, which is close enough to
+# break-even to argue about. Week 1 settled it. On 146 published live picks:
+#
+#     elite    102 picks   52.0% hit   +1.1% ROI
+#     strong    44 picks   45.5% hit  -16.2% ROI
+#
+# Both sources now agree that elite is the only tier that has earned its place,
+# and depth is not a reason to keep the others: one Sunday slate produced 81
+# elite picks on its own.
 PUBLISHED_TIERS = [
     t.strip() for t in
-    os.getenv("PUBLISHED_TIERS", "elite,strong").split(",") if t.strip()
+    os.getenv("PUBLISHED_TIERS", "elite").split(",") if t.strip()
 ]
 
 
