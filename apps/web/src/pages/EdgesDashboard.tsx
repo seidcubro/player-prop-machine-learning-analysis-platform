@@ -282,21 +282,21 @@ export default function EdgesDashboard() {
   return (
     <>
       <PageTitle lead="Today&rsquo;s" accent="Signals" />
+      {/*
+        One sentence, where there used to be two paragraphs.
+
+        The second of them defined Model and Edge column by column, which is
+        word for word what the glossary directly beneath it says, and the
+        glossary is a better place for it: collapsed once you know the terms,
+        and one click away when you do not. Between the two paragraphs and the
+        coverage note, a stranger met 186 words of prose before the first
+        number, on a page whose whole job is to show numbers.
+      */}
       <p className="ps-tagline">
-        Sportsbook lines against the model&rsquo;s own number. <strong>EV</strong>{" "}
-        is the column that matters: the model&rsquo;s probability minus the
-        break-even the price demands. Anything at or below zero is a bet the
-        price already covers.
-      </p>
-      <p className="ps-tagline">
-        <strong>Model</strong> is the median outcome, not the average, because
-        the pick is chosen from the same distribution.{" "}
-        <strong>Edge</strong> is always the model&rsquo;s number minus the
-        book&rsquo;s. Green means the model sits above the line, which is why
-        the pick is the over; red means it sits below and the pick is the under.
-        <strong> EV</strong> then says whether the price makes that pick worth
-        taking.{" "}
-        <a href="/faq">How It Works</a>.
+        Sportsbook lines against the model&rsquo;s own number.{" "}
+        <strong>EV</strong> is the column that matters: anything at or below
+        zero is a bet the price already covers.{" "}
+        <Link to="/faq">How it works</Link>.
       </p>
 
       {/* Definitions sit above the board, collapsed. Terms like EV and
