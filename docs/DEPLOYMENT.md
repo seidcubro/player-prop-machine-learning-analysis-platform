@@ -90,9 +90,18 @@ timers in `deploy/systemd` run it:
 | timer | mode | when | credits |
 |---|---|---|---|
 | closing | `--closing` | hourly | 9 per game, only when a slate is inside 90 minutes |
+| early | `--early` | Friday 09:00 | 9 per unpriced game inside the window |
 | daily | `--daily` | 08:00 | about 145 |
 | board | `--board` | 17:00 | free |
 | weekly | `--weekly` | Tuesday 01:00 | free |
+
+`early` is the one that is easy to leave switched off, and it is the reason
+closing line value has been measuring nothing. CLV is the difference between the
+price a pick was taken at and the price it closed at, and 90% of props in the
+database have exactly one snapshot against them, so open and close are the same
+row by construction and every pick scores zero. Buying on Friday and capturing
+hourly through kickoff is what produces two ends to measure between. Enable it
+with the rest of them.
 
 Every timer sets `Persistent=true`, which is the part that matters. A run the
 machine was down for happens when it comes back instead of being skipped
@@ -108,11 +117,20 @@ Both scripts end with `audit_freshness.py`, which exits non-zero if anything is
 stale or inconsistent. Don't ignore it. It exists because the dashboard once
 published 260 edges on games from the 2023 season and nothing noticed.
 
-## What not to deploy yet
+## What the site claims, and what it does not
 
-The edges page. As of Week 1 2026 the projections are sound but the win
-probabilities read about 10 points high on the under side, because no calibration
-can anticipate a season that hasn't been played. It sorts itself out once the
-weekly retrain has current games in its window, around Week 4 or 5.
+This section used to say hold the edges page back, because in Week 1 the win
+probabilities read about ten points high on the under side and no calibration
+can anticipate a season nobody has played yet. That gap is still there and still
+visible: the live 2026 picks claim 58% and have hit 48%.
 
-Ship the projections. Hold the edges until the numbers earn it.
+What changed is what the site does about it. Only the elite tier is published,
+which is the one tier that has made money in every season it has run, and the
+claimed figure sits beside the actual one on the track record and on the landing
+page rather than being quietly omitted. A reader is told the model is wrong
+often, by how much, and which tiers lost money.
+
+So it ships. The thing to keep watching is the weekly retrain pulling current
+games into the calibration window, which is what closes the gap, around Week 4
+or 5. If the published tier stops beating its break-even, the honest move is to
+publish nothing rather than to widen the filter until something qualifies.

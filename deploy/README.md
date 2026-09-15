@@ -153,8 +153,9 @@ rsync -av services/training/artifacts/ priorline@your.server.ip:/opt/priorline/s
 ```bash
 cp deploy/systemd/* /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now priorline@closing.timer priorline@daily.timer \
-                       priorline@board.timer priorline@weekly.timer
+systemctl enable --now priorline@closing.timer priorline@early.timer \
+                       priorline@daily.timer priorline@board.timer \
+                       priorline@weekly.timer
 systemctl list-timers 'priorline@*'
 ```
 
@@ -162,6 +163,14 @@ systemctl list-timers 'priorline@*'
 missing: a run the machine was down for happens when it comes back rather than
 being skipped in silence. That is why the laptop captured no closing lines for
 Week 1.
+
+Enable `early` along with the rest. It buys Friday morning, and it is the other
+half of the closing capture: a pick with one price snapshot against it has the
+same open and close by definition, which is why closing line value has been
+reading zero across the board. Friday open plus hourly through kickoff gives it
+two numbers to compare. It spends credits without needing an `ODDS=1` file,
+because buying prices is the entire purpose of that mode, and it buys only the
+games inside its window that have no prices yet.
 
 ## Frontend
 
