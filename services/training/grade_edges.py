@@ -94,7 +94,15 @@ SELECT DISTINCT ON (g.player_id, g.game_date, e.market_code)
     e.best_bet,
     EXTRACT(YEAR FROM g.game_date)::int
         - CASE WHEN EXTRACT(MONTH FROM g.game_date) < 3 THEN 1 ELSE 0 END
-FROM prop_edges e
+-- History, not the live table.
+--
+-- prop_edges is truncated on every build, and a stat line arrives a day after
+-- kickoff, so grading the live table can only ever catch a game whose results
+-- happened to land before the next rebuild. Monday night 2026-09-14 did not:
+-- 24 published picks were wiped before their own box scores were ingested.
+-- prop_edges_history keeps every board, so a pick stays gradeable for as long
+-- as it takes the data to show up.
+FROM prop_edges_history e
 JOIN LATERAL (
     SELECT
         pgs.player_id,

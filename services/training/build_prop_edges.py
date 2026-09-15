@@ -1692,6 +1692,33 @@ def main():
         conn.execute(text("TRUNCATE prop_edges"))
     out.to_sql("prop_edges", engine, if_exists="append", index=False, method="multi", chunksize=500)
 
+    # Keep a copy that the next rebuild cannot erase.
+    #
+    # Grading needs the board to still exist when the stat line shows up, and
+    # nflverse publishes a day late. The Monday night board of 2026-09-14 was
+    # rebuilt on the Tuesday morning, hours before its own results were
+    # ingested, so 24 published picks could never be graded and are missing from
+    # the track record entirely. The record is the product's whole claim; it
+    # cannot depend on a table that gets truncated every run.
+    #
+    # Rows are refreshed while the game is upcoming and frozen once it starts,
+    # so history holds the last thing published before kickoff rather than a
+    # number revised afterwards.
+    with engine.begin() as conn:
+        cols = ", ".join(f'"{c}"' for c in out.columns if c != "id")
+        updates = ", ".join(
+            f'"{c}" = EXCLUDED."{c}"' for c in out.columns
+            if c not in ("id", "player_name", "market_code", "bookmaker_key",
+                         "commence_time"))
+        n = conn.execute(text(f"""
+            INSERT INTO prop_edges_history ({cols}, archived_at)
+            SELECT {cols}, NOW() FROM prop_edges
+            ON CONFLICT (player_name, market_code, bookmaker_key, commence_time)
+            DO UPDATE SET {updates}, archived_at = NOW()
+            WHERE prop_edges_history.commence_time > NOW()
+        """)).rowcount
+    print(f"archived {n} board rows to prop_edges_history")
+
     print(f"PROP EDGES BUILT: {len(out)} rows")
 
 
