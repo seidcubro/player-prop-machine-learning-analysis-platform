@@ -1004,6 +1004,8 @@ def check_corrections_present(engine):
         "probability_calibrator.joblib": "win probabilities ship uncorrected",
         "spread_calibrator.json": "projections ship without the level correction",
         "interval_calibrator.json": "ranges ship without the interval correction",
+        "median_anchor.json": "medians come from the quantile ladder alone, which "
+                              "cannot extrapolate past its training leaves",
     }
     missing = [(n, why) for n, why in wanted.items()
                if not (ARTIFACTS / n).exists()]

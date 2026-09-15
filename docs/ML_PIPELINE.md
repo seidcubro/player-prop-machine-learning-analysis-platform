@@ -186,6 +186,59 @@ contains no pick above a 2.0 projected rate and cannot adjudicate the case that
 prompted the change. The argument is internal consistency plus the fact that the
 point model is the validated one.
 
+### 5f. The median is anchored to the point projection where that helps
+
+The point model and the quantile models are different families and they behave
+differently at the edge of the data. Most markets use a linear point model
+(`enet_v2` for rush_yds), which extrapolates. The ladder is a
+`GradientBoostingRegressor` per level, and a tree cannot predict past the leaves
+it was fitted on, so it saturates.
+
+Jahmyr Gibbs before a Thursday game, a week after taking 29 carries while his
+backups took two each:
+
+| | |
+|---|---|
+| point projection | 91.0 |
+| quantile median | 73.7 |
+| ratio | 0.784 |
+| median ratio among backs at that projection | 0.932 |
+
+James Cook, projected 67.2 in the same game, had a quantile median of 69.0.
+Twenty four yards apart on the point model, two yards apart on the ladder. The
+board takes its side from the median, so the one back on the slate nobody else
+resembled was being priced like a committee back, and the row published as a
+strong best bet.
+
+The answer is not to publish the mean instead. On 430 graded picks in exactly
+this situation, a high projection with the two models straddling the line, the
+median picked the winning side 53.0% of the time and the mean 47.0%. The side
+rule is sound. The number feeding it was not.
+
+So `fit_median_anchor.py` measures the median of actual/projection per market
+and per projection band, and the published median is re-read as that fraction of
+the point projection. That distribution is stable where it matters: for rush_yds
+it runs 0.919, 0.940, 0.929 across the top three bands. Anchoring inherits the
+point model's extrapolation and leaves the rest of the ladder alone, clamped
+inside the row's own p25 and p75.
+
+Two things it does not do. It never touches the count markets, whose ladder is a
+Poisson already built around the point projection. And it never moves the median
+without moving the probability: `p_over` is read off the ladder, so the anchored
+median is written back into the ladder and the CDF re-read through it. The first
+version corrected only the median and produced a row reading "median 83.9, line
+88.5, edge -4.6" while still claiming the 57.4% win probability that belonged to
+a median of 73.7.
+
+A band ships only where the held-out coverage moves toward 0.50 or the side
+accuracy improves, and neither gets worse. Two `rec_yds` bands and the top
+`rush_yds` band qualify; everything else is left alone. The rush_yds band is
+fitted on 197 rows and validated on 88, which is thin, and it is the one to
+re-check first as the record grows.
+
+With it applied, Gibbs reads 83.9 against a line of 88.5 and no longer clears
+the expected-value bar, so the board does not publish him at all.
+
 ### 6. Evaluation
 
 `eval.py`. Time-ordered split, position filter from the database, bias check,

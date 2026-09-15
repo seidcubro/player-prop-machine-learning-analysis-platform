@@ -60,6 +60,9 @@ MIN_FIT = int(os.getenv("ANCHOR_MIN_FIT", "150"))
 MIN_TEST = int(os.getenv("ANCHOR_MIN_TEST", "80"))
 # A projection this small is mostly structural zeros, where a ratio means little.
 MIN_PROJECTION = float(os.getenv("ANCHOR_MIN_PROJECTION", "5"))
+# Markets whose ladder is a Poisson around the point projection. Kept in step
+# with build_prop_edges.COUNT_MARKETS.
+COUNT_MARKETS = {"pass_td", "rush_td", "rec_td", "any_td"}
 
 
 def main():
@@ -87,6 +90,16 @@ def main():
 
     out: dict = {}
     for market, g in df.groupby("market_code"):
+        # Never the count markets.
+        #
+        # Their ladder is a Poisson built to have the point projection as its
+        # mean, so the median and the point are already consistent by
+        # construction and there is nothing here for an anchor to fix. Moving
+        # one without the other is what put the board's median at 1.00 against
+        # the projections page's 1.45 on the same Mahomes row. The interval
+        # correction skips them for the same reason.
+        if market in COUNT_MARKETS:
+            continue
         g = g.copy()
         # Bands are cut on the fit rows only, so the holdout cannot inform them.
         fit_all = g[g["_d"] <= cut]

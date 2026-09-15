@@ -382,6 +382,15 @@ if [ "$MODE" != "--board" ]; then
   # Fitted on priced player-games, accepted one quantile level at a time.
   log "refit interval calibrator"
   $COMPOSE run --rm training python fit_interval_calibrator.py
+
+  # And the median anchor, which reads the median off the point projection in
+  # the bands where that was shown to help. The quantile models are trees and
+  # cannot predict past their training leaves, so on a player at the edge of
+  # the data their median lags a linear point model badly. Fitted per market
+  # and per projection band, accepted only where held-out coverage or side
+  # accuracy improves and neither gets worse.
+  log "refit median anchor"
+  $COMPOSE run --rm training python fit_median_anchor.py
 fi
 
 log "project every eligible player"
