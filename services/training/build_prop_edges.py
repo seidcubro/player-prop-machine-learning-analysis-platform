@@ -894,7 +894,14 @@ def main():
               -- Cleaning the table is worth doing separately; the builder
               -- should never have been able to price a finished game either
               -- way.
-              AND e.commence_time > NOW()
+              -- Cutoff is a parameter so a finished slate can be replayed.
+              --
+              -- This was a bare NOW(), which is right in production and makes
+              -- the builder impossible to question after kickoff: the moment a
+              -- game starts, every prop in it vanishes from the query and the
+              -- honest answer to "why was this player not on the board" becomes
+              -- unavailable exactly when someone thinks to ask.
+              AND e.commence_time > NOW() - make_interval(hours => (:lookback_hours)::int)
             GROUP BY
               p.provider_event_id,
               e.commence_time,
@@ -908,10 +915,34 @@ def main():
             """
         ),
         engine,
+        params={"lookback_hours": int(os.getenv("EDGE_LOOKBACK_HOURS", "0"))},
     )
 
     if odds.empty:
-        raise RuntimeError("No rows in odds_player_props")
+        # An empty slate is a state, not a failure.
+        #
+        # Between slates there is nothing upcoming with prices on it, because
+        # prices are bought close to kickoff. This used to raise, and
+        # scheduled_update.sh runs under `set -e`, so the Tuesday weekly run
+        # would retrain every market for an hour and then abort at the last
+        # step, skipping the closing-line-value step and the freshness audit
+        # behind it. The board being empty on a Tuesday is correct.
+        #
+        # The distinction that matters is whether prices exist at all. No
+        # upcoming priced game is routine; an odds table with nothing in it
+        # means a sync failed or a truncation ran, and that is worth stopping
+        # for. The existing board is left alone either way, since the API only
+        # serves games that have not kicked off and cannot show a stale pick.
+        total = pd.read_sql(
+            text("SELECT COUNT(*) AS n FROM odds_player_props"), engine
+        )["n"].iloc[0]
+        if int(total) == 0:
+            raise RuntimeError(
+                "odds_player_props is empty, which is a failed sync rather than "
+                "a quiet week. Not touching the board.")
+        print("no upcoming game has prices yet, so there is no board to build. "
+              f"{int(total)} prop rows are stored for games already played.")
+        return
 
     pmf = pd.read_sql(
         text(
