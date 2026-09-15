@@ -54,12 +54,29 @@ OUT = ARTIFACTS / "median_anchor.json"
 
 # Fraction of rows, oldest first, used to fit. The rest is the holdout.
 FIT_FRACTION = float(os.getenv("FIT_FRACTION", "0.70"))
-# Bands are quartiles of the point projection, so the ratio can vary with size.
-BANDS = int(os.getenv("ANCHOR_BANDS", "4"))
+# Bands are quantiles of the point projection, so the ratio can vary with size.
+#
+# The count adapts to how much data the market has rather than being a fixed
+# four. rush_att has 984 graded rows, which cut four ways and split 70/30 leaves
+# about 74 rows to score on against a floor of 80, so the market was silently
+# dropped and shipped with no anchor. Three bands over the same rows clears it.
+# Finer bands need more evidence, not less.
+MAX_BANDS = int(os.getenv("ANCHOR_BANDS", "4"))
+ROWS_PER_BAND = int(os.getenv("ANCHOR_ROWS_PER_BAND", "330"))
 MIN_FIT = int(os.getenv("ANCHOR_MIN_FIT", "150"))
 MIN_TEST = int(os.getenv("ANCHOR_MIN_TEST", "80"))
-# A projection this small is mostly structural zeros, where a ratio means little.
-MIN_PROJECTION = float(os.getenv("ANCHOR_MIN_PROJECTION", "5"))
+# The smallest projections are mostly structural zeros, where actual/projection
+# is meaningless, so they are dropped. As a share of each market rather than an
+# absolute number.
+#
+# This was a flat 5, which is a yards threshold quietly applied to counts. It
+# left 209 of 2,195 recs rows standing, because a receptions projection averages
+# 3.1, and cut a third of rush_att. Both markets were then too thin to fit and
+# shipped with no anchor at all, which is why a bell cow carrying 29 times in
+# Week 1 was published at a median of 16.3 carries against a mean of 20.3 when
+# real bell cow workloads run a median/mean of 0.97.
+MIN_PROJECTION_PCTL = float(os.getenv("ANCHOR_MIN_PCTL", "0.10"))
+MIN_PROJECTION_FLOOR = float(os.getenv("ANCHOR_MIN_FLOOR", "0.5"))
 # Markets whose ladder is a Poisson around the point projection. Kept in step
 # with build_prop_edges.COUNT_MARKETS.
 COUNT_MARKETS = {"pass_td", "rush_td", "rec_td", "any_td"}
@@ -79,7 +96,11 @@ def main():
         OUT.write_text("{}", encoding="utf-8")
         return
 
-    df = df[df["projection"] > MIN_PROJECTION].copy()
+    df = df.copy()
+    floors = (df.groupby("market_code")["projection"]
+                .quantile(MIN_PROJECTION_PCTL)
+                .clip(lower=MIN_PROJECTION_FLOOR))
+    df = df[df["projection"] > df["market_code"].map(floors)].copy()
     d = pd.to_datetime(df["game_date"])
     df = df.assign(_d=d).sort_values("_d").reset_index(drop=True)
     cut = df["_d"].quantile(FIT_FRACTION)
@@ -103,10 +124,11 @@ def main():
         g = g.copy()
         # Bands are cut on the fit rows only, so the holdout cannot inform them.
         fit_all = g[g["_d"] <= cut]
-        if len(fit_all) < MIN_FIT * BANDS / 2:
+        if len(fit_all) < MIN_FIT:
             continue
+        bands = max(2, min(MAX_BANDS, len(g) // ROWS_PER_BAND))
         edges = np.unique(np.quantile(
-            fit_all["projection"], np.linspace(0, 1, BANDS + 1)))
+            fit_all["projection"], np.linspace(0, 1, bands + 1)))
         if len(edges) < 3:
             continue
         edges[0], edges[-1] = -np.inf, np.inf
