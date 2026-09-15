@@ -79,6 +79,8 @@ MIN_ROWS = 300
 # holdout season being one sample of many. recs came through the honest refit at
 # a 0.9% gain off a single level; rec_yds came through at 32.9% off three.
 MIN_GAIN = float(os.getenv("MIN_INTERVAL_GAIN", "0.05"))
+# Share of rows, oldest first, used to fit. The rest is the holdout.
+FIT_FRACTION = float(os.getenv("FIT_FRACTION", "0.70"))
 
 
 def coverage(df: pd.DataFrame) -> dict:
@@ -122,18 +124,31 @@ def main():
 
     d = pd.to_datetime(df["game_date"])
     df["season"] = d.dt.year.where(d.dt.month >= 3, d.dt.year - 1)
-    counts = df.groupby("season").size()
-    eligible = counts[counts >= 0.5 * counts.median()]
-    holdout = int(eligible.index.max())
+    # Split by date, not by season.
+    #
+    # Holding out a whole season sounds cleaner and starves the fit. The odds
+    # history is lopsided: of 6,826 walk-forward rows, 5,532 are 2025 and the
+    # rest are spread over two earlier seasons. Fitting on "everything before
+    # 2025" left 66 to 354 rows per market against a 300 row minimum, so five
+    # markets of six could not be fitted at all and shipped uncorrected. Those
+    # are the ones whose published medians run 0.39 to 0.47 against a nominal
+    # 0.50, which is what makes almost every published pick an under.
+    #
+    # A date cut keeps the split walk-forward, which is the property that
+    # matters, and puts the bulk of the rows where they do some good.
+    df = df.assign(_d=d).sort_values("_d").reset_index(drop=True)
+    cut_at = df["_d"].quantile(FIT_FRACTION)
+    df["_fit"] = df["_d"] <= cut_at
 
-    print(f"{len(df)} priced rows, fitting below {holdout}, scoring on {holdout}\n")
+    print(f"{len(df)} priced rows, fitting on games up to {cut_at.date()}, "
+          f"scoring on everything after")
     print(f"{'market':<14}{'n fit':>7}{'n test':>7}"
           f"{'miscal raw':>12}{'miscal adj':>12}{'gain':>8}  verdict")
 
     out = {}
     for market, g in df.groupby("market_code"):
-        fit = g[g["season"] < holdout]
-        test = g[g["season"] == holdout]
+        fit = g[g["_fit"]]
+        test = g[~g["_fit"]]
         if len(fit) < MIN_ROWS or len(test) < 150:
             print(f"{market:<14}{len(fit):>7}{len(test):>7}"
                   f"{'-':>12}{'-':>12}{'-':>8}  too few rows")
@@ -229,7 +244,7 @@ def main():
         out[market] = {"levels": LEVELS, "read_at": final_read,
                        "corrected_levels": kept_levels,
                        "fitted_rows": int(len(fit)),
-                       "holdout_season": holdout,
+                       "holdout_after": str(cut_at.date()),
                        "holdout_gain": float(gain)}
 
     OUT.write_text(json.dumps(out, indent=2), encoding="utf-8")
