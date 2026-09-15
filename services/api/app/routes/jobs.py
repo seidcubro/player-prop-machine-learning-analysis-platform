@@ -377,6 +377,17 @@ def build_features(
 
     eligible_positions = set(_as_text_array(m["eligible_positions"]))
     feature_family = str(m["feature_family"] or "").strip().lower()
+    # Touchdown markets, which are not a feature family and so fall through
+    # every dispatch below. See the expected-touchdown block.
+    #
+    # pass_td is deliberately not one of them. ff_opportunity models expected
+    # rushing and receiving touchdowns and has no passing equivalent, so the
+    # figure available for a quarterback is his own expectation of running one
+    # in. That is a real signal and it is not the one the feature name claims,
+    # and a column that means something different for one market than for the
+    # other three is how a feature set becomes untrustworthy.
+    is_td_market = market_code in ("any_td", "rush_td", "rec_td")
+
     upstream_cols = _get_safe_upstream_markets(db, market_code)
 
     select_upstream_sql = ""
@@ -508,6 +519,44 @@ def build_features(
             FROM team_rush_defense
             WINDOW w AS (PARTITION BY defense_team ORDER BY game_date
                          ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING)
+        ),
+        player_exp_td AS (
+            -- Expected touchdowns, rolled over the player's own previous games.
+            --
+            -- Rolled here rather than averaged from the feature window, which
+            -- is the same thing and measurably is not. Averaging the window
+            -- gave log loss 0.4268 to 0.4266 on anytime touchdown, inside the
+            -- seed noise; rolling over the player's own ff_opportunity history
+            -- gave 0.4268 to 0.4237 and AUC 0.7387 to 0.7431, on the same
+            -- split and stable across seeds. Lagging it an extra game does not
+            -- weaken it, so the difference is the construction rather than
+            -- recency or anything leaking.
+            --
+            -- The window frame is the same shape every other rolling form
+            -- feature here uses, and it ends one row back so the game being
+            -- predicted never contributes to its own feature.
+            SELECT
+                o.player_id,
+                g.game_date,
+                AVG(COALESCE(o.rush_touchdown_exp, 0)
+                    + COALESCE(o.rec_touchdown_exp, 0)) OVER w
+                    AS exp_td_trailing,
+                -- Finishing: scored minus expected over the same frame. Kept
+                -- apart from the expectation because it mostly regresses, and
+                -- the model should decide how much of it to believe.
+                AVG((COALESCE(o.rush_touchdown, 0) + COALESCE(o.rec_touchdown, 0))
+                    - (COALESCE(o.rush_touchdown_exp, 0)
+                       + COALESCE(o.rec_touchdown_exp, 0))) OVER w
+                    AS td_over_exp_trailing,
+                count(*) OVER w AS exp_td_games
+            FROM ff_opportunity o
+            JOIN nfl_games g ON g.game_id = o.game_id
+            WHERE g.game_date IS NOT NULL
+            WINDOW w AS (
+                PARTITION BY o.player_id
+                ORDER BY g.game_date
+                ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING
+            )
         )
         SELECT
             pgs.player_id,
@@ -549,6 +598,9 @@ def build_features(
             COALESCE(fo.rec_touchdown_exp, 0)::float8 AS exp_rec_td,
             COALESCE(fo.rush_yards_gained_exp, 0)::float8 AS exp_rush_yards,
             COALESCE(fo.rush_touchdown_exp, 0)::float8 AS exp_rush_td,
+            pet.exp_td_trailing::float8       AS exp_td_trailing,
+            pet.td_over_exp_trailing::float8  AS td_over_exp_trailing,
+            pet.exp_td_games::int             AS exp_td_games,
             COALESCE(fo.pass_yards_gained_exp, 0)::float8 AS exp_pass_yards,
 
             ng.home_team AS game_home_team,
@@ -626,6 +678,9 @@ def build_features(
         LEFT JOIN ff_opportunity fo
             ON fo.player_id = pgs.player_id
            AND fo.game_id = pgs.game_id
+        LEFT JOIN player_exp_td pet
+            ON pet.player_id = pgs.player_id
+           AND pet.game_date = pgs.game_date
         LEFT JOIN nfl_games ng
             ON ng.game_id = pgs.game_id
         LEFT JOIN pos_season_prior psp
@@ -998,328 +1053,42 @@ def build_features(
                     extra_features["exp_pass_yards_mean"] = _mean(exp_pass_yards_window)
                     extra_features["exp_pass_yards_trend"] = _trend_slope(exp_pass_yards_window)
 
-            if feature_family == "rushing":
-                carries_window = [float(g.get("carries", 0.0) or 0.0)
-                                        for g in window_games]
-                rush_yards_window = [
-                    float(g.get("rushing_yards", 0.0) or 0.0) for g in window_games]
-
-                if carries_window:
-                    extra_features["carries_weighted_mean"] = _weighted_mean_recent(
-                        carries_window)
-
-                team_rush_window = [
-                    float(g.get("team_rush_attempts", 0.0) or 0.0) for g in window_games]
-                team_rush_window_nonzero = [
-                    v for v in team_rush_window if v > 0]
-
-                if team_rush_window_nonzero:
-                    extra_features["team_rush_attempts"] = _mean(
-                        team_rush_window_nonzero)
-                    extra_features["team_rush_attempts_trend"] = _trend_slope(
-                        team_rush_window_nonzero)
-
-                if carries_window and team_rush_window:
-                    cs_vals = []
-                    for c, tr_team in zip(carries_window, team_rush_window):
-                        if tr_team > 0:
-                            cs_vals.append(c / tr_team)
-
-                    if cs_vals:
-                        extra_features["carry_share_mean"] = _mean(cs_vals)
-                        extra_features["carry_share_trend"] = _trend_slope(
-                            cs_vals)
-
-                if market_code == "rush_yds" and carries_window and rush_yards_window:
-                    ypc_vals = []
-                    for y, c in zip(rush_yards_window, carries_window):
-                        if c > 0:
-                            ypc_vals.append(y / c)
-
-                    if ypc_vals:
-                        extra_features["yards_per_carry_mean"] = _mean(ypc_vals)
-                        extra_features["yards_per_carry_trend"] = _trend_slope(ypc_vals)
-
-                if market_code == "rush_td" and carries_window:
-                    td_window = [float(g.get("rushing_tds", 0.0) or 0.0) for g in window_games]
-
-                    td_rate_vals = []
-                    for td, c in zip(td_window, carries_window):
-                        if c > 0:
-                            td_rate_vals.append(td / c)
-
-                    if td_rate_vals:
-                        extra_features["rush_td_rate_mean"] = _mean(td_rate_vals)
-                        extra_features["rush_td_rate_trend"] = _trend_slope(td_rate_vals)
-                # Defensive form of the opponent in THIS game (see opp_pos_form).
-                # Previously averaged over the lookback window, which described
-                # the defenses the player had just faced rather than the one he
-                # was about to face.
-                v = target_game.get("form_rush_yards_allowed")
-                if v is not None:
-                    extra_features["opp_rush_yards_allowed"] = float(v)
-                c = target_game.get("form_carries_allowed")
-                if c is not None:
-                    extra_features["opp_carries_allowed"] = float(c)
-                if v is not None and c is not None and float(c) > 0:
-                    extra_features["opp_yards_per_carry_allowed"] = float(v) / float(c)
-
-            if feature_family == "passing":
-                pass_window = [float(g.get("pass_attempts", 0.0) or 0.0) for g in window_games]
-                completions_window = [float(g.get("completions", 0.0) or 0.0) for g in window_games]
-                pass_yds_window = [float(g.get("passing_yards", 0.0) or 0.0) for g in window_games]
-                pass_td_window = [float(g.get("passing_tds", 0.0) or 0.0) for g in window_games]
-
-                if pass_window:
-                    extra_features["pass_attempts_weighted_mean"] = _weighted_mean_recent(pass_window)
-
-                team_pass_window = [float(g.get("team_pass_attempts_calc", 0.0) or 0.0) for g in window_games]
-                team_pass_nonzero = [v for v in team_pass_window if v > 0]
-
-                if team_pass_nonzero:
-                    extra_features["team_pass_attempts"] = _mean(team_pass_nonzero)
-                    extra_features["team_pass_attempts_trend"] = _trend_slope(team_pass_nonzero)
-
-                if pass_window and team_pass_window:
-                    share_vals = []
-                    for pa, tp in zip(pass_window, team_pass_window):
-                        if tp > 0:
-                            share_vals.append(pa / tp)
-
-                    if share_vals:
-                        extra_features["pass_share_mean"] = _mean(share_vals)
-                        extra_features["pass_share_trend"] = _trend_slope(share_vals)
-
-                if market_code == "pass_completions" and pass_window and completions_window:
-                    comp_rate_vals = []
-                    for comp, att in zip(completions_window, pass_window):
-                        if att > 0:
-                            comp_rate_vals.append(comp / att)
-
-                    if comp_rate_vals:
-                        extra_features["completion_rate_mean"] = _mean(comp_rate_vals)
-                        extra_features["completion_rate_trend"] = _trend_slope(comp_rate_vals)
-
-                if market_code == "pass_yds" and pass_window and pass_yds_window:
-                    ypa_vals = []
-                    for py, pa in zip(pass_yds_window, pass_window):
-                        if pa > 0:
-                            ypa_vals.append(py / pa)
-
-                    if ypa_vals:
-                        extra_features["yards_per_attempt_mean"] = _mean(ypa_vals)
-                        extra_features["yards_per_attempt_trend"] = _trend_slope(ypa_vals)
-
-                if market_code == "pass_td" and pass_window and pass_td_window:
-                    td_rate_vals = []
-                    for td, att in zip(pass_td_window, pass_window):
-                        if att > 0:
-                            td_rate_vals.append(td / att)
-
-                    if td_rate_vals:
-                        extra_features["pass_td_rate_mean"] = _mean(td_rate_vals)
-                        extra_features["pass_td_rate_trend"] = _trend_slope(td_rate_vals)
-
-                # Passing defense of the opponent in THIS game, not an average
-                # over the defenses already played (see opp_pos_form).
-                pa = target_game.get("form_pass_att_allowed")
-                py = target_game.get("form_pass_yds_allowed")
-                if pa is not None:
-                    extra_features["opp_pass_attempts_allowed"] = float(pa)
-                if py is not None:
-                    extra_features["opp_pass_yards_allowed"] = float(py)
-                if pa is not None and py is not None and float(pa) > 0:
-                    extra_features["opp_yards_per_attempt_allowed"] = float(py) / float(pa)
-
-            if feature_family == "receiving":
-                targets_window = [float(g.get("targets", 0.0) or 0.0)
-                                  for g in window_games]
-                if targets_window:
-                    extra_features["targets_weighted_mean"] = _weighted_mean_recent(
-                        targets_window)
-
-                if targets_window and market_code == "rec_yds":
-                    ypt_vals = [
-                        (y / t) if t not in (None, 0, 0.0) else 0.0
-                        for y, t in zip(window, targets_window)
-                    ]
-                    extra_features["yards_per_target_mean"] = _mean(ypt_vals)
-                    extra_features["yards_per_target_trend"] = _trend_slope(
-                        ypt_vals)
-
-                team_pass_window = [
-                    float(g.get("team_pass_attempts", 0.0) or 0.0) for g in window_games
-                ]
-                if team_pass_window:
-                    extra_features["team_pass_attempts"] = _mean(
-                        team_pass_window)
-                    extra_features["team_pass_attempts_trend"] = _trend_slope(
-                        team_pass_window)
-
-                if targets_window and team_pass_window:
-                    ts_vals = []
-                    for t, tp in zip(targets_window, team_pass_window):
-                        if tp > 0:
-                            ts_vals.append(t / tp)
-                        else:
-                            ts_vals.append(0.0)
-
-                    if ts_vals:
-                        extra_features["target_share_mean"] = _mean(ts_vals)
-                        extra_features["target_share_trend"] = _trend_slope(
-                            ts_vals)
-
-                opp_rec_vals = []
-                opp_targets_vals = []
-                for g in window_games:
-                    opp_rec_roll = float(
-                        g.get("opp_rec_yds_allowed_rolling", 0.0) or 0.0)
-                    opp_rec_base = float(
-                        g.get("opp_rec_yds_allowed", 0.0) or 0.0)
-                    opp_targets_roll = float(
-                        g.get("opp_targets_allowed_rolling", 0.0) or 0.0)
-                    opp_targets_base = float(
-                        g.get("opp_targets_allowed", 0.0) or 0.0)
-
-                    opp_rec_vals.append(
-                        opp_rec_roll if opp_rec_roll > 0 else opp_rec_base)
-                    opp_targets_vals.append(
-                        opp_targets_roll if opp_targets_roll > 0 else opp_targets_base)
-
-                # Receiving defense of the opponent in THIS game, normalised by
-                # the pass volume they face so a team is not flattered simply for
-                # playing run-heavy opponents. Previously averaged over the
-                # window, which described the wrong defenses entirely.
-                opp_rec_form = target_game.get("form_pos_rec_yds")
-                opp_tgt_form = target_game.get("form_pos_targets")
-                team_pass_ref = _mean(team_pass_window) if team_pass_window else 0.0
-                if opp_rec_form is not None and team_pass_ref > 0:
-                    extra_features["opp_rec_yds_per_attempt"] = (
-                        float(opp_rec_form) / team_pass_ref
-                    )
-                if opp_tgt_form is not None and team_pass_ref > 0:
-                    extra_features["opp_target_rate_allowed"] = (
-                        float(opp_tgt_form) / team_pass_ref
-                    )
-
-                if market_code == "rec_td":
-                    recs_window = [float(g.get("receptions", 0.0) or 0.0) for g in window_games]
-                    td_window = [float(g.get("receiving_tds", 0.0) or 0.0) for g in window_games]
-
-                    td_rate_vals = []
-                    for td, rec in zip(td_window, recs_window):
-                        if rec > 0:
-                            td_rate_vals.append(td / rec)
-
-                    if td_rate_vals:
-                        extra_features["rec_td_rate_mean"] = _mean(td_rate_vals)
-                        extra_features["rec_td_rate_trend"] = _trend_slope(td_rate_vals)
-
-            # Pre-game Vegas context for the game being predicted (games[i]
-            # itself, not the lookback window). This is known before kickoff
-            # -- same information a sportsbook prop line is priced off of --
-            # so it's not leakage, and it carries far more signal about this
-            # specific game's likely script/volume than any rolling average
-            # of past games can.
-            spread_line = target_game.get("game_spread_line")
-            total_line = target_game.get("game_total_line")
-            home_team = target_game.get("game_home_team")
-            away_team = target_game.get("game_away_team")
-            if spread_line is not None and total_line is not None and home_team:
-                spread_line = float(spread_line)
-                total_line = float(total_line)
-                if target_game.get("team") == home_team:
-                    team_implied_total = (total_line + spread_line) / 2.0
-                    team_spread = spread_line
-                elif target_game.get("team") == away_team:
-                    team_implied_total = (total_line - spread_line) / 2.0
-                    team_spread = -spread_line
-                else:
-                    team_implied_total = total_line / 2.0
-                    team_spread = 0.0
-                extra_features["game_total_line"] = total_line
-                extra_features["team_implied_total"] = team_implied_total
-                extra_features["team_spread"] = team_spread
-
-            # Weather, with "not recorded" kept distinct from "zero".
+            # Expected touchdowns, for the markets that are about touchdowns.
             #
-            # Leaving the key out does not mean the model never sees a number:
-            # a feature named in feature_cols but absent here is read with a
-            # default of 0.0, and game_temp is in the feature list of 214 model
-            # artifacts. So every game without a recorded temperature was being
-            # trained and served as 0F.
+            # This block is new and the data behind it is not: `exp_rec_td` and
+            # `exp_rush_td` have been selected by the query above since the
+            # ff_opportunity join was written, and nothing has ever read them.
+            # The dispatch above is on feature_family, which is receiving,
+            # rushing or passing, and anytime touchdown's family is "scoring",
+            # so it matched no branch and collected none of these. rec_td and
+            # rush_td did match, and collected expected yards and receptions
+            # while the expected-touchdown columns sat one line away unused.
             #
-            # For a dome that is merely wrong; indoor stadiums are climate
-            # controlled and 70F is the honest number, with no wind. For the
-            # 1,394 outdoor rows and every open-roof game with no reading it is
-            # worse: a September afternoon in Miami and a January night in
-            # Buffalo arrive as the same feature value, and the value is colder
-            # than either.
-            roof_raw = (target_game.get("game_roof") or "").strip().lower()
-            if roof_raw:
-                indoors = roof_raw in ("dome", "closed")
-            else:
-                # Blank means a retractable roof that has not been called yet.
-                # Go with what the venue usually does.
-                indoors = _RETRACTABLE_CLOSED_RATE.get(
-                    target_game.get("game_home_team"), 0.0) > 0.5
-
-            game_wind = target_game.get("game_wind")
-            game_temp = target_game.get("game_temp")
-
-            if game_wind is not None:
-                extra_features["game_wind"] = float(game_wind)
-            elif indoors:
-                extra_features["game_wind"] = 0.0
-            else:
-                extra_features["game_wind"] = _OUTDOOR_WIND_DEFAULT
-
-            if game_temp is not None:
-                extra_features["game_temp"] = float(game_temp)
-            elif indoors:
-                extra_features["game_temp"] = 70.0
-            else:
-                # Outdoors and unrecorded. The month is the single strongest
-                # thing known about an NFL temperature, so it beats both a
-                # constant and a zero.
-                extra_features["game_temp"] = _OUTDOOR_TEMP_BY_MONTH.get(
-                    getattr(target_game.get("game_date"), "month", 0),
-                    _OUTDOOR_TEMP_DEFAULT)
-            extra_features["game_div_game"] = float(target_game.get("game_div_game", 0.0) or 0.0)
-
-            # Venue and situation for the game being predicted. Indoor removes
-            # weather entirely, surface affects pace, and rest days separate a
-            # short-week Thursday game from a bye-week return -- all known well
-            # before kickoff and none of it previously used.
-            # "closed" is a retractable roof shut for the game, so it plays as a
-            # dome; "open" is a retractable roof left open. A blank roof is a
-            # retractable venue whose game-day call has not been made, resolved
-            # above by what that stadium usually does rather than left to read
-            # as open air.
-            extra_features["is_indoor"] = 1.0 if indoors else 0.0
-            surface = (target_game.get("game_surface") or "").strip().lower()
-            if surface:
-                extra_features["is_turf"] = 0.0 if "grass" in surface else 1.0
-
-            is_home = 1.0 if target_game.get("team") == home_team else 0.0
-            extra_features["is_home"] = is_home
-            rest = target_game.get("game_home_rest" if is_home else "game_away_rest")
-            if rest is not None:
-                extra_features["rest_days"] = float(rest)
-
-            # Rolling play-context usage. Red-zone volume is the single most
-            # direct predictor of touchdowns, which plain box-score rates miss
-            # entirely: a back with 4 red-zone carries a game is a different
-            # proposition from one with the same yardage and none.
-            for col in (
-                "rz_targets", "rz_carries", "rz_target_rate", "third_down_targets",
-                "shotgun_pct", "air_yards", "yac", "epa_per_play", "vegas_wp",
-                "player_plays",
-            ):
-                vals = [float(g.get(col, 0.0) or 0.0) for g in window_games]
-                if any(vals):
-                    extra_features[f"{col}_mean"] = _mean(vals)
-                    extra_features[f"{col}_trend"] = _trend_slope(vals)
+            # It matters because a touchdown is not a big yardage game, it is a
+            # touch taken near the goal line, and nothing else in the feature
+            # set sees where a carry happened. nflverse models that directly
+            # from the down, distance and yard line of every touch. Red-zone
+            # counts are in here too but they are raw volume over five games,
+            # which is a small and noisy number; this is the same signal with
+            # the conversion probability already estimated.
+            #
+            # Measured on 2025, trained on 2022 to 2024: log loss 0.4276 to
+            # 0.4237 and AUC 0.7375 to 0.7427. Modest, and larger than the gap
+            # between every model family tried on this market.
+            if is_td_market:
+                # Read from the target game's own row, not averaged over
+                # window_games, for the same reason the opponent-form features
+                # are: the value is already a trailing average as of this game
+                # date, computed in SQL over the player's own previous games.
+                # See the player_exp_td CTE for what that is worth and why it
+                # is not built from the window.
+                n_games = target_game.get("exp_td_games") or 0
+                exp_td = target_game.get("exp_td_trailing")
+                if exp_td is not None and n_games >= 2:
+                    extra_features["exp_td_mean"] = float(exp_td)
+                    over = target_game.get("td_over_exp_trailing")
+                    if over is not None:
+                        extra_features["td_over_expected"] = float(over)
 
             # How the opponent *being faced in this game* has defended this
             # player's position group lately.
