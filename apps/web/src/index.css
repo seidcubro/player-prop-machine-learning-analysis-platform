@@ -448,6 +448,12 @@ button.ps-stat[aria-pressed="true"] {
   border-color: var(--accent);
   background-color: var(--accent-soft);
 }
+/* The reset card is not itself a filter, so it says what pressing it does.
+   Without this it wore the same "active filter" badge as the cards that narrow
+   the board, on a card whose whole job is to widen it again. */
+button.ps-stat.is-reset[aria-pressed="true"]::after { content: "clear filters"; }
+button.ps-stat.is-reset[aria-pressed="true"] .label { padding-right: 92px; }
+
 /* Reserve room for the badge rather than hoping the label is short enough.
    The badge is absolutely positioned, so it does not push anything aside on its
    own, and at four cards across a card is only about 230px wide. */

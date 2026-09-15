@@ -337,10 +337,17 @@ export default function EdgesDashboard() {
           obvious thing to press, so it clears every filter the cards can set
           and reads as pressed whenever none of them are.
         */}
+        {/*
+          Pressed only when something is filtered, so it reads as "clear this"
+          rather than labelling the default view as a filter.
+
+          It was pressed whenever no filter was set, which put an ACTIVE FILTER
+          badge on the headline card of a board nobody had filtered.
+        */}
         <button
           type="button"
-          className="ps-stat"
-          aria-pressed={!exactTier && !bestOnly && !minTier}
+          className="ps-stat is-reset"
+          aria-pressed={Boolean(exactTier || bestOnly || minTier || eventId)}
           onClick={() => {
             setExactTier("");
             setBestOnly(false);
@@ -348,7 +355,12 @@ export default function EdgesDashboard() {
             setEventId("");
           }}
         >
-          <div className="label">Total Signals</div>
+          {/*
+            Named for the tier, because elite is the only one published.
+            "Total Signals" beside an Elite card counting the same props was
+            two labels for one number.
+          */}
+          <div className="label">Elite Signals</div>
           {/*
             The summary count, not `total`.
 
