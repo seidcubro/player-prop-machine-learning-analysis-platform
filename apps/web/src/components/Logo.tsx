@@ -8,6 +8,8 @@
  * remain the marketing assets.
  */
 
+import { useId } from "react";
+
 type LogoProps = {
   /** Pixel size of the (square) icon. */
   size?: number;
@@ -17,6 +19,21 @@ type LogoProps = {
 
 export default function Logo({ size = 32, title = "PriorLine" }: LogoProps) {
   const decorative = title === "";
+  /*
+   * The gradients need ids unique to this instance, not shared across every
+   * logo on the page.
+   *
+   * They were hard-coded, and SVG ids are document-global, so all four marks
+   * pointed at the defs belonging to whichever one rendered first. That is the
+   * mobile top bar, which `display: none` hides above 960px, and Blink will
+   * not paint a gradient defined inside a hidden subtree. The result was that
+   * the mark vanished on a full-screen laptop and came back the moment the
+   * window was narrow enough to show the top bar again: the icon was always
+   * there, it just had nothing to paint with.
+   */
+  const uid = useId().replace(/:/g, "");
+  const ring = `ps-ring-${uid}`;
+  const wave = `ps-wave-${uid}`;
   return (
     <svg
       width={size}
@@ -28,12 +45,12 @@ export default function Logo({ size = 32, title = "PriorLine" }: LogoProps) {
     >
       {!decorative && <title>{title}</title>}
       <defs>
-        <linearGradient id="ps-ring" x1="0" y1="1" x2="1" y2="0">
+        <linearGradient id={ring} x1="0" y1="1" x2="1" y2="0">
           <stop offset="0%" stopColor="#22d3ee" />
           <stop offset="55%" stopColor="#4d7cfe" />
           <stop offset="100%" stopColor="#a855f7" />
         </linearGradient>
-        <linearGradient id="ps-wave" x1="0" y1="0" x2="1" y2="0">
+        <linearGradient id={wave} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="#4d7cfe" />
           <stop offset="50%" stopColor="#a855f7" />
           <stop offset="100%" stopColor="#4d7cfe" />
@@ -56,14 +73,14 @@ export default function Logo({ size = 32, title = "PriorLine" }: LogoProps) {
       <path
         d="M 84.93 64.71 A 36 36 0 0 1 15.07 64.71"
         fill="none"
-        stroke="url(#ps-ring)"
+        stroke={`url(#${ring})`}
         strokeWidth="5"
         strokeLinecap="round"
       />
       <path
         d="M 15.07 47.29 A 36 36 0 0 1 84.93 47.29"
         fill="none"
-        stroke="url(#ps-ring)"
+        stroke={`url(#${ring})`}
         strokeWidth="5"
         strokeLinecap="round"
       />
@@ -72,7 +89,7 @@ export default function Logo({ size = 32, title = "PriorLine" }: LogoProps) {
       <path
         d="M 4 56 L 30 56 L 38 34 L 46 74 L 54 24 L 62 70 L 68 48 L 72 56 L 96 56"
         fill="none"
-        stroke="url(#ps-wave)"
+        stroke={`url(#${wave})`}
         strokeWidth="5.5"
         strokeLinecap="round"
         strokeLinejoin="round"
