@@ -25,11 +25,10 @@ be a fantasy backtest.
 
 import os
 
+import eval as ev
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
-
-import eval as ev
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

@@ -16,7 +16,6 @@ day. Matching therefore allows a +/- 1 day window and prefers the closest game.
 
 import os
 
-import pandas as pd
 from sqlalchemy import create_engine, text
 
 DATABASE_URL = os.getenv(

@@ -37,15 +37,13 @@ import json
 import os
 from datetime import date
 
+import eval as ev
 import joblib
 import numpy as np
 import pandas as pd
-from scipy.stats import poisson
-from sklearn.ensemble import HistGradientBoostingRegressor
-
-import eval as ev
 import train as tr
 import train_quantiles as tq
+from scipy.stats import poisson
 
 MARKETS = os.getenv("MARKETS", "pass_td,rush_td,rec_td").split(",")
 TD_MODEL_NAME = os.getenv("TD_MODEL_NAME", "td_poisson_v1")
@@ -118,9 +116,8 @@ MARKET_KEY = {
 
 
 def main():
-    from sqlalchemy import create_engine, text
-
     from backtest_season import DATABASE_URL
+    from sqlalchemy import create_engine, text
 
     engine = create_engine(DATABASE_URL, future=True)
     ids = pd.read_sql(text(

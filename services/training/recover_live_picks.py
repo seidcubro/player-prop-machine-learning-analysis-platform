@@ -28,12 +28,11 @@ double-count and cannot overwrite anything grading has written.
 import os
 from pathlib import Path
 
+import build_prop_edges as bp
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
-
-import build_prop_edges as bp
 from backtest_season import MARKET_MAP, american_to_prob
+from sqlalchemy import create_engine, text
 
 LEVELS = [0.10, 0.25, 0.50, 0.75, 0.90]
 GAME_DATE = os.getenv("RECOVER_GAME_DATE", "")

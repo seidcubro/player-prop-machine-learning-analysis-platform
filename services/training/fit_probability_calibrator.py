@@ -46,8 +46,6 @@ import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 from sqlalchemy import create_engine, text
 
-import eval as ev
-
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://{u}:{p}@{h}:{port}/{db}".format(

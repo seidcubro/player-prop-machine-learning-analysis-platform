@@ -27,17 +27,17 @@ Environment variables:
 - TEST_FRAC (default 0.20)  # final portion of time-ordered rows used for test
 """
 
-import os
 import json
 import math
+import os
 from datetime import date
 from typing import Any
+
 import joblib
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
 
 DB_HOST = os.getenv("POSTGRES_HOST", "postgres")
 DB_PORT = int(os.getenv("POSTGRES_PORT", "5432"))

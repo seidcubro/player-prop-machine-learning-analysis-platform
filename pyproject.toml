@@ -1,4 +1,18 @@
 
+# Ruff config, and what it is honestly for.
+#
+# This is a target, not a gate. CI does not run it and neither does anything
+# else, because a clean run needs about 280 fixes, most of them D103 asking for
+# a docstring on every internal helper in a research script. Turning that into
+# a required check would mean either a week of typing or ignoring a red build,
+# and the second one is how a repo ends up with a check nobody reads.
+#
+# What it is good for is running by hand on a file being worked on:
+#
+#     ruff check services/training/build_prop_edges.py
+#
+# The rules that catch real defects rather than style, F401 unused imports and
+# I001 unsorted ones, were applied across the tree on 2026-09-15 and are clean.
 [tool.ruff]
 line-length = 100
 target-version = "py311"

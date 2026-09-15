@@ -20,9 +20,10 @@ import ctypes
 import gc
 import os
 from typing import Iterable
+
+import nflreadpy
 import pandas as pd
 from sqlalchemy import create_engine, text
-import nflreadpy
 
 
 def _db_url() -> str:

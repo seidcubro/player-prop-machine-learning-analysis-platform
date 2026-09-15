@@ -44,15 +44,13 @@ import argparse
 import json
 import os
 
+import eval as ev
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
-
-import eval as ev
 import train as tr
 import train_quantiles as tq
-from backtest_season import (DATABASE_URL, MARKET_MAP, american_to_decimal,
-                             american_to_prob)
+from backtest_season import DATABASE_URL, MARKET_MAP, american_to_decimal, american_to_prob
+from sqlalchemy import create_engine, text
 
 MIN_EV = float(os.getenv("MIN_EV", "0.02"))
 

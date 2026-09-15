@@ -50,9 +50,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
-
 from interval_calibration import _read_ladder
+from sqlalchemy import create_engine, text
 
 # Built from POSTGRES_* the way every other script here does, with an explicit
 # DATABASE_URL still winning if one is set.

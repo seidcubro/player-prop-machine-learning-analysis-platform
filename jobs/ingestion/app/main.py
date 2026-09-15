@@ -6,6 +6,7 @@ latest player/game/stat information used for feature engineering and modeling.
 
 from app.etl.nflverse_ingest import run
 
+
 def main():
     """Entrypoint for the ingestion job container.
 

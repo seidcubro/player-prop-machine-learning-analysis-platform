@@ -34,7 +34,6 @@ Env: N_SIMS (default 20000), SIM_SEED.
 
 import json
 import os
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd

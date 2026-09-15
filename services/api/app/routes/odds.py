@@ -7,12 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from ..admin_auth import require_admin
 from ..db import get_db
 from ..odds_market_map import ODDS_API_MARKET_MAP
 from ..services.odds_api_client import OddsApiClient
-from ..admin_auth import require_admin
-
-import requests
 
 router = APIRouter()
 

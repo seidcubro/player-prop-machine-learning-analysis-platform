@@ -7,7 +7,7 @@ Windows. Requires Docker Desktop.
 
 ```bash
 # start Docker Desktop if not already running, then:
-docker compose up -d postgres redis
+docker compose up -d postgres
 ```
 
 `db/init.sql` runs automatically on first container creation (mounted into

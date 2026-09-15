@@ -27,13 +27,12 @@ import json
 import os
 from datetime import date
 
+import eval as ev
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor
-
-import eval as ev
 from odds_markets import MARKET_TO_ODDS as ODDS_MARKET_KEYS
+from sklearn.ensemble import GradientBoostingRegressor
 
 QUANTILES = [0.10, 0.25, 0.50, 0.75, 0.90]
 QUANT_MODEL_NAME = os.getenv("QUANT_MODEL_NAME", "quant_v1")
@@ -133,7 +132,8 @@ def priced_player_ids(market_code: str) -> set[str]:
     key = ODDS_MARKET_KEYS.get(market_code)
     if not key:
         return set()
-    from sqlalchemy import create_engine, text as _text
+    from sqlalchemy import create_engine
+    from sqlalchemy import text as _text
     url = os.getenv("DATABASE_URL") or (
         f"postgresql://{os.getenv('POSTGRES_USER', 'app')}:"
         f"{os.getenv('POSTGRES_PASSWORD', 'app')}@"
@@ -275,7 +275,8 @@ def active_model_meta():
     """
     import json as _json
 
-    from sqlalchemy import create_engine, text as _text
+    from sqlalchemy import create_engine
+    from sqlalchemy import text as _text
 
     url = os.getenv("DATABASE_URL") or (
         f"postgresql://{os.getenv('POSTGRES_USER', 'app')}:"

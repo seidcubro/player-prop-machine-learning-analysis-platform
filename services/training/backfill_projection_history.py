@@ -28,17 +28,15 @@ Going forward build_projections.py records history on every run and none of this
 is needed.
 """
 
+import json
 import os
-
-import numpy as np
-import pandas as pd
-from sqlalchemy import create_engine, text
+from pathlib import Path
 
 import eval as ev
-import train_quantiles as tq
-from build_prop_edges import load_quantile_bundle, calibrated_quantiles
-from pathlib import Path
-import json
+import numpy as np
+import pandas as pd
+from build_prop_edges import calibrated_quantiles, load_quantile_bundle
+from sqlalchemy import create_engine, text
 
 # Built from POSTGRES_* the way every other script here does, with an explicit
 # DATABASE_URL still winning if one is set.

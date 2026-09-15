@@ -7,11 +7,10 @@ the real mechanism rather than an assumed one.
 """
 import os
 
+import eval as ev  # reuse the honest loader/split
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
-
-import eval as ev  # reuse the honest loader/split
 
 
 def main():

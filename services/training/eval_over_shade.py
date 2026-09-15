@@ -35,9 +35,8 @@ import os
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
-
 from market_disagreement import DATABASE_URL, MARKET_MAP, dec
+from sqlalchemy import create_engine, text
 
 MIN_BOOKS = int(os.getenv("MIN_BOOKS", "2"))
 

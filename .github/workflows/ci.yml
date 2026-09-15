@@ -1,0 +1,72 @@
+# Checks that catch the mistakes this project actually makes.
+#
+# Deliberately not a full test suite. Everything here runs without a database,
+# without Docker and without the Odds API key, because a check that needs a
+# secret to pass is a check that goes red on every fork and then gets ignored.
+#
+# The two real failure modes this catches are a frontend that type-checks in
+# the editor and fails to build, and a Python file that imports something that
+# is not there. Both have happened.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  web:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Build
+        # vite.config.ts refuses to build for production without these, which is
+        # the point of them. The values only have to be well formed here; the
+        # real ones live in the Vercel project settings.
+        env:
+          VITE_API_BASE: https://api.example.com/api/v1
+          VITE_SITE_URL: https://example.com
+        run: npm run build
+
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Byte-compile every module
+        run: python -m compileall -q services jobs scripts
+
+  compose:
+    name: Compose files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the dev stack
+        run: docker compose config --quiet
+      - name: Validate the production stack
+        # Every variable in the production file is written ${VAR:?...} so it
+        # refuses to load without them. These are placeholders to prove the
+        # file parses, not configuration.
+        env:
+          POSTGRES_PASSWORD: ci
+          ADMIN_TOKEN: ci
+          ODDS_API_KEY: ci
+          API_DOMAIN: api.example.com
+          ACME_EMAIL: ci@example.com
+          WEB_ORIGINS: https://example.com
+        run: docker compose -f deploy/docker-compose.prod.yml config --quiet

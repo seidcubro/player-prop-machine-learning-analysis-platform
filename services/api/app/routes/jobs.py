@@ -10,19 +10,19 @@ Uses the market registry to determine:
 This version stores cross-market upstream features in player_market_features.extra_features JSONB.
 """
 
+import json
 import logging
+import math
 import os
+import re
 from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-import math
-import re
-import json
 
-from ..db import get_db
 from ..admin_auth import require_admin
-
+from ..db import get_db
 
 log = logging.getLogger(__name__)
 

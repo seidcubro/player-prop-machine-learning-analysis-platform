@@ -20,7 +20,6 @@ import ast
 import json
 import math
 import os
-import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -32,6 +31,7 @@ from sqlalchemy import create_engine, text
 ARTIFACTS = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 
 from odds_markets import MARKET_TO_ODDS as ODDS_MARKET_KEYS
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://{u}:{p}@{h}:{port}/{db}".format(

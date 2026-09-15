@@ -1,9 +1,12 @@
 """Show what the model actually sees for one player's upcoming prop."""
-import os, json, datetime
-import pandas as pd, joblib
+import datetime
+import json
+import os
 from pathlib import Path
-from sqlalchemy import create_engine, text
+
 import build_prop_edges as bp
+import pandas as pd
+from sqlalchemy import create_engine, text
 
 NAME = os.getenv("PLAYER", "Woody Marks")
 MARKET = os.getenv("MARKET", "rush_yds")

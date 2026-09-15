@@ -24,15 +24,12 @@ break-even a real bettor faces at the price on offer.
 import argparse
 import os
 
-import joblib
+import eval as ev
 import numpy as np
 import pandas as pd
-from sklearn.metrics import mean_absolute_error
-from sqlalchemy import create_engine, text
-
-import eval as ev
 import train as tr
 from odds_markets import ALL_ODDS_TO_MARKET
+from sqlalchemy import create_engine, text
 
 DATABASE_URL = ev.DATABASE_URL if hasattr(ev, "DATABASE_URL") else os.getenv(
     "DATABASE_URL",

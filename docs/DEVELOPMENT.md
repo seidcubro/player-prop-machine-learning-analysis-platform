@@ -19,7 +19,6 @@ Services:
 - API: http://localhost:8000
 - Inference: http://localhost:8001
 - Postgres: localhost:5432
-- Redis: localhost:6379
 
 Health check:
 

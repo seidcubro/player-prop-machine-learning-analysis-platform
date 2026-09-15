@@ -281,7 +281,7 @@ with the audit.
 ## Running it
 
 ```bash
-docker compose up -d postgres redis
+docker compose up -d postgres
 docker compose build api training
 docker compose up -d api
 npm run dev --prefix apps/web
@@ -358,12 +358,15 @@ closing number converges much faster than win-loss does.
 ## Layout
 
 - `services/training/` training, evaluation, bakeoff, simulation, edge building,
-  grading, backtest, freshness audit. Most of the work is here.
+  grading, backtest, freshness audit. Most of the work is here, and about a
+  third of it runs on a schedule. `services/training/README.md` says which.
 - `services/api/` FastAPI backend.
 - `jobs/ingestion/` the nflverse pipeline.
 - `apps/web/` React frontend.
-- `db/` schema, migrations, backfills.
-- `docs/` architecture and pipeline notes.
+- `db/` schema, migrations, backfills. `db/README.md` explains the split.
+- `scripts/` the scheduled refresh and its modes. `scripts/README.md`.
+- `deploy/` production compose, Caddy, systemd timers, migration script.
+- `docs/` architecture, ML pipeline, deployment reasoning.
 
 ## Author
 

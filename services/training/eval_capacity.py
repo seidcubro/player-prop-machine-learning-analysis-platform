@@ -33,17 +33,16 @@ Env: MARKETS (default the four QB markets), SEASON, LOOKBACK.
 import json
 import os
 
+import eval as ev
 import numpy as np
 import pandas as pd
+import train as tr
+from backtest_season import DATABASE_URL
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import PoissonRegressor, Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sqlalchemy import create_engine, text
-
-import eval as ev
-import train as tr
-from backtest_season import DATABASE_URL
 
 MARKETS = os.getenv("MARKETS", "pass_td,pass_yds,pass_att,pass_completions").split(",")
 SEASON = int(os.getenv("SEASON", "2025"))

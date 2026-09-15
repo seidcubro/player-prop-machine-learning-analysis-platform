@@ -13,17 +13,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
-  redis:
-    image: redis:7
-    ports:
-      - 6379:6379
-
   api:
     build:
       context: ./services/api
     environment:
       DATABASE_URL: postgresql://app:app@postgres:5432/app
-      REDIS_URL: redis://redis:6379/0
       ODDS_API_KEY: ${ODDS_API_KEY}
       ODDS_API_BASE_URL: ${ODDS_API_BASE_URL}
       ODDS_API_SPORT: ${ODDS_API_SPORT}
@@ -50,19 +44,6 @@ services:
       - ./services/training/artifacts:/artifacts:ro
     depends_on:
       - postgres
-      - redis
-
-  inference:
-    build:
-      context: ./services/inference
-    environment:
-      DATABASE_URL: postgresql://app:app@postgres:5432/app
-      REDIS_URL: redis://redis:6379/0
-    ports:
-      - 8001:8001
-    depends_on:
-      - postgres
-      - redis
 
   training:
     build:

@@ -22,9 +22,9 @@ metrics -- eval.py rebuilds the feature matrix independently and checks bias,
 which is what caught the log1p regression above.
 """
 
-import os
 import json
 import math
+import os
 from typing import Any
 
 import joblib
@@ -32,17 +32,17 @@ import numpy as np
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
-
 from sklearn.ensemble import (
-    RandomForestRegressor,
+    ExtraTreesRegressor,
     GradientBoostingRegressor,
     HistGradientBoostingRegressor,
-    ExtraTreesRegressor,
+    RandomForestRegressor,
 )
 from sklearn.linear_model import ElasticNet, Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
 
 def _env_max_depth(default: str):
     """MAX_DEPTH accepts an int or "none" for unlimited-depth trees."""

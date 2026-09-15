@@ -24,14 +24,12 @@ import math
 import os
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-from sqlalchemy import create_engine, text
-
 import build_prop_edges as bp
-import spread_calibration as sc
 import interval_calibration as ic
 import median_anchor as ma
+import pandas as pd
+import spread_calibration as sc
+from sqlalchemy import create_engine, text
 
 ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 # One slate, not two.

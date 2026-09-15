@@ -11,13 +11,13 @@ This scores every candidate on the same held-out rows so the choice is made on
 evidence rather than on which one feels safer.
 """
 
-import numpy as np
-import pandas as pd
-from sklearn.metrics import mean_absolute_error, r2_score
-import joblib
 import os
 
 import eval as ev
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.metrics import mean_absolute_error, r2_score
 
 
 def score(name, y, p):

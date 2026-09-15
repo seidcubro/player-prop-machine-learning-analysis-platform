@@ -33,14 +33,13 @@ Validated on 2025 (full season) and then on the held-out 2023+2024 slates.
 
 import os
 
+import eval as ev
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor
-from sqlalchemy import create_engine, text
-
-import eval as ev
 import train as tr
 from odds_markets import ALL_ODDS_TO_MARKET
+from sklearn.ensemble import GradientBoostingRegressor
+from sqlalchemy import create_engine, text
 
 # Historical snapshots still carry the two dead touchdown keys, so this uses
 # the map that includes them. One definition, in odds_markets.py.
@@ -259,7 +258,6 @@ def structural_check(engine, years, label):
     lines = load_lines(engine, years)
     lines["market_code"] = lines["market_key"].map(MARKET_MAP)
     lines = lines[lines["market_code"].notna()]
-    import json as _j
     q = text("SELECT external_id, name FROM players WHERE external_id IS NOT NULL")
     ids = pd.read_sql(q, engine)
     ids["key"] = ids["name"].str.lower().str.replace(r"[.\-]", "", regex=True)

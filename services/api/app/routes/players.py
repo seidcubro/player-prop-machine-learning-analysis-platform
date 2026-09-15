@@ -1,11 +1,9 @@
 """Player-related API routes."""
 
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-import joblib
-import json
-import os
 
 from ..db import get_db
 

@@ -27,9 +27,8 @@ style), so a handful of observations cannot license a huge correction.
 
 import os
 
-import numpy as np
-import pandas as pd
 import eval as ev
+import numpy as np
 import train as tr
 import train_quantiles as tq
 

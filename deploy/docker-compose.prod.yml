@@ -11,11 +11,11 @@
 # exposed database port, and Postgres data on a named volume rather than
 # wherever Docker Desktop felt like putting it.
 #
-# No Redis either. The dev stack runs one and hands the API a REDIS_URL, and
-# the API has never opened a connection to it: the rate limiter keeps its
-# counters in process, which is the right call when there is exactly one API
-# container. On a box with four gigabytes and an ingest that peaks at 3.6, a
-# container that exists to be ignored is memory and attack surface for
+# No Redis. The dev stack used to run one and hand the API a REDIS_URL that no
+# client ever opened: the rate limiter keeps its counters in process, which is
+# the right call when there is exactly one API container. It has since been
+# removed from the dev stack too, for the same reason it was never added here.
+# A container that exists to be ignored is memory and attack surface for
 # nothing.
 
 # Named so the network is deploy-independent of the directory it is run from.

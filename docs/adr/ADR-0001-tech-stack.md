@@ -30,16 +30,15 @@ ecosystem for training/evaluation.
   gets deployed somewhere, build real infra-as-code against whatever that target is, rather
   than resurrecting the placeholder.
 - **React + Vite** for the frontend, minimal, fast local dev loop; no heavier framework
-  needed for what's currently a 2-page app.
-- **Redis** is provisioned but not yet used by any service, kept available for future
-  caching/job-coordination needs.
-
-## Consequences
-
+  needed for eight pages with no auth and no server rendering.
+- **Redis** was provisioned and never used by any service, so it is gone as of
+  2026-09-15. The API's rate limiter keeps its counters in process, which is correct
+  for a single container, and nothing else ever asked for a cache or a queue. If one
+  of those is needed later, adding it back is an afternoon.
 - No horizontal scaling story yet (single Postgres instance, no read replicas, no queue).
-  Not a concern at current data volume (~50k rows across the core tables) or usage (one
-  user).
-- `services/inference` exists as an intentional placeholder in case inference ever needs to
-  scale independently of the API, not built out, and shouldn't be until there's an actual
-  need (see `docs/ARCHITECTURE.md` "History" for why speculative scaffolding elsewhere in
-  this repo was removed rather than kept).
+  Not a concern at 1.3M rows and a read-only public site: the heavy work is a weekly batch,
+  not a request path, and the largest table nobody queries live.
+- `services/inference` used to exist as a placeholder in case inference ever needed to
+  scale independently of the API. Removed on 2026-09-15: it held a health endpoint and
+  nothing else, and an empty service costs more in explanation than it saves in future
+  work. Inference runs inside the API. Redis went with it, having never had a client.

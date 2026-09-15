@@ -31,17 +31,15 @@ previous backtest rows first (live rows are never touched).
 
 import os
 
-import numpy as np
-import pandas as pd
-from sqlalchemy import create_engine, text
-
 import build_prop_edges as bp
 import eval as ev
+import numpy as np
+import pandas as pd
 import train as tr
 import train_quantiles as tq
-from backtest_quantile_ev import (american_to_decimal, american_to_prob,
-                                  cdf_level, load_prices)
+from backtest_quantile_ev import american_to_decimal, american_to_prob, cdf_level, load_prices
 from backtest_season import DATABASE_URL, MARKET_MAP
+from sqlalchemy import create_engine, text
 
 SEASONS = [int(s) for s in os.getenv("SEASONS", "2023,2024,2025").split(",")]
 

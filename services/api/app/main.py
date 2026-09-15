@@ -19,17 +19,17 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
-
-from .db import engine
 from limits import parse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
+from sqlalchemy import text
 
 from app.routes import router
 from app.routes.odds import router as odds_router
+
+from .db import engine
 
 log = logging.getLogger(__name__)
 

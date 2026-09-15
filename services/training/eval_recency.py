@@ -31,13 +31,12 @@ Env: MARKETS, SEASON (holdout, default 2025), LOOKBACK.
 import json
 import os
 
+import eval as ev
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
-
-import eval as ev
 import train as tr
 from backtest_season import DATABASE_URL
+from sqlalchemy import create_engine, text
 
 MARKETS = os.getenv(
     "MARKETS",

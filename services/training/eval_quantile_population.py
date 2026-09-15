@@ -35,10 +35,9 @@ Env: MARKETS (comma-separated, default the rush and receiving markets),
 
 import os
 
+import eval as ev
 import numpy as np
 import pandas as pd
-
-import eval as ev
 import train_quantiles as tq
 
 MARKETS = os.getenv("MARKETS", "rush_att,rush_yds,rec_yds,recs").split(",")
@@ -83,9 +82,8 @@ def fmt(cov):
 def main():
     import json
 
-    from sqlalchemy import create_engine, text
-
     from backtest_season import DATABASE_URL
+    from sqlalchemy import create_engine, text
 
     engine = create_engine(DATABASE_URL, future=True)
     hdr = f"{'':<34}" + "".join(f"{'q' + str(int(q * 100)):>9}"

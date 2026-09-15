@@ -20,13 +20,12 @@ import json
 import os
 import sys
 
+import eval as ev
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
-
-import eval as ev
 import train as tr
 from backtest_season import DATABASE_URL
+from sqlalchemy import create_engine, text
 
 
 def season_of(dates: pd.Series) -> pd.Series:

@@ -22,21 +22,19 @@ Not currently exposed via any API route -- see docs/API.md "The gap".
 from __future__ import annotations
 
 import json
+import math
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
-import joblib
-import numpy as np
-import spread_calibration as spread
 import interval_calibration as interval
+import joblib
 import median_anchor as anchor
+import numpy as np
 import pandas as pd
+import spread_calibration as spread
+from odds_markets import ALL_ODDS_TO_MARKET
 from scipy.stats import norm
 from sqlalchemy import create_engine, text
-
-import math
-from odds_markets import ALL_ODDS_TO_MARKET
 
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")

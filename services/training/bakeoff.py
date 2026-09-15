@@ -25,8 +25,8 @@ import json
 import os
 from datetime import date
 
+import eval as ev
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import (
     ExtraTreesRegressor,
     GradientBoostingRegressor,
@@ -37,8 +37,6 @@ from sklearn.linear_model import ElasticNet, PoissonRegressor, Ridge
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-
-import eval as ev
 
 N_FOLDS = int(os.getenv("N_FOLDS", "5"))
 SEED = 42

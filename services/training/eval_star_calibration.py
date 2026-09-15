@@ -18,13 +18,12 @@ charging more than they are worth, which is a finding rather than a fault.
 import json
 import os
 
+import eval as ev
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
-
-import eval as ev
 import train as tr
 from backtest_season import DATABASE_URL
+from sqlalchemy import create_engine, text
 
 MARKET = "any_td"
 HOLDOUT = 2025

@@ -22,7 +22,6 @@ So this splits the comparison by projected rate. If the CDF only loses in the
 upper band, that is where the bets are and the average was the wrong summary.
 """
 
-import os
 
 import numpy as np
 import pandas as pd

@@ -88,7 +88,7 @@ through a loop variable are invisible to it.
 
 ## Data storage
 
-Postgres is the primary store. Redis is running but nothing uses it yet.
+Postgres is the primary store, and the only one.
 
 Model artifacts (`.joblib` plus metadata `.json`) live in
 `services/training/artifacts/`, bind-mounted read-only into the api container.
@@ -116,6 +116,12 @@ works.
 
 Earlier versions of this repo had a lot of scaffolding that never ran: stub job
 entrypoints, a separate inference service, aspirational specs describing things
-that didn't exist. Most of it got removed. `services/inference/` is still a
-placeholder, kept as an extension point if inference ever needs to scale away
-from the API.
+that didn't exist. All of it is gone now.
+
+`services/inference/` was the last of it, kept for a while as an extension point
+in case inference ever needed to scale away from the API. It never did. What it
+actually contained was a health endpoint, a Dockerfile, a compose entry and an
+open port on 8001, and the Redis instance beside it had no client in the
+codebase at all. Both are removed. If inference ever does need its own service,
+writing one then is less work than the years of explaining why an empty one is
+sitting in the tree.

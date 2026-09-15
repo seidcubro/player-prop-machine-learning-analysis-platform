@@ -22,7 +22,7 @@ Usage:
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import requests
 from sqlalchemy import create_engine, text
