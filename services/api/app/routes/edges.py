@@ -102,12 +102,30 @@ _TIER_ORDER = ["small", "medium", "strong", "elite"]
 #     elite    102 picks   52.0% hit   +1.1% ROI
 #     strong    44 picks   45.5% hit  -16.2% ROI
 #
-# Both sources now agree that elite is the only tier that has earned its place,
-# and depth is not a reason to keep the others: one Sunday slate produced 81
-# elite picks on its own.
+# Both sources agree that elite is the only tier that has earned a bet.
+#
+# It is not the only tier worth showing, and those are different questions. The
+# board now returns strong and medium as well, and the site marks them as the
+# model's other opinions rather than as picks, with each tier's real return
+# printed beside it. Hiding a losing tier and publishing it as a bet are both
+# ways of not saying what it is; printing it next to "minus five percent over a
+# thousand graded picks" is the third option.
+#
+# The order here is the order of conviction, and BET_TIERS is the subset the
+# site presents as something to actually stake. Anything outside it is context.
 PUBLISHED_TIERS = [
     t.strip() for t in
-    os.getenv("PUBLISHED_TIERS", "elite").split(",") if t.strip()
+    os.getenv("PUBLISHED_TIERS", "elite,strong,medium").split(",") if t.strip()
+]
+
+# The tiers offered as a bet. Everything else published is shown, not sold.
+#
+# Separate from PUBLISHED_TIERS on purpose: widening what the board displays
+# should never silently widen what the site recommends, and one env var doing
+# both jobs is how that happens.
+BET_TIERS = [
+    t.strip() for t in
+    os.getenv("BET_TIERS", "elite").split(",") if t.strip()
 ]
 
 
@@ -532,6 +550,12 @@ def edges_summary(db: Session = Depends(get_db)):
 
     return {
         "ok": True,
+        # Which tiers the board is showing, and which of those the site is
+        # willing to call a bet. The frontend reads these rather than carrying
+        # its own copy of the list, so the two can never disagree about what is
+        # being recommended.
+        "published_tiers": PUBLISHED_TIERS,
+        "bet_tiers": BET_TIERS,
         "by_market": [dict(r) for r in by_market],
         "by_tier": {r["edge_tier"]: int(r["count"]) for r in by_tier},
         "by_game": [dict(r) for r in by_game],

@@ -168,11 +168,13 @@ export default function Landing() {
             </p>
           </li>
           <li>
-            <h3>Publish almost none of it</h3>
+            <h3>Recommend almost none of it</h3>
             <p>
-              Four tiers are graded and one is published. Elite is the only tier
-              that has made money, so it is the only tier offered as a bet. The
-              others stay on the track record, losses and all.
+              Four tiers are graded, three reach the board and one is offered
+              as a bet. Elite is the only tier that has made money; the others
+              are shown with their real return printed beside them, because
+              what the model thinks and what is worth staking are two different
+              questions. Every tier stays on the track record, losses and all.
             </p>
           </li>
         </ol>

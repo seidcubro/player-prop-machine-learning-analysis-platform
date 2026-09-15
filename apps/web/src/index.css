@@ -3031,3 +3031,94 @@ a.ps-link:hover::after { transform: scaleX(1); }
    keeps the height of the ones beside it; the fill and the marker go, because
    there is no range to mark. */
 .ps-wp-range.is-flat .ps-wp-track { opacity: 0.45; }
+
+/* ========================================================== tier ledger */
+/*
+ * The board shows three tiers and recommends one, and that sentence has to be
+ * unmissable or showing the other two is just quietly widening the
+ * recommendation. So this sits above the table, states it in a heading, and
+ * prints each tier's graded return next to its name.
+ *
+ * Styled as a statement rather than as a stat panel. The summary cards below
+ * already do instrumentation; this is the site talking.
+ */
+.ps-ledger {
+  margin: 0 0 var(--s5);
+  padding: var(--s5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.ps-ledger h2 {
+  margin: 0 0 var(--s2);
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  letter-spacing: -0.01em;
+}
+.ps-ledger > p {
+  margin: 0 0 var(--s4);
+  max-width: 78ch;
+  font-size: 0.86rem;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+.ps-ledger-rows { display: flex; flex-direction: column; gap: var(--s2); }
+.ps-ledger-row {
+  display: grid;
+  grid-template-columns: 5.5rem 10rem repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  /* The recommended tier is the only one with brand on it. Everything else is
+     deliberately quiet, which is the point being made. */
+  border-left: 2px solid transparent;
+}
+.ps-ledger-row.is-bet {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+}
+.ps-ledger-row .verdict {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.ps-ledger-row.is-bet .verdict { color: var(--text-dim); font-weight: 600; }
+.ps-ledger-row .fig { display: flex; flex-direction: column; min-width: 0; }
+.ps-ledger-row .fig b {
+  font-family: var(--font-mono);
+  font-size: 0.98rem;
+  font-variant-numeric: tabular-nums;
+}
+.ps-ledger-row .fig small {
+  font-size: 0.68rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 820px) {
+  .ps-ledger-row {
+    grid-template-columns: 5.5rem 1fr;
+    row-gap: var(--s2);
+  }
+  .ps-ledger-row .verdict { text-align: right; }
+  .ps-ledger-row .fig { grid-column: span 1; }
+}
+@media (max-width: 520px) {
+  .ps-ledger { padding: var(--s4); }
+  .ps-ledger-row { grid-template-columns: 1fr 1fr; }
+  .ps-ledger-row .verdict { text-align: left; }
+}
+
+/*
+ * A row the site is showing but not recommending.
+ *
+ * Muted rather than hidden, and never so faint it reads as disabled: it is
+ * real information about a real prop, it is just not a pick. The tier chip and
+ * the numbers keep full contrast so the row stays legible and accessible; what
+ * drops is the row's presence, not its readability.
+ */
+.ps-table tbody tr.is-context { opacity: 0.72; }
+.ps-table tbody tr.is-context:hover { opacity: 1; }

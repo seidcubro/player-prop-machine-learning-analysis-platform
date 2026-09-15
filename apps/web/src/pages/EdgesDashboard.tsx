@@ -15,6 +15,7 @@ import NextSlate from "../components/NextSlate";
 import Avatar from "../components/Avatar";
 import Select from "../components/Select";
 import Glossary from "../components/Glossary";
+import TierLedger from "../components/TierLedger";
 import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { fullDateTime, kickoff, price as fmtOdds } from "../lib/format";
@@ -123,10 +124,11 @@ function CalibrationNotice() {
             They now run through a calibration fitted on 7,125 graded results.
           </p>
           <p>
-            <strong>Only the top tier is published.</strong> On out-of-sample
+            <strong>Only the top tier is recommended.</strong> On out-of-sample
             graded picks elite returns +4.0% per unit, and it is the only tier
-            that does: strong sits at &minus;0.3%, medium at &minus;5.2% and
-            small at &minus;4.3%. Week 1 said the same thing on live picks,
+            that does: strong sits within a tenth of a point of break-even,
+            medium at &minus;5.2% and small at &minus;4.3%. Strong and medium
+            are on the board as context, marked as such and never as picks. Week 1 said the same thing on live picks,
             elite at +1.1% against strong at &minus;16.2%. The lower tiers are
             still graded and still on the track record, because a tier table
             that hid its losers would not be worth reading, but they are not
@@ -243,11 +245,30 @@ export default function EdgesDashboard() {
   // the card counted only the rows currently in memory.
   const bestCount = summary?.best_bets ?? null;
 
+  // Which tiers the API is willing to call a bet. Read from the summary rather
+  // than hardcoded, so the server stays the single source of that decision.
+  const betTiers = summary?.bet_tiers ?? ["elite"];
+
   // Unfiltered board size, summed from the per-tier summary.
   const allTiersTotal = useMemo(() => {
     if (!summary) return null;
     return Object.values(summary.by_tier).reduce((a, b) => a + b, 0);
   }, [summary]);
+
+  // How many of those the site is actually recommending.
+  //
+  // The headline card used to be labelled "Elite Signals" over this same
+  // unfiltered total, which was true while elite was the only tier on the
+  // board and became a lie the moment it was not: a slate with no elite picks
+  // and one strong read "Elite Signals 1". The card counts the board and says
+  // separately how much of it is a bet.
+  const betCount = useMemo(() => {
+    if (!summary) return null;
+    return betTiers.reduce(
+      (a, t) => a + (summary.by_tier[t as keyof typeof summary.by_tier] ?? 0),
+      0,
+    );
+  }, [summary, betTiers]);
   const showingFiltered =
     allTiersTotal !== null && total !== allTiersTotal;
 
@@ -303,6 +324,15 @@ export default function EdgesDashboard() {
           break-even are used here as if they were common knowledge, and a
           number nobody can interpret is worse than no number. */}
       <Glossary />
+
+      {/* The board carries more than it recommends, so it has to say which is
+          which before the table, not after it. */}
+      {summary?.published_tiers && summary.published_tiers.length > 1 && (
+        <TierLedger
+          published={summary.published_tiers}
+          bet={summary.bet_tiers ?? ["elite"]}
+        />
+      )}
 
       {/*
         Say why the board is the size it is.
@@ -360,11 +390,12 @@ export default function EdgesDashboard() {
           }}
         >
           {/*
-            Named for the tier, because elite is the only one published.
-            "Total Signals" beside an Elite card counting the same props was
-            two labels for one number.
+            Named for the board, not for a tier. It counts every published
+            tier, and the line underneath says how many of those are the tier
+            being recommended. Naming it "Elite" over that total was correct
+            only while elite was the only tier on the board.
           */}
-          <div className="label">Elite Signals</div>
+          <div className="label">On The Board</div>
           {/*
             The summary count, not `total`.
 
@@ -383,7 +414,9 @@ export default function EdgesDashboard() {
           <div className="sub">
             {showingFiltered
               ? `${total} match your filters`
-              : "elite only, the one tier that has paid"}
+              : betCount === null
+              ? "across every published tier"
+              : `${betCount} elite, the tier offered as a bet`}
           </div>
         </button>
 
@@ -527,10 +560,15 @@ export default function EdgesDashboard() {
           <tbody>
             {edges.map((e, i) => {
               const over = e.recommended_side === "over";
+              // A row the site is not recommending reads differently, because
+              // a table where every row looks the same is a table where every
+              // row is a pick. The ledger above says which tiers those are;
+              // this is the same statement at the level of the row.
+              const isBet = betTiers.includes(e.edge_tier);
               return (
                 <tr
                   key={e.id}
-                  className="ps-row-in"
+                  className={`ps-row-in${isBet ? "" : " is-context"}`}
                   // Staggered entrance, capped at twelve rows. Past that the
                   // delay stops reading as motion and starts reading as lag.
                   style={{ animationDelay: `${Math.min(i, 12) * 26}ms` }}
@@ -695,7 +733,7 @@ export default function EdgesDashboard() {
                       cov.games_in_progress === 1 ? " is" : "s are"
                     } under way. Picks come down at kickoff so nothing here is ever stale, and the next slate is priced as it approaches.`
                   : cov && cov.games_priced > 0
-                  ? `${cov.games_priced} of ${cov.games_upcoming} games are priced and none of them rate an edge worth publishing. Elite is the only tier that has made money, so on a day like this the honest answer is that there is nothing to bet.`
+                  ? `${cov.games_priced} of ${cov.games_upcoming} games are priced and none of them clear the bar. Elite is the only tier that has made money, so on a day like this the honest answer is that there is nothing to bet.`
                   : cov && cov.games_upcoming > 0
                   ? `${cov.games_upcoming} game${
                       cov.games_upcoming === 1 ? "" : "s"

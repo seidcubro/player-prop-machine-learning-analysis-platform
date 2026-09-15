@@ -198,6 +198,11 @@ export type EdgeCoverage = {
 
 export type EdgesSummary = {
   ok: boolean;
+  /** Tiers the board is returning at all. */
+  published_tiers?: string[];
+  /** The subset of those the site presents as something to stake. Everything
+      published and not in here is context, and the board says so. */
+  bet_tiers?: string[];
   by_market: { market_code: string; count: number; avg_abs_edge: number }[];
   by_tier: Partial<Record<EdgeTier, number>>;
   by_game: {
