@@ -67,7 +67,7 @@ export default function Landing() {
         {/* The mark and the name together. The icon alone reads as decoration;
             the lockup is what a visitor recognises as a brand. */}
         <div className="mark">
-          <Logo size={40} title="" />
+          <Logo size={64} title="" />
           <span className="word">
             Prior<span className="sig">Line</span>
           </span>

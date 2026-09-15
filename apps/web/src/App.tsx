@@ -118,7 +118,7 @@ export default function App() {
 
       <aside className="ps-rail" aria-label="Main">
         <NavLink to="/" className="ps-rail-brand" aria-label="PriorLine home">
-          <Logo size={30} title="" />
+          <Logo size={36} title="" />
           <span className="ps-rail-word">
             Prior<span className="sig">Line</span>
           </span>

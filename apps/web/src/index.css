@@ -173,9 +173,12 @@ body {
   color: var(--text);
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.16rem;
+  font-size: 1.32rem;
   letter-spacing: -0.02em;
 }
+/* The mark keeps its size while the word does the wrapping, so the two never
+   pull apart as the rail narrows. */
+.ps-rail-brand svg { flex: none; }
 .ps-rail-brand .sig {
   background: var(--brand-grad);
   -webkit-background-clip: text;
@@ -1349,17 +1352,27 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 }
 .ps-landing .hero > * { position: relative; z-index: 1; }
 
+/*
+ * The lockup at the top of the front door.
+ *
+ * It was sized for a navigation bar, which is what made it read as an
+ * afterthought under a 4rem headline: a 40px mark and a 1.6rem word sitting in
+ * the middle of an otherwise empty 88px of hero. It is the first thing on the
+ * page, so it is sized like it.
+ */
 .ps-landing .mark {
   display: inline-flex;
   align-items: center;
-  gap: var(--s3);
+  gap: var(--s4);
   margin-bottom: var(--s5);
 }
+.ps-landing .mark svg { flex: none; }
 .ps-landing .mark .word {
   font-family: var(--font-display);
-  font-size: 1.6rem;
+  font-size: clamp(1.75rem, 3.4vw, 2.5rem);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  line-height: 1;
   color: var(--text);
 }
 .ps-landing .mark .word .sig {
