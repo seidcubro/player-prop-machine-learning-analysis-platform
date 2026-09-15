@@ -1,0 +1,8 @@
+# Crawl the site. There is nothing here that needs hiding, and the pages worth
+# finding are the ones a search engine would want: the projections, the record,
+# and how any of it works.
+User-agent: *
+Allow: /
+
+# The API is a separate host and is not for crawling. It is rate limited and the
+# odds it returns are licensed for display, not redistribution.

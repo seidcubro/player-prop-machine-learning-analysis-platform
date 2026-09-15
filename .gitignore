@@ -27,6 +27,10 @@ coverage/
 .env
 .env.*
 !.env.example
+# The dev server's own origin, which is localhost and is not a secret. It is
+# committed so a fresh clone renders the Open Graph tags with a real value
+# instead of leaving the build placeholder in the markup.
+!apps/web/.env.development
 
 # Logs
 *.log

@@ -58,10 +58,17 @@ Frontend only. In the Vercel project settings:
 
 - Root directory: `apps/web`
 - Framework preset: Vite (auto-detected)
-- Environment variable: `VITE_API_BASE=https://api.priorline.io/api/v1`
+- Environment variables:
+  - `VITE_API_BASE=https://api.priorline.io/api/v1`
+  - `VITE_SITE_URL=https://priorline.io` (the site's own origin, no trailing slash)
 
-`VITE_API_BASE` is read at build time, not runtime, so changing it needs a
-redeploy.
+Both are read at build time, not runtime, so changing either needs a redeploy.
+The build refuses to run without them rather than shipping a broken version
+quietly: a missing `VITE_API_BASE` produces a site that deploys and looks
+correct while the browser blocks every call to `http://localhost`, and a missing
+`VITE_SITE_URL` leaves the Open Graph image as a relative path, which crawlers
+resolve against nothing, so every shared link renders as a bare URL with no
+preview card.
 
 `apps/web/vercel.json` handles the rest. The rewrite rule matters: React Router
 does client-side routing, so a hard refresh on `/projections` asks Vercel for a

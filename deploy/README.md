@@ -174,14 +174,19 @@ games inside its window that have no prices yet.
 
 ## Frontend
 
-Vercel, root directory `apps/web`, and one environment variable:
+Vercel, root directory `apps/web`, and two environment variables:
 
 ```
 VITE_API_BASE=https://api.priorline.io/api/v1
+VITE_SITE_URL=https://priorline.io
 ```
 
-It is read at build time, so changing it needs a redeploy. `apps/web/vercel.json`
-already handles the SPA rewrite and the asset caching.
+Both are read at build time, so changing either needs a redeploy, and the build
+fails with the variable's name rather than shipping without it.
+`VITE_SITE_URL` is the site's own origin and builds the Open Graph tags, which
+a crawler fetches with no page context and therefore cannot resolve a relative
+path against. `apps/web/vercel.json` already handles the SPA rewrite and the
+asset caching.
 
 ## Check it worked
 

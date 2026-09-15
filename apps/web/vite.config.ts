@@ -25,6 +25,18 @@ export default defineConfig(({ command, mode }) => {
         'is read at build time, so changing it needs a redeploy.'
       )
     }
+    // Same reasoning, different symptom. index.html builds the Open Graph and
+    // canonical tags out of this, and a crawler cannot resolve a relative
+    // image, so a missing value means every shared link renders as a bare URL
+    // with no title card. Vite would leave the placeholder in the markup and
+    // only warn, which nobody reads in a deploy log.
+    if (!env.VITE_SITE_URL) {
+      throw new Error(
+        'VITE_SITE_URL is not set. Set it to the site origin with no trailing ' +
+        'slash, for example https://priorline.io, in the Vercel project ' +
+        'settings. It is read at build time, so changing it needs a redeploy.'
+      )
+    }
   }
 
   return {
