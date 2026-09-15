@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from .db import engine
+from limits import parse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -29,6 +30,8 @@ from slowapi.util import get_remote_address
 
 from app.routes import router
 from app.routes.odds import router as odds_router
+
+log = logging.getLogger(__name__)
 
 # A ceiling on how fast anyone can read the board.
 #
@@ -45,7 +48,44 @@ from app.routes.odds import router as odds_router
 # The limit is set well above what the site needs. A page load is a handful of
 # calls, so a person never sees this; a harvester walking every market and page
 # does.
-_RATE = os.getenv("READ_RATE_LIMIT", "60/minute")
+_RATE_DEFAULT = "60/minute"
+
+
+def _read_rate() -> str:
+    """The configured limit, or the default if it cannot be parsed.
+
+    This is validated here because the failure it prevents is genuinely nasty.
+    The value is a `limits` rate string, "60/minute", and a bare number is not
+    one. slowapi does not parse it when the Limiter is built; it parses it on
+    the first request, inside middleware, where the ValueError is handed to a
+    handler that expects a RateLimitExceeded. The result is an API that starts
+    cleanly, reports itself healthy for as long as nobody asks it anything, and
+    then answers every single read with a 500 and a traceback about a missing
+    `detail` attribute.
+
+    `.env.example` shipped `READ_RATE_LIMIT=120`, so copying it to the server,
+    which is what the deploy instructions tell you to do, produced exactly that.
+
+    Falling back rather than refusing to start is deliberate. A typo in a
+    tuning value should not take the site down, and the log line says what
+    happened and what is being used instead.
+    """
+    raw = os.getenv("READ_RATE_LIMIT", "").strip()
+    if not raw:
+        return _RATE_DEFAULT
+    try:
+        parse(raw)
+    except ValueError:
+        log.error(
+            "READ_RATE_LIMIT=%r is not a rate limit string; using %s. "
+            "Write it as a count and a period, for example 120/minute.",
+            raw, _RATE_DEFAULT,
+        )
+        return _RATE_DEFAULT
+    return raw
+
+
+_RATE = _read_rate()
 
 
 def _client_ip(request: Request) -> str:
@@ -81,8 +121,6 @@ limiter = Limiter(key_func=_client_ip, default_limits=[_RATE])
 #
 # Set API_DOCS=off to serve neither the docs nor the schema.
 _DOCS = os.getenv("API_DOCS", "on").strip().lower() not in ("0", "off", "false", "no")
-
-log = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Player Prop API",
