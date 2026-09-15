@@ -294,7 +294,7 @@ function Technical() {
           Verified on the 2025 holdout, slate-clustered 95% intervals.
         </p>
         <div className="ps-tablewrap">
-          <table className="ps-table">
+          <table className="ps-table is-matrix">
             <thead>
               <tr>
                 <th>Selection</th>

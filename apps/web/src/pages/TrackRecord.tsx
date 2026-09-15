@@ -269,7 +269,7 @@ export default function TrackRecord() {
 
       {err && <div className="ps-empty">Could not load the record: {err}</div>}
 
-      <section className="ps-statgrid" aria-label="Headline record">
+      <section className="ps-statgrid ps-balance" aria-label="Headline record">
         <div className="ps-stat">
           <div className="label">Graded Picks</div>
           <div className="value">{loading ? "..." : totals.picks.toLocaleString()}</div>
@@ -303,7 +303,7 @@ export default function TrackRecord() {
         <h2>By Season</h2>
         <div className="ps-tablewrap">
           <div className="ps-tablescroll">
-            <table className="ps-table">
+            <table className="ps-table is-stats">
               <thead>
                 <tr>
                   <th>Season</th>
@@ -365,7 +365,7 @@ export default function TrackRecord() {
             check.
           </p>
           <div className="ps-tablewrap">
-            <table className="ps-table">
+            <table className="ps-table is-stats">
               <thead>
                 <tr>
                   <th>Tier</th>
@@ -399,7 +399,7 @@ export default function TrackRecord() {
         <h2>By Market</h2>
         <div className="ps-tablewrap">
           <div className="ps-tablescroll">
-            <table className="ps-table">
+            <table className="ps-table is-stats">
               <thead>
                 <tr>
                   <th>Market</th>

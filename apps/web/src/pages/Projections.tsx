@@ -179,7 +179,7 @@ export default function Projections() {
 
       <div className="ps-tablewrap">
         <div className="ps-tablescroll">
-        <table className="ps-table">
+        <table className="ps-table is-projections">
           <caption className="sr-only">
             Model projections for every eligible player
           </caption>

@@ -66,7 +66,7 @@ export default function GameBreakdown({
 
   return (
     <div className="ps-tablewrap">
-      <table className="ps-table">
+      <table className="ps-table is-matrix">
         <caption className="sr-only">Projection against result</caption>
         <thead>
           <tr>

@@ -34,7 +34,23 @@ function fmt(v: number | null | undefined, market: string): string {
 function Range({ p }: { p: Projection }) {
   const lo = p.p10;
   const hi = p.p90;
-  if (lo === null || hi === null || hi <= lo) return null;
+  /*
+   * A market with no spread still gets the row.
+   *
+   * Touchdown markets come back with a tenth of a score and an interval of
+   * nothing, so this returned null and that card alone lost its bottom two
+   * lines. In a grid of equal-height cards that reads as one card having
+   * failed to load, and the fix is not to hide the answer but to state it: the
+   * model has this player at a single outcome.
+   */
+  if (lo === null || hi === null || hi <= lo) {
+    return (
+      <div className="ps-wp-range is-flat">
+        <span className="ps-wp-track" />
+        <span className="ps-wp-nums">no spread to speak of</span>
+      </div>
+    );
+  }
   const pos = ((displayProjection(p) - lo) / (hi - lo)) * 100;
   return (
     <div className="ps-wp-range">

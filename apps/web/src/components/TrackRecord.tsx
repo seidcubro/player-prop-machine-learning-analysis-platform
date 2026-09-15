@@ -81,7 +81,7 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
     <div className="ps-section">
       <h2>Track Record</h2>
 
-      <div className="ps-statgrid">
+      <div className="ps-statgrid ps-balance">
         <div className="ps-stat">
           <div className="label">Hit Rate</div>
           <div className="ps-record">
@@ -104,7 +104,7 @@ export default function TrackRecord({ playerId }: { playerId: number }) {
       </div>
 
       <div className="ps-tablewrap">
-        <table className="ps-table">
+        <table className="ps-table is-picklog">
           <caption className="sr-only">
             Games we published a pick on. A game missing here is a game we
             did not bet, not a game that did not happen; the full log with our

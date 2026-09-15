@@ -1318,64 +1318,6 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 
 
 
-
-/* ========================================================= balanced grids */
-/*
- * A grid should not leave an orphan on the last row.
- *
- * `repeat(auto-fit, minmax(...))` fits as many columns as the width allows and
- * says nothing about how many items there are, so four cards in a container
- * wide enough for three render as a row of three and a lonely fourth. That
- * reads as a layout bug even though every card is the size it asked for.
- *
- * These rules pick a column count that divides the item count evenly: four goes
- * 2x2, six goes 3x2, eight goes 4x2, nine goes 3x3. Counts that do not divide
- * neatly, five and seven, keep auto-fit, because any fixed choice leaves a gap
- * anyway and auto-fit at least fills the width.
- *
- * The class is doubled so the utility outranks the page-level grid rule it
- * is overriding. `.ps-landing .seasons .grid` and a single `.ps-balance:has()`
- * tie on specificity, and the page rule happened to come later in the file,
- * so four season cards stayed in a row of four.
- *
- * :has() does the counting. `> :nth-child(4):last-child` is "the fourth child
- * is also the last", which is only true when there are exactly four.
- */
-.ps-balance.ps-balance:has(> :nth-child(2):last-child),
-.ps-balance.ps-balance:has(> :nth-child(4):last-child) {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.ps-balance.ps-balance:has(> :nth-child(3):last-child),
-.ps-balance.ps-balance:has(> :nth-child(6):last-child),
-.ps-balance.ps-balance:has(> :nth-child(9):last-child) {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.ps-balance.ps-balance:has(> :nth-child(8):last-child) {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-/* Narrow screens ignore all of it and stack, which is always balanced. */
-@media (max-width: 720px) {
-  .ps-balance.ps-balance:has(> :nth-child(2):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(3):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(4):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(6):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(8):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(9):last-child) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (max-width: 440px) {
-  .ps-balance.ps-balance:has(> :nth-child(2):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(3):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(4):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(6):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(8):last-child),
-  .ps-balance.ps-balance:has(> :nth-child(9):last-child) {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 /* ============================================================== landing */
 /*
  * The front door. Same tokens as everything else, arranged to be read rather
@@ -1465,6 +1407,20 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   text-decoration: none;
   transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease),
               border-color 0.2s var(--ease);
+}
+/*
+ * The buttons state their own fill.
+ *
+ * The inline-link rule paints body-copy links with a gradient clipped to the
+ * glyphs, which needs `-webkit-text-fill-color: transparent`. That rule was
+ * scoped to the whole `.honest` section, so it caught the two buttons at the
+ * bottom of it as well: the gradient pill kept its shape and its label went
+ * invisible. The selector is narrower now, and these two lines mean a future
+ * one cannot do it again.
+ */
+.ps-landing .cta a {
+  -webkit-text-fill-color: currentColor;
+  background-clip: border-box;
 }
 .ps-landing .cta a:hover { transform: translateY(-2px); }
 .ps-landing .cta .primary {
@@ -1579,6 +1535,9 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 }
 .ps-landing .how h3 {
   margin: 0 0 var(--s2);
+  /* Clear of the step number in the corner, which a two-line heading ran
+     straight through. */
+  padding-right: var(--s6);
   font-size: 0.98rem;
   font-family: var(--font-display);
 }
@@ -1655,26 +1614,28 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   line-height: 1.65;
   color: var(--text-dim);
 }
+/*
+ * Three ways out of a quiet day, written as links rather than as buttons.
+ *
+ * They were outlined pills with underlined labels inside them, which is two
+ * affordances doing the same job and neither of them matching the links in the
+ * copy above. These are the same inline link used everywhere else on the site:
+ * brand-coloured, with the rule that grows underneath on hover.
+ */
 .ps-noboard .actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: var(--s3);
+  gap: var(--s3) var(--s6);
   margin-top: var(--s5);
-}
-.ps-noboard .actions .ps-linkbtn {
-  padding: var(--s2) var(--s4);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  background: var(--bg-raised);
-  transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
-}
-.ps-noboard .actions .ps-linkbtn:hover {
-  border-color: var(--accent);
-  background: var(--bg-raised-2);
+  font-size: 0.9rem;
 }
 @media (max-width: 520px) {
-  .ps-noboard .actions { flex-direction: column; align-items: stretch; }
+  .ps-noboard .actions {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s4);
+  }
 }
 
 /* ============================================================ next slate */
@@ -1709,6 +1670,14 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   line-height: 1.6;
   color: var(--text-dim);
 }
+/* Two words, on one line. It was breaking after "Every" and sitting over its
+   own second line, which made a two-word link look like a paragraph. */
+.ps-nextslate .head > a {
+  flex: none;
+  align-self: center;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
 .ps-nextslate .rows { display: flex; flex-direction: column; }
 .ps-nextslate .row {
   display: grid;
@@ -1722,7 +1691,16 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
    * unrelated things. One flexible column does the spacing and the two values
    * travel together.
    */
-  grid-template-columns: auto minmax(0, 1fr) auto minmax(64px, auto);
+  /*
+   * The last two columns are fixed, not auto.
+   *
+   * With `auto` they sized to their own contents, so the market label was
+   * right-aligned against a ragged left edge and "Receiving Yards" started
+   * 40px further left than "Passing Yards" one row below it. Reserving the
+   * width instead gives both a real column: labels aligned left, figures
+   * aligned right, and the eye reads straight down each.
+   */
+  grid-template-columns: auto minmax(0, 1fr) 7.5rem 3.25rem;
   align-items: center;
   gap: var(--s3);
   padding: var(--s3) var(--s5);
@@ -1749,21 +1727,26 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-nextslate .market {
   font-size: 0.8rem;
   color: var(--text-faint);
-  text-align: right;
+  text-align: left;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ps-nextslate .num {
   font-family: var(--font-mono);
   font-size: 1.15rem;
+  /* Tabular figures so a two-digit number and a three-digit one occupy the
+     same grid, which is what lets them sit centred in a fixed column without
+     drifting against each other. */
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  text-align: center;
   color: var(--text);
 }
 
 @media (max-width: 620px) {
   .ps-nextslate .head { flex-direction: column; }
   .ps-nextslate .row {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) 3.25rem;
     row-gap: 2px;
   }
   /* The market label moves under the name rather than squeezing a third
@@ -2133,82 +2116,129 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
     color: var(--text-faint);
     white-space: nowrap;
   }
-  /* The identity block, the pick and the books each want the full width. */
   /*
-   * Spans chosen so every row fills the four columns exactly.
+   * Which cell goes where, per table.
    *
-   * Line, Model, Edge and EV are the stat line and take one column each. Win %
-   * and Pick pair. Tier and Book get the full width because their chips wrap.
-   * Leaving a column empty is what made the card look like it had holes in it.
-   */
-  /*
-   * Only the identity block earns a row to itself.
+   * These rules used to be written once for every table on the site, on the
+   * assumption that a cell called "Market" means the same thing wherever it
+   * appears. It does not. The board wants Market and Pick at the top because
+   * those are what a reader is looking up; the player's pick log wants the
+   * game first and the result last. One set of rules for both put ACTUAL and
+   * RESULT above MARKET and PICK on the player page, because the cells with no
+   * rule kept the default order of zero and sorted ahead of the ones that had
+   * been given an order at all.
    *
-   * Market, Tier and Book each used to take the full width, so a card was six
-   * stacked rows for ten values and ran nearly the height of a phone screen.
-   * Pairing them two to a row halves that without crowding anything: Market
-   * sits beside the Pick it describes, and Tier beside the Book offering it.
+   * So each table states its own reading order and its own spans, and every
+   * set below adds up to a whole number of four-column rows. A card with a
+   * hole in it is the thing all of this exists to avoid.
    */
-  .ps-table td:first-child { grid-column: 1 / -1; }
+
+  /* The cell that names the row always gets a line of its own, and needs no
+     label above it: a player's name or a market is self-evident. */
+  .ps-table td:first-child { grid-column: 1 / -1; order: 0; }
   .ps-table td:first-child::before { display: none; }
-  .ps-table td[data-label="Market"],
-  .ps-table td[data-label="Pick"],
-  .ps-table td[data-label="Win %"],
-  .ps-table td[data-label="Tier"] { grid-column: span 2; }
-  .ps-table td[data-label="Book"] { grid-column: 1 / -1; }
 
+  /* ---------------------------------------------------- the signals board */
+  /* Market beside the Pick it describes, the four numbers as a stat line
+     underneath, then the tier and the book offering it. */
+  .ps-table.is-board td[data-label="Market"],
+  .ps-table.is-board td[data-label="Pick"],
+  .ps-table.is-board td[data-label="Win %"],
+  .ps-table.is-board td[data-label="Tier"] { grid-column: span 2; }
+  .ps-table.is-board td[data-label="Book"] { grid-column: 1 / -1; }
+  .ps-table.is-board td[data-label="Market"] { order: 1; }
+  .ps-table.is-board td[data-label="Pick"] { order: 2; }
+  .ps-table.is-board td[data-label="Line"] { order: 3; }
+  .ps-table.is-board td[data-label="Model"] { order: 4; }
+  .ps-table.is-board td[data-label="Edge"] { order: 5; }
+  .ps-table.is-board td[data-label="EV"] { order: 6; }
+  .ps-table.is-board td[data-label="Win %"] { order: 7; }
+  .ps-table.is-board td[data-label="Tier"] { order: 8; }
+  .ps-table.is-board td[data-label="Book"] { order: 9; }
+
+  /* ------------------------------------------------------- projections */
   /*
-   * Projections pairs its cells two to a row as well.
-   *
-   * Its four values, Game, the market, Range and Depth, had no span rule, so
-   * they each took one column of four and were 68px wide on a 375px phone.
-   * That is narrower than the content: the range read "29-1" where the number
-   * is 29-129, silently truncated, which is worse than wrapping because it
-   * looks like a value rather than a clipped one.
+   * The projection is the page, so it goes directly under the name rather
+   * than third behind the date. Four cells, two to a row, no holes.
    */
-  .ps-table td[data-label="Game"],
-  .ps-table td[data-label="Range"],
-  .ps-table td[data-label="Depth"],
-  .ps-table td[data-label="Receiving Yards"],
-  .ps-table td[data-label="Rushing Yards"],
-  .ps-table td[data-label="Receptions"],
-  .ps-table td[data-label="Rush Attempts"],
-  .ps-table td[data-label="Passing Yards"],
-  .ps-table td[data-label="Passing TDs"],
-  .ps-table td[data-label="Completions"],
-  .ps-table td[data-label="Pass Attempts"],
-  .ps-table td[data-label="Anytime TD"] { grid-column: span 2; }
-
-  /*
-   * Reading order, which is not the column order.
-   *
-   * The table puts Pick near the end because that is where it belongs in a
-   * wide row. On a card the market and the pick are the two things being
-   * looked up, so they go together at the top, the four numbers form a stat
-   * line under them, and the supporting chips follow. Grid honours `order`, so
-   * this needs no change to the markup.
-   */
-  .ps-table td:first-child { order: 0; }
-  .ps-table td[data-label="Market"] { order: 1; }
-  .ps-table td[data-label="Pick"] { order: 2; }
-  .ps-table td[data-label="Line"] { order: 3; }
-  .ps-table td[data-label="Model"] { order: 4; }
-  .ps-table td[data-label="Edge"] { order: 5; }
-  .ps-table td[data-label="EV"] { order: 6; }
-  .ps-table td[data-label="Win %"] { order: 7; }
-  .ps-table td[data-label="Tier"] { order: 8; }
-  .ps-table td[data-label="Book"] { order: 9; }
-
-  .ps-table td[data-label="Tier"],
-  .ps-table td[data-label="Book"] {
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: wrap;
-    line-height: 1.4;
-    gap: 6px;
+  .ps-table.is-projections td:not(:first-child) { grid-column: span 2; }
+  .ps-table.is-projections td.num { order: 1; }
+  .ps-table.is-projections td[data-label="Depth"] { order: 2; }
+  .ps-table.is-projections td[data-label="Game"] { order: 3; }
+  .ps-table.is-projections td[data-label="Range"] { order: 4; }
+  /* The number is the one thing being looked up. Let it read like one. */
+  .ps-table.is-projections td.num strong {
+    font-family: var(--font-mono);
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
   }
-  .ps-table td[data-label="Book"]::before,
-  .ps-table td[data-label="Tier"]::before { align-self: center; }
+
+  /* --------------------------------------------- the record, by anything */
+  /*
+   * Season or market on its own line, the figures as a four-across stat line,
+   * and the claimed-against-actual bars last, full width, where they have the
+   * room to be compared.
+   */
+  .ps-table.is-stats td.num { order: 2; }
+  .ps-table.is-stats td[data-label="Claimed vs Actual"] {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+  /* The season table carries a source chip, which pairs with the year rather
+     than taking a line of its own. */
+  /* The bars are centred in the wide table, where they sit in a column of
+     their own. On a card they are a full-width block under their own label,
+     and centring them left the label hanging off to one side of them. */
+  .ps-table td .ps-cvr {
+    margin-inline: 0;
+    width: 100%;
+    max-width: 340px;
+  }
+  .ps-table.is-stats td[data-label="Source"] { grid-column: span 2; order: 1; }
+  .ps-table.is-stats tbody tr:has(td[data-label="Source"]) td:first-child {
+    grid-column: span 2;
+  }
+
+  /* ------------------------------------------------ a player's pick log */
+  /* The game, then what was bet, then how it finished. */
+  .ps-table.is-picklog td[data-label="Market"],
+  .ps-table.is-picklog td[data-label="Pick"] { grid-column: span 2; }
+  .ps-table.is-picklog td[data-label="Market"] { order: 1; }
+  .ps-table.is-picklog td[data-label="Pick"] { order: 2; }
+  .ps-table.is-picklog td[data-label="Line"] { order: 3; }
+  .ps-table.is-picklog td[data-label="Model"] { order: 4; }
+  .ps-table.is-picklog td[data-label="Actual"] { order: 5; }
+  .ps-table.is-picklog td[data-label="Result"] { order: 6; }
+
+  /* ------------------------------------------------------------ matrices */
+  /*
+   * A game log is a grid of numbers with a column per statistic, and turning
+   * one into stacked cards produces a column of labels nobody reads and a card
+   * per game the height of the screen. These stay tables and scroll sideways,
+   * which is what a matrix is for.
+   */
+  .ps-table.is-matrix { display: table; width: max-content; min-width: 100%; }
+  .ps-table.is-matrix thead { display: table-header-group; }
+  .ps-table.is-matrix tbody { display: table-row-group; }
+  .ps-table.is-matrix tbody tr {
+    display: table-row;
+    padding: 0;
+    gap: 0;
+  }
+  .ps-table.is-matrix td,
+  .ps-table.is-matrix th {
+    display: table-cell;
+    vertical-align: middle;
+    padding: var(--s3) var(--s4);
+    white-space: nowrap;
+  }
+  .ps-table.is-matrix td::before { display: none; }
+  /* Same alignment the table has on a wide screen: figures centred under
+     their heading, the row's own label left. */
+  .ps-table.is-matrix td { text-align: center; }
+  .ps-table.is-matrix td:first-child { text-align: left; }
 
   .ps-table td .prob { justify-content: flex-start; }
   .ps-table td[data-label="Win %"] .prob-bar { width: 40px; }
@@ -2393,10 +2423,42 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .side-under { background: rgba(255, 93, 108, 0.10); }
 
 /* ================================================== week projections */
+/*
+ * A player produces however many markets his position produces, which is five,
+ * seven or eight, and none of those divide by the column count the width
+ * happens to allow. `auto-fill` left the last card sitting on a row of its own
+ * beside an empty square, which is the one thing on the page that looks broken.
+ *
+ * So the column count is fixed rather than fitted, and the last row is widened
+ * to fill whatever it is short by. The result is always a rectangle, and the
+ * wide card at the bottom reads as deliberate.
+ */
 .ps-wp-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--s3);
+}
+.ps-wp-grid:has(> :nth-child(odd):last-child) > :last-child {
+  grid-column: 1 / -1;
+}
+@media (min-width: 1020px) {
+  .ps-wp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* A count that already divides by three needs nothing, and would otherwise
+     be caught by the two-column rule above. */
+  .ps-wp-grid:has(> :nth-child(3n):last-child) > :last-child {
+    grid-column: auto;
+  }
+  /* Last row holding one: widen it across all three. */
+  .ps-wp-grid:has(> :nth-child(3n + 1):last-child) > :last-child {
+    grid-column: 1 / -1;
+  }
+  /* Last row holding two: widen the second so the pair fills the row. */
+  .ps-wp-grid:has(> :nth-child(3n + 2):last-child) > :last-child {
+    grid-column: span 2;
+  }
+}
+@media (max-width: 460px) {
+  .ps-wp-grid { grid-template-columns: minmax(0, 1fr); }
 }
 .ps-wp-card {
   padding: var(--s4);
@@ -2635,7 +2697,7 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-noboard p a,
 .ps-landing .lede a,
 .ps-landing .sub a,
-.ps-landing .honest a,
+.ps-landing .honest p a,
 .ps-nextslate .head p a,
 a.ps-link {
   position: relative;
@@ -2656,7 +2718,7 @@ a.ps-link {
 .ps-noboard p a::after,
 .ps-landing .lede a::after,
 .ps-landing .sub a::after,
-.ps-landing .honest a::after,
+.ps-landing .honest p a::after,
 .ps-nextslate .head p a::after,
 a.ps-link::after {
   content: "";
@@ -2680,7 +2742,7 @@ a.ps-link::after {
 .ps-noboard p a:hover::after,
 .ps-landing .lede a:hover::after,
 .ps-landing .sub a:hover::after,
-.ps-landing .honest a:hover::after,
+.ps-landing .honest p a:hover::after,
 .ps-nextslate .head p a:hover::after,
 a.ps-link:hover::after { transform: scaleX(1); }
 
@@ -2863,3 +2925,96 @@ a.ps-link:hover::after { transform: scaleX(1); }
 /* Pager controls sit together at the right, regardless of how the count above
    wraps. */
 .ps-pager-controls { display: flex; gap: var(--s2); flex: none; }
+
+/* ========================================================= balanced grids */
+/*
+ * A grid should not leave an orphan on the last row.
+ *
+ * `repeat(auto-fit, minmax(...))` fits as many columns as the width allows and
+ * says nothing about how many items there are, so three cards in a container
+ * wide enough for two render as a pair and a lonely third. That reads as a
+ * layout bug even though every card is the size it asked for.
+ *
+ * These rules pick a column count that divides the item count evenly: three
+ * goes in a row, four goes 2x2, six goes 3x2, eight goes 4x2, nine goes 3x3.
+ * Counts that do not divide neatly, five and seven, keep auto-fit, because any
+ * fixed choice leaves a gap anyway.
+ *
+ * :has() does the counting. `> :nth-child(4):last-child` is "the fourth child
+ * is also the last", which is only true when there are exactly four.
+ *
+ * Two things about where this block sits and how it is written.
+ *
+ * It is last in the file and the class is written three times because it has
+ * to outrank the page rule it corrects. `.ps-landing .seasons .grid` and
+ * `.ps-landing .how ol` both score higher than a single `.ps-balance`, so the
+ * utility was being ignored on the two grids it was written for.
+ *
+ * And the narrow-screen fallback drops straight to one column. It used to go
+ * to two, which is the whole bug again: three cards in two columns is the
+ * orphan this file exists to prevent.
+ */
+.ps-balance.ps-balance.ps-balance:has(> :nth-child(2):last-child),
+.ps-balance.ps-balance.ps-balance:has(> :nth-child(4):last-child) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.ps-balance.ps-balance.ps-balance:has(> :nth-child(3):last-child),
+.ps-balance.ps-balance.ps-balance:has(> :nth-child(6):last-child),
+.ps-balance.ps-balance.ps-balance:has(> :nth-child(9):last-child) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.ps-balance.ps-balance.ps-balance:has(> :nth-child(8):last-child) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* Eight across is only readable on a wide screen. Halve it before the cards
+   start clipping their own labels, which still divides evenly. */
+@media (max-width: 900px) {
+  .ps-balance.ps-balance.ps-balance:has(> :nth-child(8):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* Six and nine are three-wide or nothing, so they halve here too. */
+@media (max-width: 720px) {
+  .ps-balance.ps-balance.ps-balance:has(> :nth-child(6):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/*
+ * Below this the cards are narrower than their own contents, so everything
+ * stacks. One column is the only width that is balanced at every count.
+ */
+@media (max-width: 540px) {
+  .ps-balance.ps-balance.ps-balance:has(> :nth-child(2):last-child),
+  .ps-balance.ps-balance.ps-balance:has(> :nth-child(3):last-child),
+  .ps-balance.ps-balance.ps-balance:has(> :nth-child(4):last-child),
+  .ps-balance.ps-balance.ps-balance:has(> :nth-child(6):last-child),
+  .ps-balance.ps-balance.ps-balance:has(> :nth-child(8):last-child),
+  .ps-balance.ps-balance.ps-balance:has(> :nth-child(9):last-child) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/*
+ * Cards carrying a paragraph need more room than cards carrying a number, so
+ * the prose variant stacks a lot earlier. Three columns of eighteen-character
+ * lines is balanced and unreadable, which is not the trade this file is making.
+ */
+@media (max-width: 860px) {
+  /*
+   * The class is repeated once more than the rules above it, because those
+   * carry `:has(:nth-child)` and a selector's :has() lends it the specificity
+   * of its own argument. A plain `.is-prose` scored lower than the count rule
+   * it was written to override and was ignored, which is the same specificity
+   * trap that made this utility get written twice.
+   */
+  .ps-balance.ps-balance.ps-balance.is-prose.is-prose:has(> :nth-child(2)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+
+/* A market the model puts at a single outcome. The track stays so the card
+   keeps the height of the ones beside it; the fill and the marker go, because
+   there is no range to mark. */
+.ps-wp-range.is-flat .ps-wp-track { opacity: 0.45; }

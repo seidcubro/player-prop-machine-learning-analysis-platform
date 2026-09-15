@@ -489,7 +489,7 @@ export default function EdgesDashboard() {
 
       <div className="ps-tablewrap">
         <div className="ps-tablescroll">
-        <table className="ps-table">
+        <table className="ps-table is-board">
           <caption className="sr-only">
             Betting edges: sportsbook lines versus model projections
           </caption>
@@ -709,13 +709,13 @@ export default function EdgesDashboard() {
                  from the next slate and how it has done when it did have an
                  opinion. */
               <div className="actions">
-                <Link className="ps-linkbtn" to="/projections">
+                <Link className="ps-link" to="/projections">
                   Every player&rsquo;s projection
                 </Link>
-                <Link className="ps-linkbtn" to="/record">
+                <Link className="ps-link" to="/record">
                   How the model has done
                 </Link>
-                <Link className="ps-linkbtn" to="/faq">
+                <Link className="ps-link" to="/faq">
                   Why a pick has to clear a bar
                 </Link>
               </div>

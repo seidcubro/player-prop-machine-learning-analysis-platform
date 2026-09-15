@@ -89,7 +89,7 @@ export default function NextSlate() {
             above only when a price is worth taking.
           </p>
         </div>
-        <Link className="ps-linkbtn" to="/projections">
+        <Link className="ps-link" to="/projections">
           Every player
         </Link>
       </div>
