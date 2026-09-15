@@ -11,6 +11,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import NextSlate from "../components/NextSlate";
 import Avatar from "../components/Avatar";
 import Select from "../components/Select";
 import Glossary from "../components/Glossary";
@@ -666,6 +667,12 @@ export default function EdgesDashboard() {
                 : "No games scheduled in the next eight days."
               : "No signals match these filters."}
           </div>
+        )}
+        {/* An empty board still has something to say: every player in the next
+            slate is already projected, so show that rather than a dead table.
+            Only when the board is genuinely empty, not when a filter is. */}
+        {!loading && edges.length === 0 && !err && allTiersTotal === 0 && (
+          <NextSlate />
         )}
         {loading && edges.length === 0 && (
           <div style={{ padding: 1 }}>

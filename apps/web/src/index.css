@@ -1287,6 +1287,85 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 }
 
 
+
+/* ============================================================ next slate */
+/*
+ * Shown in place of the signals table when nothing is priced. Deliberately
+ * quieter than the board: no tier colours and no green or red, because none of
+ * these are picks and colour here would claim otherwise.
+ */
+.ps-nextslate {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+.ps-nextslate .head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--border);
+}
+.ps-nextslate .head h3 {
+  margin: 0 0 var(--s2);
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+}
+.ps-nextslate .head p {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.ps-nextslate .rows { display: flex; flex-direction: column; }
+.ps-nextslate .row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 0.9fr) auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--border);
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.2s var(--ease);
+}
+.ps-nextslate .row:first-child { border-top: none; }
+.ps-nextslate .row:hover { background: var(--bg-hover); }
+.ps-nextslate .who { min-width: 0; }
+.ps-nextslate .name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ps-nextslate .sub {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+.ps-nextslate .market { font-size: 0.82rem; color: var(--text-dim); }
+.ps-nextslate .num {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (max-width: 620px) {
+  .ps-nextslate .head { flex-direction: column; }
+  .ps-nextslate .row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: 2px;
+  }
+  /* The market label moves under the name rather than squeezing a third
+     column onto a phone. */
+  .ps-nextslate .market { grid-column: 2 / 3; font-size: 0.74rem; }
+}
+
 /* ================================================================== profile */
 .ps-profilehead {
   display: flex;
