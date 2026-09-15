@@ -51,8 +51,8 @@ COMPOSE="docker compose"
 log() { printf '\n[%s] ==> %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
 
 case "$MODE" in
-  --closing|--board|--daily|--weekly) ;;
-  *) echo "usage: $0 [--closing|--board|--daily|--weekly]"; exit 2 ;;
+  --closing|--early|--board|--daily|--weekly) ;;
+  *) echo "usage: $0 [--closing|--early|--board|--daily|--weekly]"; exit 2 ;;
 esac
 
 log "mode $MODE"
@@ -136,6 +136,84 @@ ON CONFLICT (provider_event_id, bookmaker_key, market_key,
 SQL
 
   log "rebuild the board on the fresh prices"
+  $COMPOSE build -q training >/dev/null
+  $COMPOSE run --rm training python build_prop_edges.py
+  log "done"
+  exit 0
+fi
+
+if [ "$MODE" = "--early" ]; then
+  : "${ADMIN_TOKEN:?set ADMIN_TOKEN to the value the API is running with}"
+  WINDOW_H="${EARLY_WINDOW_H:-72}"
+
+  # Put a board up days before kickoff, not minutes.
+  #
+  # --closing exists to capture a price that is about to disappear, which is the
+  # right job for measuring closing line value and the wrong one for having a
+  # site. It buys inside 90 minutes of kickoff, so for most of the week there is
+  # no upcoming priced game and the board is empty. Run this on a Friday and
+  # Sunday's slate is live from Friday instead of from Sunday lunchtime.
+  #
+  # Same "only what is not already bought" guard as --closing, so running it
+  # twice in a day costs nothing. A day is the right memory here: lines move
+  # over a week, and re-buying a game the next morning is a deliberate refresh
+  # rather than an accident.
+  unpriced=$($COMPOSE exec -T postgres psql -U app -d app -tA -c \
+    "SELECT count(*) FROM odds_events e
+      WHERE e.commence_time >= NOW()
+        AND e.commence_time < NOW() + make_interval(hours => $WINDOW_H)
+        AND NOT EXISTS (
+          SELECT 1 FROM odds_snapshots s
+           WHERE s.provider_event_id = e.provider_event_id
+             AND s.observed_at > NOW() - make_interval(hours => ${EARLY_RECHECK_H:-20}));")
+  unpriced=$(printf '%s' "$unpriced" | tr -d '[:space:]')
+
+  if [ "${unpriced:-0}" -eq 0 ]; then
+    log "early: every game within ${WINDOW_H}h already has prices, nothing to buy"
+    exit 0
+  fi
+
+  # A hard ceiling, because this is the one mode that can reach a whole slate.
+  # Nine markets a game, so the default cap is about 135 credits.
+  MAX_GAMES="${EARLY_MAX_GAMES:-15}"
+  if [ "$unpriced" -gt "$MAX_GAMES" ]; then
+    log "early: $unpriced games need prices, which is more than EARLY_MAX_GAMES=$MAX_GAMES; buying the first $MAX_GAMES"
+    unpriced="$MAX_GAMES"
+  fi
+
+  log "early: $unpriced game(s) within ${WINDOW_H}h, about $((unpriced * 9)) credits"
+  props=$(curl -sf -X POST -H "$AUTH" \
+    "$API/odds/sync/player_props?hours_ahead=$WINDOW_H&limit=$unpriced") || {
+    echo "FAILED: early props sync"; exit 1; }
+  echo "    $props"
+
+  # Record what was just bought, or the guard above can never see it.
+  #
+  # That guard asks odds_snapshots which games already have prices. Without this
+  # block the mode never writes there, so every run looks at a slate it bought
+  # an hour ago, decides it is unpriced, and buys it again. It cost 9 credits to
+  # find that out.
+  $COMPOSE exec -T postgres psql -U app -d app -q <<'SQL'
+INSERT INTO odds_snapshots
+  (provider_event_id, sport_key, commence_time, home_team, away_team,
+   bookmaker_key, bookmaker_title, market_key, player_name, outcome_name,
+   line, price_american, last_update, observed_at, source)
+SELECT p.provider_event_id, p.sport_key, e.commence_time, e.home_team, e.away_team,
+       p.bookmaker_key, p.bookmaker_title, p.market_key, p.player_name,
+       p.outcome_name, p.line, p.price_american, p.last_update,
+       date_trunc('hour', NOW()),
+       -- 'early' rather than 'live', because these are not closing prices and
+       -- eval_clv must not score them as if they were.
+       'early'
+FROM odds_player_props p
+LEFT JOIN odds_events e ON e.provider_event_id = p.provider_event_id
+WHERE e.commence_time IS NOT NULL
+  AND e.commence_time >= NOW()
+ON CONFLICT (provider_event_id, bookmaker_key, market_key,
+             player_name, outcome_name, observed_at) DO NOTHING;
+SQL
+
+  log "rebuild the board on the new prices"
   $COMPOSE build -q training >/dev/null
   $COMPOSE run --rm training python build_prop_edges.py
   log "done"

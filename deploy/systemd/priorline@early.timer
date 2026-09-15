@@ -1,0 +1,13 @@
+[Unit]
+Description=PriorLine early price buy, so the board is live before kickoff day
+
+[Timer]
+# Friday morning. Sunday's slate is inside the 72 hour window by then, so the
+# board is populated from Friday instead of from ninety minutes before kickoff.
+# Persistent, so a machine that was down on Friday still buys when it returns
+# rather than leaving the weekend unpriced.
+OnCalendar=Fri *-*-* 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

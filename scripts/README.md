@@ -8,6 +8,7 @@ only entry point anything automated should call.
 | mode | what it does | credits | runtime |
 |---|---|---|---|
 | `--closing` | buys prices for a slate kicking off inside 90 minutes, rebuilds the board | 9 per game, nothing when no slate is near | under a minute |
+| `--early` | buys prices for everything inside 72 hours, so the board is live days ahead | 9 per game, nothing when the window is already bought | under a minute |
 | `--board` | injuries and depth charts, projections, board, audit | free | about 5 minutes |
 | `--daily` | the above plus full ingest, features, grading, recalibration | free, or a full sync with `ODDS=1` | about 10 minutes |
 | `--weekly` | the above plus retraining every market | free | about an hour |
@@ -36,6 +37,23 @@ Closing line value converges far faster than win and loss does, and a price not
 captured before kickoff cannot be bought back at anything like the same cost.
 That is why the cheap job is the one that matters.
 
+### Why --early exists
+
+`--closing` buys inside 90 minutes of kickoff, which is correct for capturing a
+closing price and useless for having a site: for most of the week no upcoming
+game has prices, so the board is empty. `--early` buys the same games days out
+instead, on a Friday for the Sunday slate, and the board is live from Friday.
+
+It costs a second capture of each game, so a week runs about 270 credits rather
+than 144, or roughly 4,600 across a season instead of 2,448. That is the price
+of the board existing for two days a week rather than two hours.
+
+Both guards apply. It only buys games with no snapshot in the last 20 hours, so
+running it twice on a Friday is free, and `EARLY_MAX_GAMES` caps a single run at
+15 games regardless. The snapshots it writes are labelled `early` rather than
+`live`, because an opening price is not a close and `eval_clv.py` must never
+score a pick against one.
+
 ### Guardrails
 
 - Odds spending is opt-in per run: `ODDS=1`, or `--closing`, and nothing else.
@@ -58,6 +76,7 @@ That is why the cheap job is the one that matters.
 Credits are only spent when the second argument is the word `odds`:
 
 ```
+schtasks /Create /TN "PriorLine Early"   /TR "...un_update.cmd --early odds"  /SC WEEKLY /D FRI /ST 09:00 /F
 schtasks /Create /TN "PriorLine Daily"   /TR "...\run_update.cmd --daily odds" /SC DAILY  /ST 08:00 /F
 schtasks /Create /TN "PriorLine Closing" /TR "...\run_update.cmd --closing"    /SC HOURLY /ST 08:05 /F
 schtasks /Create /TN "PriorLine Board PM" /TR "...\run_update.cmd --board"   /SC DAILY  /ST 17:00 /F

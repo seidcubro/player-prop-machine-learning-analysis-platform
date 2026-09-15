@@ -47,10 +47,18 @@ def main():
                                         market_key, bookmaker_key
                            ORDER BY observed_at
                        ) AS first_seen,
+                       -- The close must not be an early price.
+                       --
+                       -- The --early mode buys a slate days out and archives
+                       -- what it bought as 'early'. Those rows are genuine
+                       -- OPENING observations and belong in first_seen, which
+                       -- is the whole point of capturing them. They are the one
+                       -- thing a close cannot be, so non-early rows sort ahead
+                       -- of early ones here and the latest real price wins.
                        ROW_NUMBER() OVER (
                            PARTITION BY provider_event_id, player_name,
                                         market_key, bookmaker_key
-                           ORDER BY observed_at DESC
+                           ORDER BY (source = 'early') ASC, observed_at DESC
                        ) AS last_seen
                 FROM odds_snapshots
                 WHERE lower(outcome_name) = 'over' AND line IS NOT NULL
