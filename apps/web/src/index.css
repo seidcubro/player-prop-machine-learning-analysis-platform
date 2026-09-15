@@ -1294,6 +1294,54 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 
 
 
+
+/* ========================================================== empty board */
+/*
+ * A quiet day should read as a decision, not a failure. The old empty state was
+ * one grey sentence in the middle of a dead table, which looks like the site is
+ * broken and gives a visitor nothing to do. This states what happened, why, and
+ * where else to go.
+ */
+.ps-noboard {
+  padding: var(--s6) var(--s5);
+  text-align: center;
+  border-top: 1px solid var(--border);
+}
+.ps-noboard h3 {
+  margin: 0 0 var(--s2);
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+}
+.ps-noboard p {
+  margin: 0 auto;
+  max-width: 62ch;
+  font-size: 0.88rem;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+.ps-noboard .actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s3);
+  margin-top: var(--s5);
+}
+.ps-noboard .actions .ps-linkbtn {
+  padding: var(--s2) var(--s4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--bg-raised);
+  transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
+}
+.ps-noboard .actions .ps-linkbtn:hover {
+  border-color: var(--accent);
+  background: var(--bg-raised-2);
+}
+@media (max-width: 520px) {
+  .ps-noboard .actions { flex-direction: column; align-items: stretch; }
+}
+
 /* ============================================================ next slate */
 /*
  * Shown in place of the signals table when nothing is priced. Deliberately

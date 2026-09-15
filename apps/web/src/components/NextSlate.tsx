@@ -71,8 +71,13 @@ export default function NextSlate() {
         <div>
           <h3>Next up</h3>
           <p>
-            No lines posted yet, so there is nothing to bet against. These are
-            the model&rsquo;s own numbers for
+            {/* Careful not to claim nothing is priced. This panel shows whenever
+                the board is empty, and that happens both before prices arrive
+                and when prices are up but nothing clears the bar. Saying "no
+                lines posted yet" under a card reading "13 games priced" was the
+                second place the same wrong assumption had been written down. */}
+            No pick on the board right now. These are the model&rsquo;s own
+            numbers for
             {day
               ? ` ${new Date(day + "T12:00:00").toLocaleDateString(undefined, {
                   weekday: "long",
@@ -80,7 +85,8 @@ export default function NextSlate() {
                   day: "numeric",
                 })}`
               : " the next slate"}
-            . Picks appear here once a sportsbook prices the game.
+            , whether or not a sportsbook has posted a line. A pick appears
+            above only when a price is worth taking.
           </p>
         </div>
         <Link className="ps-linkbtn" to="/projections">

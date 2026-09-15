@@ -671,18 +671,48 @@ export default function EdgesDashboard() {
              empty because no game is close enough to kickoff to have been
              priced yet, and telling somebody their filters matched nothing
              sends them hunting through filters that were never the issue. */
-          <div className="ps-empty">
-            {allTiersTotal === 0
-              ? cov && cov.games_in_progress > 0
-                ? `Tonight's board is done. ${cov.games_in_progress} game${
-                    cov.games_in_progress === 1 ? " is" : "s are"
-                  } under way, and picks come down at kickoff so nothing here is stale. The next slate is priced as it approaches.`
-                : cov && cov.games_upcoming > 0
-                ? `No prices yet. ${cov.games_upcoming} game${
-                    cov.games_upcoming === 1 ? "" : "s"
-                  } scheduled, none priced. Lines are bought close to kickoff, so the board fills in as each game approaches.`
-                : "No games scheduled in the next eight days."
-              : "No signals match these filters."}
+          <div className="ps-noboard">
+            <h3>
+              {allTiersTotal !== 0
+                ? "No signals match these filters"
+                : cov && cov.games_in_progress > 0
+                ? "Tonight's board is done"
+                : cov && cov.games_priced > 0
+                ? "No elite picks today"
+                : "No prices posted yet"}
+            </h3>
+            <p>
+              {allTiersTotal === 0
+                ? cov && cov.games_in_progress > 0
+                  ? `${cov.games_in_progress} game${
+                      cov.games_in_progress === 1 ? " is" : "s are"
+                    } under way. Picks come down at kickoff so nothing here is ever stale, and the next slate is priced as it approaches.`
+                  : cov && cov.games_priced > 0
+                  ? `${cov.games_priced} of ${cov.games_upcoming} games are priced and none of them rate an edge worth publishing. Elite is the only tier that has made money, so on a day like this the honest answer is that there is nothing to bet.`
+                  : cov && cov.games_upcoming > 0
+                  ? `${cov.games_upcoming} game${
+                      cov.games_upcoming === 1 ? "" : "s"
+                    } scheduled, none priced yet. Lines are bought close to kickoff, so the board fills in as each game approaches.`
+                  : "No games are scheduled in the next eight days."
+                : "Widen a filter, or clear them all, to see the rest of the board."}
+            </p>
+            {allTiersTotal === 0 && (
+              /* Somewhere to go. A blank table is a dead end, and the two
+                 things worth reading on a quiet day are what the model expects
+                 from the next slate and how it has done when it did have an
+                 opinion. */
+              <div className="actions">
+                <Link className="ps-linkbtn" to="/projections">
+                  Every player&rsquo;s projection
+                </Link>
+                <Link className="ps-linkbtn" to="/record">
+                  How the model has done
+                </Link>
+                <Link className="ps-linkbtn" to="/faq">
+                  Why a pick has to clear a bar
+                </Link>
+              </div>
+            )}
           </div>
         )}
         {/* An empty board still has something to say: every player in the next
