@@ -35,15 +35,25 @@ case "$MODE" in
     # --clean --if-exists so a second run replaces rather than collides.
     # -j4 because the index builds dominate and the box has more than one core.
     #
+    # The dump is copied into the container rather than piped into it, which
+    # looks like a pointless extra step and is not. pg_restore refuses to run
+    # parallel jobs against standard input, because it has to seek around the
+    # archive to schedule them: "parallel restore from standard input is not
+    # supported", exit 1. This piped it in and passed -j4, so it had never
+    # worked. Found on the first real deploy, which is late for a script whose
+    # entire job runs once.
+    #
     # The env file is sourced first. Every variable in the production
     # compose file is written ${VAR:?...}, so compose refuses to read the
     # file at all without them, and a non-interactive ssh session starts
     # with none of them set: the restore would abort on a missing password
     # before it ever reached the dump.
     ssh "$HOST" "set -a; . /etc/priorline/env; set +a; cd /opt/priorline && \
+      docker compose -f deploy/docker-compose.prod.yml cp /tmp/$DUMP postgres:/tmp/$DUMP && \
       docker compose -f deploy/docker-compose.prod.yml exec -T postgres \
-        pg_restore -U app -d app --clean --if-exists --no-owner -j4 \
-        < /tmp/$DUMP && rm -f /tmp/$DUMP"
+        pg_restore -U app -d app --clean --if-exists --no-owner -j4 /tmp/$DUMP && \
+      docker compose -f deploy/docker-compose.prod.yml exec -T postgres rm -f /tmp/$DUMP && \
+      rm -f /tmp/$DUMP"
 
     echo "==> verifying"
     ssh "$HOST" "set -a; . /etc/priorline/env; set +a; cd /opt/priorline && \
