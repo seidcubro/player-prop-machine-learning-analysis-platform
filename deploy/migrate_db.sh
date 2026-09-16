@@ -31,8 +31,32 @@ case "$MODE" in
     echo "==> copying to $HOST"
     scp "$DUMP" "$HOST:/tmp/$DUMP"
 
+    # Start from an empty schema, not from --clean.
+    #
+    # The production compose mounts db/init.sql into the Postgres entrypoint so
+    # the API has tables to answer against before the dump lands. On a fresh
+    # volume that runs, and it creates a nine-column players table that the
+    # forty-table dump then cannot replace: --clean issues DROP TABLE players,
+    # two foreign keys depend on it, the drop fails, CREATE fails as "already
+    # exists", and the COPY fails on a column that version has never had. The
+    # restore reports "errors ignored on restore: 11" and exits 0, and every
+    # other table looks right, so the row counts say it worked. players is
+    # empty and every projection on the site joins to it.
+    #
+    # Dropping the schema first removes the collision at the source. It is
+    # destructive by design: this command means "make the server look like my
+    # laptop", and it is the reason it is a separate subcommand rather than
+    # something the pipeline runs.
+    echo "==> clearing the bootstrap schema"
+    ssh "$HOST" "set -a; . /etc/priorline/env; set +a; cd /opt/priorline && \
+      docker compose -f deploy/docker-compose.prod.yml exec -T postgres \
+        psql -U app -d app -v ON_ERROR_STOP=1 \
+        -c 'DROP SCHEMA public CASCADE' \
+        -c 'CREATE SCHEMA public' \
+        -c 'GRANT ALL ON SCHEMA public TO app' \
+        -c 'GRANT ALL ON SCHEMA public TO public'"
+
     echo "==> restoring"
-    # --clean --if-exists so a second run replaces rather than collides.
     # -j4 because the index builds dominate and the box has more than one core.
     #
     # The dump is copied into the container rather than piped into it, which
@@ -51,7 +75,7 @@ case "$MODE" in
     ssh "$HOST" "set -a; . /etc/priorline/env; set +a; cd /opt/priorline && \
       docker compose -f deploy/docker-compose.prod.yml cp /tmp/$DUMP postgres:/tmp/$DUMP && \
       docker compose -f deploy/docker-compose.prod.yml exec -T postgres \
-        pg_restore -U app -d app --clean --if-exists --no-owner -j4 /tmp/$DUMP && \
+        pg_restore -U app -d app --no-owner -j4 /tmp/$DUMP && \
       docker compose -f deploy/docker-compose.prod.yml exec -T postgres rm -f /tmp/$DUMP && \
       rm -f /tmp/$DUMP"
 
