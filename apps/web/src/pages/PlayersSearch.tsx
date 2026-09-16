@@ -118,14 +118,13 @@ export default function PlayersSearch() {
       {players.length > 0 && (
         <>
           <div className="ps-playergrid">
-            {players.map((p, i) => {
+            {players.map((p) => {
               const name = p.name ?? p.display_name ?? "Unknown";
               return (
                 <Link
                   key={p.id}
                   to={`/players/${p.id}`}
-                  className="ps-playercard ps-row-in"
-                  style={{ animationDelay: `${Math.min(i, 14) * 22}ms` }}
+                  className="ps-playercard"
                 >
                   <Avatar name={name} src={p.headshot} size="lg" />
                   <div style={{ minWidth: 0 }}>

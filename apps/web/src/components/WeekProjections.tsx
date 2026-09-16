@@ -124,11 +124,10 @@ export default function WeekProjections({ playerId }: { playerId: number }) {
         {game.opponent ? ` ${fmtDate(game.game_date)} vs ${game.opponent}.` : ""}
       </p>
       <div className="ps-wp-grid">
-        {rows.map((r, i) => (
+        {rows.map((r) => (
           <div
-            className="ps-wp-card ps-row-in"
+            className="ps-wp-card"
             key={`${r.market_code}-${r.game_date}`}
-            style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}
           >
             <div className="ps-wp-label">
               {marketLabel(r.market_code)}

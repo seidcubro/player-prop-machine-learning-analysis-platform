@@ -316,9 +316,8 @@ export default function TrackRecord() {
                 </tr>
               </thead>
               <tbody>
-                {seasons.map((s, i) => (
-                  <tr key={`${s.season}-${s.source}`} className="ps-row-in"
-                      style={{ animationDelay: `${Math.min(i, 10) * 26}ms` }}>
+                {seasons.map((s) => (
+                  <tr key={`${s.season}-${s.source}`}>
                     <td data-label="Season"><strong>{s.season}</strong></td>
                     <td data-label="Source">
                       <span className={`tier ${s.source === "live" ? "tier-strong" : "tier-small"}`}>
@@ -411,9 +410,8 @@ export default function TrackRecord() {
                 </tr>
               </thead>
               <tbody>
-                {markets.map((m, i) => (
-                  <tr key={m.market_code} className="ps-row-in"
-                      style={{ animationDelay: `${Math.min(i, 10) * 26}ms` }}>
+                {markets.map((m) => (
+                  <tr key={m.market_code}>
                     <td data-label="Market">
                       {marketLabel(m.market_code)}
                     </td>
@@ -461,8 +459,7 @@ function LeaderBoard({
       <p className="ps-tagline">{blurb}</p>
       <div className="ps-leaderlist">
         {rows.map((r, i) => (
-          <div className="ps-leader ps-row-in" key={r.player_id}
-               style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}>
+          <div className="ps-leader" key={r.player_id}>
             <span className="ps-leader-rank">{i + 1}</span>
             <Avatar name={r.player_name} src={r.headshot} />
             <div className="ps-leader-text">

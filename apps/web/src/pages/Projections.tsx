@@ -193,11 +193,9 @@ export default function Projections() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
+            {rows.map((r) => (
               <tr
                 key={`${r.player_id}-${r.market_code}-${r.game_date}`}
-                className="ps-row-in"
-                style={{ animationDelay: `${Math.min(i, 12) * 26}ms` }}
               >
                 <td data-label="Player">
                   <div className="ps-ident">

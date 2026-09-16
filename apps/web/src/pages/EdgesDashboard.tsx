@@ -559,7 +559,7 @@ export default function EdgesDashboard() {
             </tr>
           </thead>
           <tbody>
-            {edges.map((e, i) => {
+            {edges.map((e) => {
               const over = e.recommended_side === "over";
               // A row the site is not recommending reads differently, because
               // a table where every row looks the same is a table where every
@@ -569,10 +569,7 @@ export default function EdgesDashboard() {
               return (
                 <tr
                   key={e.id}
-                  className={`ps-row-in${isBet ? "" : " is-context"}`}
-                  // Staggered entrance, capped at twelve rows. Past that the
-                  // delay stops reading as motion and starts reading as lag.
-                  style={{ animationDelay: `${Math.min(i, 12) * 26}ms` }}
+                  className={isBet ? undefined : "is-context"}
                 >
                   <td data-label="Player">
                     <div className="ps-ident">
