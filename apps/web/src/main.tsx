@@ -11,6 +11,7 @@ import EdgesDashboard from './pages/EdgesDashboard'
 import Projections from './pages/Projections'
 import TrackRecord from './pages/TrackRecord'
 import Faq from './pages/Faq'
+import Model from './pages/Model'
 import PlayersSearch from './pages/PlayersSearch'
 import PlayerDetail from './pages/PlayerDetail'
 import NotFound from './pages/NotFound'
@@ -26,6 +27,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/projections" element={<Projections />} />
           <Route path="/record" element={<TrackRecord />} />
           <Route path="/faq" element={<Faq />} />
+          <Route path="/model" element={<Model />} />
           <Route path="/players" element={<PlayersSearch />} />
           <Route path="/players/:id" element={<PlayerDetail />} />
           {/* Anything else. Without this an unknown path rendered the nav and

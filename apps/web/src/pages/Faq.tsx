@@ -37,7 +37,8 @@ export default function Faq() {
         <p>
           Two versions of the same answers. Neither one is the sales pitch: the
           numbers below are what the model has actually done, including where it
-          has been wrong.
+          has been wrong. For the full method, read{" "}
+          <Link to="/model">Inside the Model</Link>.
         </p>
       </div>
 

@@ -2701,6 +2701,7 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
  * gradient rule that grows underneath on hover, so the affordance is still
  * obvious without the permanent line through the descenders.
  */
+.ps-hero p a,
 .ps-qa a,
 .ps-tagline a,
 .ps-notice-body a,
@@ -2722,6 +2723,7 @@ a.ps-link {
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+.ps-hero p a::after,
 .ps-qa a::after,
 .ps-tagline a::after,
 .ps-notice-body a::after,
@@ -2746,6 +2748,7 @@ a.ps-link::after {
   transform-origin: left;
   transition: transform 0.24s var(--ease);
 }
+.ps-hero p a:hover::after,
 .ps-qa a:hover::after,
 .ps-tagline a:hover::after,
 .ps-notice-body a:hover::after,
@@ -3136,3 +3139,142 @@ a.ps-link:hover::after { transform: scaleX(1); }
   border-left: 2px solid var(--border);
 }
 .ps-ledger-key b { color: var(--text-dim); font-weight: 600; }
+
+/* ========================================================== inside the model */
+/*
+ * The long-form method page. It reuses How It Works' section blocks and the
+ * site's tables so it reads as part of the same site; these are only the pieces
+ * that page does not have: an at-a-glance row, an on-page index, a callout, a
+ * formula block and the pipeline figure.
+ */
+.ps-model-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s3);
+  margin: 0 0 var(--s5);
+}
+.ps-model-stats > div {
+  padding: var(--s4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.ps-model-stats b {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 1.3rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.ps-model-stats b.pos { color: var(--green); }
+.ps-model-stats span {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+@media (max-width: 820px) {
+  .ps-model-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* An index of the page, laid out as a wrapping row so it costs one line on a
+   wide screen and a few on a phone rather than a column the height of the
+   screen. */
+.ps-model-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: 0 0 var(--s4);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+.ps-model-toc a {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
+}
+.ps-model-toc a:hover,
+.ps-model-toc a:focus-visible {
+  color: var(--text);
+  border-color: var(--accent);
+  outline: none;
+}
+.ps-faq .ps-qa[id] { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 72px); }
+
+.ps-model-callout {
+  margin: var(--s4) 0 0;
+  padding: var(--s4) var(--s5);
+  background: var(--bg-raised);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.ps-model-callout .k {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 var(--s2);
+}
+
+.ps-model-formula {
+  margin: var(--s3) 0 var(--s4);
+  padding: var(--s3) var(--s4);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.ps-model-dated {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+.ps-model-fig { margin: var(--s4) 0; }
+.ps-model-figbox {
+  overflow-x: auto;
+  padding: var(--s4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.ps-model-fig svg {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+  color: var(--text);
+}
+.ps-model-fig text { fill: currentColor; font-size: 12px; }
+.ps-model-fig .mono { font-family: var(--font-mono); }
+.ps-model-fig .disp { font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+.ps-model-fig .strong { font-weight: 600; }
+.ps-model-fig .faint { opacity: 0.65; }
+.ps-model-fig .small { font-size: 11px; }
+.ps-model-fig .tiny { font-size: 10px; }
+.ps-model-fig .acc-fill { fill: var(--accent); }
+.ps-model-fig .acc-stroke { stroke: var(--accent); }
+.ps-model-fig figcaption {
+  margin-top: var(--s3);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* The landing's pointer to it sits under the three cards, not above them. */
+.ps-landing .how .sub { margin: var(--s4) 0 0; }

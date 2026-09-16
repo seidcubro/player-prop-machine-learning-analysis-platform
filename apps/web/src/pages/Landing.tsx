@@ -178,6 +178,10 @@ export default function Landing() {
             </p>
           </li>
         </ol>
+        <p className="sub">
+          The full method, including every idea that was tested and thrown out,
+          is in <Link to="/model">Inside the Model</Link>.
+        </p>
       </section>
 
       {eliteSeasons.length > 0 && (
