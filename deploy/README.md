@@ -95,7 +95,22 @@ ACME_EMAIL=<your email, for certificate expiry notices>
 WEB_ORIGINS=https://priorline.io,https://www.priorline.io
 WEB_ORIGIN_REGEX=https://priorline-.*\.vercel\.app
 API_DOCS=on
+
+# Which stack the scheduled runs drive. Without these, scripts/scheduled_update.sh
+# defaults to the development compose file, which is present in the clone, so it
+# does not fail cleanly: it builds and starts a second Postgres with the password
+# "app" on a published 5432 beside the production one. COMPOSE_FILE and
+# COMPOSE_PROJECT_NAME are read by docker compose itself; the other two are read
+# by the script, for the one step that runs a bare `docker run`.
+COMPOSE_FILE=/opt/priorline/deploy/docker-compose.prod.yml
+COMPOSE_PROJECT_NAME=priorline
+INGEST_NETWORK=priorline_default
+INGEST_DATABASE_URL=postgresql://app:REPLACE_WITH_POSTGRES_PASSWORD@postgres:5432/app
 ```
+
+`INGEST_DATABASE_URL` repeats the password because that one step runs a bare
+`docker run` rather than going through compose, so it gets no environment from
+the compose file. Keep the two in step.
 
 `API_DOCS=off` serves neither the interactive docs nor the schema. On is a
 reasonable default here, since the schema is the clearest description of what

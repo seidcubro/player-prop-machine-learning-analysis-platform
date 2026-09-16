@@ -46,7 +46,22 @@ SEASON_START="${SEASON_START:-2022}"
 SEASON_END="${SEASON_END:-$(date +%Y)}"
 
 MARKETS="rec_yds rush_yds pass_yds recs rush_att pass_att pass_completions pass_td rush_td rec_td any_td"
-COMPOSE="docker compose"
+# Which stack to drive, and on which network.
+#
+# These were hardcoded to the development stack, and the timers run this script
+# with no arguments, so every scheduled run on the server drove the wrong one.
+# `docker compose` with no -f reads docker-compose.yml, which is the dev file
+# and is present in the clone, so it did not fail cleanly: it would have built
+# and started a second Postgres with the password "app" on a published 5432 and
+# a second API on 8000, beside the production stack it was supposed to be
+# updating. The ingest then failed on a network that only exists in dev, which
+# is the only reason this was noticed at all.
+#
+# Overridable so the server can point them at the production file. See
+# deploy/README.md; /etc/priorline/env sets all three.
+COMPOSE="${COMPOSE:-docker compose}"
+INGEST_NETWORK="${INGEST_NETWORK:-player-prop-platform_default}"
+INGEST_DATABASE_URL="${INGEST_DATABASE_URL:-postgresql://app:app@postgres:5432/app}"
 
 log() { printf '\n[%s] ==> %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
 
@@ -313,8 +328,8 @@ docker build -q -f jobs/ingestion/Dockerfile -t priorline-ingest . >/dev/null
 
 # ONLY_ARG is deliberately unquoted: it is either empty or a flag and a value.
 # shellcheck disable=SC2086
-docker run --rm --network player-prop-platform_default \
-  -e DATABASE_URL="postgresql://app:app@postgres:5432/app" \
+docker run --rm --network "$INGEST_NETWORK" \
+  -e DATABASE_URL="$INGEST_DATABASE_URL" \
   -e SEASON_START="$SEASON_START" -e SEASON_END="$SEASON_END" \
   $ONLY_ARG priorline-ingest
 
