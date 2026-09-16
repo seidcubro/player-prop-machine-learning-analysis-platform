@@ -5,10 +5,11 @@ Three pieces in three places, for three different reasons.
 | piece | where | cost |
 |---|---|---|
 | React frontend | Vercel | free |
-| API, Postgres, scheduled jobs | one small server | about $4 to $6 a month |
+| API, Postgres, scheduled jobs | one small server | $5 a month in the EU, $38 in the US |
 | Domain | any registrar | about $12 a year |
 
-Roughly $60 a year, most of it the domain.
+So somewhere between $70 and $470 a year depending on where the server lives.
+That gap is the one real decision in this file and it is explained below.
 
 ## Why not all on one managed platform
 
@@ -23,8 +24,21 @@ static frontend, which is what Vercel is for.
 
 ## The server
 
-Anything with 2 vCPU and 4GB will do. Hetzner CX22 is about 4 euro a month,
-DigitalOcean and Vultr are around 12 dollars for the same shape.
+Anything with 2 vCPU and 4GB will do. Where it runs costs more than what it is.
+
+Hetzner's cheap shared-vCPU CX line is EU only. CX22 in Falkenstein or Helsinki
+is 2 vCPU and 4GB for about 4.50 euro a month. The US locations, Ashburn and
+Hillsboro, only sell the dedicated CPX line, where the same 4GB is CPX21 at
+$37.49. DigitalOcean and Vultr are around $24 for that shape in the US.
+
+The trade is latency against roughly $33 a month. Users are in the US and the
+frontend is on a CDN either way, so what moves is the API round trip, about
+100ms added per call from Germany. The heavy work here is a weekly batch and not
+a request path, so the EU box is defensible; the US box is the one that needs no
+thinking about.
+
+What is not negotiable is the 4GB. CPX11 and its equivalents have 2GB, and the
+daily ingest peaks at 3.6.
 
 4GB is not arbitrary, and neither is the swap file below.
 
@@ -159,6 +173,18 @@ which is where this gets run from, so `scp -r` it is. It is a one-time copy and
 the weekly retrain writes new artifacts on the server from then on.
 
 ## The schedule
+
+Set the clock first. Hetzner hands you a UTC box and every `OnCalendar` line in
+these units is bare, so on UTC they fire five hours early and two of them land
+somewhere useless: the weekly retrain goes off at 21:00 Monday, in the middle of
+Monday Night Football and before that game can be graded, and the board refresh
+lands at 13:00 on Sunday, on top of the early kickoffs rather than before them.
+Eastern is what the times were written against, and it tracks the November
+change on its own.
+
+```bash
+timedatectl set-timezone America/New_York
+```
 
 ```bash
 cp deploy/systemd/* /etc/systemd/system/
