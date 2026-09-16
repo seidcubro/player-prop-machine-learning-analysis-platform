@@ -7,6 +7,10 @@ will actually do, and shows me the gap. Where the gap is big enough, that's a
 bet. At least that was the idea. Read the backtest section before you believe
 any of it.
 
+The full method, every model, the calibration and every idea I tested and threw
+out, is in [docs/MODEL.md](docs/MODEL.md). It's also on the site at
+[priorline.io/model](https://priorline.io/model).
+
 ```
 nflverse game data
   -> rolling and situational features per player per market
@@ -94,10 +98,12 @@ rush attempts +5.4%, rushing yards +2.2%, receiving yards +1.3%, and passing
 yards **-10.0%**, which is why that market is excluded. People bet their star to
 catch passes, not to fall short.
 
-So the dashboard flags unders on top-quartile lines in those four markets. Not
-because a model likes them, but because that's where the market's own bias is
-measurable. It's a plausible small edge, not a proven one, and I'm tracking
-closing line value going forward to find out which.
+That finding is what the board is built on now. Picks are tiered on calibrated
+expected value, overs have to clear roughly twice the bar of unders, and only the
+top tier is offered as a bet. That tier has returned +4.1% over 3,952 graded
+picks and finished positive in all four seasons it has run. It's still a small
+edge rather than a proven one, which is why closing line value is tracked
+alongside it.
 
 The general lesson cost me four failed experiments to learn: I couldn't
 out-predict the market, and neither could a residual model given the market's
@@ -109,18 +115,23 @@ of a mean, and always taking the best price.
 
 The family for each market is picked by `bakeoff.py`, not by me guessing.
 
-| Market | Model | R² | Bias |
-|---|---|---|---|
-| rush_att | ridge | 0.75 | -0.02 |
-| rush_yds | elasticnet | 0.60 | -0.14 |
-| recs | elasticnet | 0.44 | +0.09 |
-| pass_att | random forest | 0.42 | +0.89 |
-| rec_yds | extra trees | 0.40 | +0.65 |
-| pass_yds | random forest | 0.39 | +9.50 |
-| pass_completions | random forest | 0.38 | +1.07 |
-| rush_td | random forest | 0.17 | 0.00 |
-| pass_td | poisson | 0.16 | +0.04 |
-| rec_td | random forest | 0.11 | 0.00 |
+| Market | Active model | Family |
+|---|---|---|
+| rush_att | `ridge_v2` | ridge |
+| rush_yds | `enet_v2` | elastic net |
+| recs | `enet_v2` | elastic net |
+| rec_yds | `rf_default` | random forest |
+| pass_yds | `hgb_v1` | histogram gradient boosting |
+| pass_att | `hgb_v1` | histogram gradient boosting |
+| pass_completions | `hgb_v1` | histogram gradient boosting |
+| pass_td | `pois_v4` | poisson |
+| rush_td | `rf_v10` | random forest |
+| rec_td | `rf_v10` | random forest |
+| any_td | `rf_v10` | random forest, projected but never priced |
+
+The active model per market lives in the `active_models` table, so this is a
+snapshot. Touchdown markets are scored as classifiers with log loss and AUC,
+not R², because R² on a one-in-five yes/no outcome is capped well below 1.
 
 ### How the family gets picked
 
@@ -293,45 +304,39 @@ Full refresh in dependency order, ending with the audit:
 sh scripts/refresh_pipeline.sh
 ```
 
-Odds sync separately. Books only post player props two to four days before
+Odds sync separately. Books only post the markets I use a few days before
 kickoff, and The Odds API bills per event per market, so the pull is scoped to
-the upcoming slate:
+the next three days. Both endpoints need the admin token:
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/odds/sync/events"
-curl -X POST "http://localhost:8000/api/v1/odds/sync/player_props?days_ahead=8"
+curl -X POST -H "X-Admin-Token: $ADMIN_TOKEN" "http://localhost:8000/api/v1/odds/sync/events"
+curl -X POST -H "X-Admin-Token: $ADMIN_TOKEN" "http://localhost:8000/api/v1/odds/sync/player_props?days_ahead=3"
 ```
 
 Model artifacts aren't in git. Regenerate them with the refresh script.
 
 ## In season
 
-Two runs a week:
+On the server, five systemd timers run `scripts/scheduled_update.sh` in
+different modes (Eastern time):
 
-```bash
-sh scripts/weekly_update.sh
-```
+| When | Mode | Does |
+|---|---|---|
+| hourly at :05 | `--closing` | if a game kicks off within 90 minutes, buy its prices and rebuild the board |
+| daily 8:00 | `--daily` | ingest results, rebuild features, grade picks, refit calibration, buy prices for the next three days |
+| daily 17:00 | `--board` | fresh injury reports, projections and the board, no credits |
+| Fri 9:00 | `--early` | price Sunday's slate so the board is live from Friday |
+| Tue 1:00 | `--weekly` | retrain every market after Monday night is graded |
 
-Tuesday. Ingests last week's results, rebuilds features, retrains, rebuilds
-edges, grades whatever has been played, and ends with the freshness audit.
 Retraining weekly is on purpose. Every week adds real games and the record is
-the whole point.
+the whole point. Setup is in [`deploy/README.md`](deploy/README.md) and the modes
+are explained in [`scripts/README.md`](scripts/README.md).
 
-```bash
-sh scripts/weekly_update.sh --close-only
-```
-
-Sunday, about an hour before the first kickoff. Captures the closing lines into
-`odds_snapshots`.
-
-The Sunday run matters more than it looks. A closing line I don't capture is gone
-unless I pay the archive rate for it later, and the archive costs about 840
-credits a slate against roughly 130 for capturing it live. Six times cheaper to
-just take the snapshot.
-
-Closing line value is why I bother. Win/loss over a few hundred bets is mostly
-variance at a 53% break-even, but whether I consistently take numbers the market
-later moves toward settles the question much faster.
+Closing line value is why the closing and early runs exist. Win/loss over a few
+hundred bets is mostly variance at a 53% break-even, but whether I consistently
+take numbers the market later moves toward settles the question much faster.
+Until the early buy existed, 90% of props had a single captured price, so open
+and close were the same row and CLV read zero by construction.
 
 ```bash
 docker compose run --rm training python eval_clv.py
@@ -339,21 +344,21 @@ docker compose run --rm training python eval_clv.py
 
 ## What I'd do next
 
-Feed the line in as a feature and predict the residual instead of the raw stat.
-Competing with the market head-on has failed three tests now. Modeling where the
-line is wrong is a different and better-posed problem.
+Measure closing line value properly now that props get an early price and a
+closing price. It's the fastest honest test of whether this works.
 
-Stop betting the biggest disagreements. Three tests say that bucket loses.
+Grow elite volume through coverage, not by lowering the bar. Elite averaged about
+90 picks a game day in 2025; a thin board is almost always prices not bought yet.
 
-Calibrate the displayed probability with isotonic regression against the graded
-history, so the number shown is the number that happens.
+Keep adding features where there's real headroom. Expected touchdowns was the
+last one that helped. The yardage markets are already close to their ceiling, and
+three separate tests say better projections there don't turn into more profit.
 
-Fix the interval coverage. The 80% quantile interval actually covers anywhere
-from 69.8% to 94.6% depending on market. Conformal prediction gives coverage by
-construction.
-
-Automate the weekly refresh and track closing line value. Whether a pick beat the
-closing number converges much faster than win-loss does.
+Things I tried that are done or dead, so nobody tries them again: predicting the
+line's residual (a coin flip in every market), rescuing the strong tier with
+filters (it misses break-even by less than its own standard error), and
+correcting the median to a true midpoint (it fixed the calibration and erased the
+edge). Details in [docs/MODEL.md](docs/MODEL.md).
 
 ## Layout
 
