@@ -8,10 +8,12 @@
 #
 # Each mode is a superset of the one above it.
 #
-#   --closing only does anything when a game kicks off inside the next 75
-#             minutes, so it can run on the hour all day and costs nothing on
-#             the 20 or so hours when no slate is near. When one is, it buys
-#             prices for that slate alone.
+#   --closing two jobs, both scoped to the near slate, both free when no game
+#             is close. Inside 90 minutes of kickoff it captures a closing
+#             price, once per game, for measuring closing line value. Outside
+#             that but within REFRESH_WINDOW_H hours it re-buys any game whose
+#             prices have gone stale and rebuilds the board, so what the site
+#             shows is a line somebody can still bet.
 #   --board   free unless ODDS=1. Pulls injury reports, rebuilds projections and
 #             the board, audits. Injury reports are the thing that actually
 #             changes hour to hour: they land Wednesday through Friday and a
@@ -88,13 +90,95 @@ fi
 # games every hour to catch the one about to start is most of a month's credits
 # for data that has not moved.
 #
-# So this asks the schedule what is imminent. A 75 minute window against an
+# So this asks the schedule what is imminent. A 90 minute window against an
 # hourly run gives each game exactly one capture, as near kickoff as the cadence
 # allows, and no game two captures: the slates are hours apart and a game that
 # has already started is no longer in the window.
+#
+# That capture is for the record, not for the board. Buying once at 90 minutes
+# is the right way to measure closing line value and a bad way to run a site:
+# --daily buys at 08:00 and nothing else buys until 19:05, so on a Thursday the
+# board sat all day on eleven hour old prices. Cook was posted at 16.5 carries
+# in the morning and 17.5 by the evening, and the board still showed a signal
+# against 16.5, which is a signal against a line nobody could bet. So the
+# refresh tier below keeps the near slate current, and the capture stays exactly
+# as it was.
 if [ "$MODE" = "--closing" ]; then
   : "${ADMIN_TOKEN:?set ADMIN_TOKEN to the value the API is running with}"
   WINDOW_MIN="${CLOSING_WINDOW_MIN:-90}"
+
+  # ---------------------------------------------------------------- refresh
+  # Re-buy prices for games near kickoff, so the board tracks the book.
+  #
+  # Scoped by the same two questions as everything else here: how close is the
+  # game, and how old is what we already hold. Inside REFRESH_WINDOW_H hours of
+  # kickoff, re-buy anything whose last real price is older than
+  # REFRESH_EVERY_H hours.
+  #
+  # Cost, per game, is nine credits a refresh. The defaults give a single
+  # Thursday game two refreshes plus its capture, so about 27 credits. A
+  # thirteen game Sunday morning is the expensive case, which is what
+  # REFRESH_MAX_GAMES is for: it caps one run, soonest kickoff first, so a big
+  # slate is refreshed nearest-first rather than all at once.
+  #
+  # Anytime touchdown does not count as a real price. A game days out comes
+  # back with that market alone, and this site does not publish it, so treating
+  # it as priced would hold the board on morning lines all week.
+  REFRESH_H="${REFRESH_WINDOW_H:-8}"
+  REFRESH_EVERY_H="${REFRESH_EVERY_H:-3}"
+  REFRESH_MAX_GAMES="${REFRESH_MAX_GAMES:-6}"
+
+  stale=$($COMPOSE exec -T postgres psql -U app -d app -tA -c \
+    "SELECT count(*) FROM odds_events e
+      WHERE e.commence_time >= NOW() + make_interval(mins => $WINDOW_MIN)
+        AND e.commence_time < NOW() + make_interval(hours => $REFRESH_H)
+        AND NOT EXISTS (
+          SELECT 1 FROM odds_snapshots s
+           WHERE s.provider_event_id = e.provider_event_id
+             AND s.market_key <> 'player_anytime_td'
+             AND s.observed_at > NOW() - make_interval(hours => $REFRESH_EVERY_H));")
+  stale=$(printf '%s' "$stale" | tr -d '[:space:]')
+
+  if [ "${stale:-0}" -gt 0 ]; then
+    if [ "$stale" -gt "$REFRESH_MAX_GAMES" ]; then
+      log "refresh: $stale game(s) hold stale prices, capping at REFRESH_MAX_GAMES=$REFRESH_MAX_GAMES"
+      stale="$REFRESH_MAX_GAMES"
+    fi
+    log "refresh: $stale game(s) within ${REFRESH_H}h, about $((stale * 9)) credits"
+
+    # `limit` takes the soonest games in the window, which is the right
+    # priority but is not exactly the set counted above: a game refreshed an
+    # hour ago can sit ahead of one that needs it. Soonest-first is what a
+    # board wants either way, and --early already works this way.
+    props=$(curl -sf -X POST -H "$AUTH" \
+      "$API/odds/sync/player_props?hours_ahead=$REFRESH_H&limit=$stale") || {
+      echo "FAILED: refresh props sync"; exit 1; }
+    echo "    $props"
+
+    # Archived as 'refresh': a real price before kickoff, so eval_clv may take
+    # it as the close if no capture follows, but distinct from the 90 minute
+    # capture so the guard below can still tell whether that capture happened.
+    $COMPOSE exec -T postgres psql -U app -d app -q <<'SQL'
+INSERT INTO odds_snapshots
+  (provider_event_id, sport_key, commence_time, home_team, away_team,
+   bookmaker_key, bookmaker_title, market_key, player_name, outcome_name,
+   line, price_american, last_update, observed_at, source)
+SELECT p.provider_event_id, p.sport_key, e.commence_time, e.home_team, e.away_team,
+       p.bookmaker_key, p.bookmaker_title, p.market_key, p.player_name,
+       p.outcome_name, p.line, p.price_american, p.last_update,
+       date_trunc('hour', NOW()), 'refresh'
+FROM odds_player_props p
+LEFT JOIN odds_events e ON e.provider_event_id = p.provider_event_id
+WHERE e.commence_time IS NOT NULL
+  AND e.commence_time >= NOW()
+ON CONFLICT (provider_event_id, bookmaker_key, market_key,
+             player_name, outcome_name, observed_at) DO NOTHING;
+SQL
+
+    log "rebuild the board on the refreshed prices"
+    $COMPOSE build -q training >/dev/null
+    $COMPOSE run --rm training python build_prop_edges.py
+  fi
 
   # Count only the games not already captured.
   #
@@ -106,12 +190,18 @@ if [ "$MODE" = "--closing" ]; then
   #
   # Two hours because that is longer than the window, so a game seen once in
   # this cycle stays seen for the rest of it.
+  #
+  # Restricted to 'live' rows, or the refresh tier above would cancel the
+  # capture it is standing in front of: a refresh at 18:05 is one hour old at
+  # 19:05, the guard would read that as captured, and the game would kick off
+  # with no closing price at all. Only a capture counts as a capture.
   imminent=$($COMPOSE exec -T postgres psql -U app -d app -tA -c     "SELECT count(*) FROM odds_events e
       WHERE e.commence_time >= NOW()
         AND e.commence_time < NOW() + make_interval(mins => $WINDOW_MIN)
         AND NOT EXISTS (
           SELECT 1 FROM odds_snapshots s
            WHERE s.provider_event_id = e.provider_event_id
+             AND s.source = 'live'
              AND s.observed_at > NOW() - interval '2 hours');")
   imminent=$(printf '%s' "$imminent" | tr -d '[:space:]')
 

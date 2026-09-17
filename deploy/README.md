@@ -132,6 +132,25 @@ No file for the other modes, so they cannot spend anything even if the schedule
 changes. `--closing` is the exception by design: it buys the slate about to
 kick off and nothing else.
 
+That mode spends on two things, and both are capped by how close a game is.
+Inside 90 minutes of kickoff it captures a closing price, once per game. Between
+that and `REFRESH_WINDOW_H` hours out it re-buys any game whose prices have gone
+stale and rebuilds the board, at nine credits a game. Without the second one the
+board runs on whatever `--daily` bought at 08:00, which on a Thursday meant
+publishing a signal against a morning line hours after the book had moved off
+it.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `REFRESH_WINDOW_H` | 8 | How close to kickoff before prices are worth re-buying |
+| `REFRESH_EVERY_H` | 3 | How old the held price must be before re-buying it |
+| `REFRESH_MAX_GAMES` | 6 | Ceiling on one run, soonest kickoff first |
+
+The defaults cost about 27 credits for a single Thursday game. A full Sunday
+morning is the expensive case; lower `REFRESH_MAX_GAMES` or widen
+`REFRESH_EVERY_H` to spend less, at the cost of a board that tracks the book
+more slowly.
+
 ## Bring it up
 
 ```bash
