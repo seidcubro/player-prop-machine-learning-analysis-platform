@@ -86,7 +86,21 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    # No ports. Caddy is the only way in.
+    # Bound to the loopback, so Caddy is still the only way in from outside.
+    #
+    # The timers run scheduled_update.sh on the host, and that script drives the
+    # API over HTTP: the odds sync, the feature rebuild and attach_labels are
+    # all POSTs. With no binding at all there was nothing on the host to POST
+    # to, so `--daily` failed on its first call, every morning, for two days.
+    # `set -e` then took the rest of the run with it: no ingest, no features, no
+    # grading, no calibrator refits. The board still rebuilt, which is why the
+    # site looked alive while it was serving prices nothing had refreshed.
+    #
+    # 127.0.0.1 rather than a bare 8000, which would publish the admin
+    # endpoints on the public interface and leave an admin token as the only
+    # thing in front of them.
+    ports:
+      - "127.0.0.1:8000:8000"
 
   # The pipeline the timers drive.
   #
