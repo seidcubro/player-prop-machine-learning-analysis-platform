@@ -335,10 +335,28 @@ SQL
 fi
 
 # ------------------------------------------------------------------ odds
+# A failed odds sync must not take the rest of the run with it.
+#
+# This block used to `exit 1` on the first failed call, and everything that
+# matters comes after it: the nflverse ingest, the feature rebuild, grading,
+# the calibrator refits, the projections. The API was unreachable from the host
+# for two days after deploy, so `--daily` died on its first line both mornings
+# and none of that ran. Week 1 was played, and the models never saw it, while
+# the board kept rebuilding and the site looked fine.
+#
+# So odds failures are recorded and the run continues on the free work, which
+# needs no sportsbook and no credits. The exit code is still non-zero at the
+# end, so a scheduler alerts either way, but a dead card or a rate limit now
+# costs prices rather than a week of training data.
+ODDS_FAILED=0
+
 if [ "${ODDS:-0}" = "1" ]; then
   log "odds: events"
   curl -sf -X POST -H "$AUTH" "$API/odds/sync/events" >/dev/null || {
-    echo "FAILED: events sync"; exit 1; }
+    echo "FAILED: events sync"; ODDS_FAILED=1; }
+fi
+
+if [ "${ODDS:-0}" = "1" ] && [ "$ODDS_FAILED" = "0" ]; then
 
   # Three days, not eight.
   #
@@ -355,7 +373,7 @@ if [ "${ODDS:-0}" = "1" ]; then
   DAYS="${ODDS_DAYS_AHEAD:-3}"
   log "odds: player props for the next ${DAYS} day(s)"
   props=$(curl -sf -X POST -H "$AUTH" "$API/odds/sync/player_props?days_ahead=$DAYS") || {
-    echo "FAILED: props sync"; exit 1; }
+    echo "FAILED: props sync"; ODDS_FAILED=1; }
   echo "    $props"
 
   # Append to the price history. Closing line value is measured against this and
@@ -385,6 +403,8 @@ WHERE e.commence_time IS NOT NULL
 ON CONFLICT (provider_event_id, bookmaker_key, market_key,
              player_name, outcome_name, observed_at) DO NOTHING;
 SQL
+elif [ "$ODDS_FAILED" = "1" ]; then
+  log "odds: events sync failed, so prices are stale; continuing on the free work"
 else
   log "odds: skipped (set ODDS=1 to spend credits)"
 fi
@@ -535,5 +555,12 @@ fi
 # ------------------------------------------------------------------ gate
 log "freshness audit"
 $COMPOSE run --rm training python audit_freshness.py
+
+# The odds failure is reported here rather than where it happened, so the run
+# still does its free work first and the scheduler still hears about it.
+if [ "$ODDS_FAILED" = "1" ]; then
+  log "done, but the odds sync failed: the board is running on prices nothing refreshed"
+  exit 1
+fi
 
 log "done"
