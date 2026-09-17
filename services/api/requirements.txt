@@ -6,3 +6,8 @@ joblib==1.4.2
 scikit-learn==1.5.1
 requests>=2.31.0
 slowapi==0.1.9
+# zoneinfo reads the system tz database, and python:3.11-slim does not ship one.
+# app/schedule.py asks for America/New_York, which raises ZoneInfoNotFoundError
+# on that image; this package carries the database as a wheel so the answer does
+# not depend on what the base image happens to include.
+tzdata==2024.2

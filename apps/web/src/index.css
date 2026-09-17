@@ -250,6 +250,41 @@ h3 {
   line-height: 1.65;
 }
 
+/* When the board was built and when it is next checked.
+ *
+ * A rule above and below rather than a card: this is a status line, not a
+ * panel, and boxing it would give it the same weight as the board itself.
+ * Monospace on the times so a countdown ticking from 22 to 21 minutes does not
+ * shift the text beside it. */
+.ps-nextup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s5);
+  padding: var(--s3) 0;
+  margin: 0 0 var(--s5);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-nextup-key {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.ps-nextup strong { color: var(--text); font-weight: 600; }
+.ps-nextup-at { color: var(--text-faint); }
+
+/* The parenthetical is the first thing to go on a phone: the countdown is the
+   point and the exact clock time is not worth a second line. */
+@media (max-width: 560px) {
+  .ps-nextup-at { display: none; }
+}
+
 .ps-section { margin-top: var(--s7); }
 
 /* ================================================================== stat cards */

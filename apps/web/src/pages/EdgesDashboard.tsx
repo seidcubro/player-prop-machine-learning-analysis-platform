@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import NextSlate from "../components/NextSlate";
+import NextUpdate from "../components/NextUpdate";
 import Avatar from "../components/Avatar";
 import Select from "../components/Select";
 import Glossary from "../components/Glossary";
@@ -303,6 +304,14 @@ export default function EdgesDashboard() {
   return (
     <>
       <PageTitle lead="Today&rsquo;s" accent="Signals" />
+
+      {/* Directly under the title, because a visitor reads a thin board as a
+          broken one. Saying when it was built and when it is next checked is
+          the difference between "nothing today" and "nothing working". */}
+      <NextUpdate
+        next={summary?.next_update}
+        updatedAt={summary?.last_updated ? fullDateTime(summary.last_updated) : null}
+      />
       {/*
         One sentence, where there used to be two paragraphs.
 

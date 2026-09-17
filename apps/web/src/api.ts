@@ -217,6 +217,26 @@ export type EdgesSummary = {
   best_bets: number;
   coverage: EdgeCoverage | null;
   last_updated: string | null;
+  /**
+   * The next scheduled rebuild, served by the API rather than worked out in
+   * the browser, so the page cannot disagree with the timers that actually
+   * run. Optional because a deployed frontend can be newer than the API.
+   */
+  next_update?: BoardSchedule;
+};
+
+export type ScheduledRun = {
+  /** The systemd instance: closing, daily, board or weekly. */
+  job: string;
+  /** ISO timestamp, with an Eastern offset. */
+  at: string;
+  does: string;
+};
+
+export type BoardSchedule = ScheduledRun & {
+  timezone: string;
+  /** Every upcoming job, soonest first. Includes the one above. */
+  schedule: ScheduledRun[];
 };
 
 /* =========================

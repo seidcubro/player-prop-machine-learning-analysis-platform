@@ -14,8 +14,18 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..schedule import next_board_update
 
 router = APIRouter()
+
+
+def _next_update_or_none() -> dict | None:
+    """The next scheduled rebuild, or nothing if the schedule cannot be read."""
+    try:
+        return next_board_update()
+    except Exception:  # noqa: BLE001 - a countdown must not break the board
+        return None
+
 
 # Whitelisted sort keys -> SQL expressions. Never interpolate raw user input
 # into ORDER BY.
@@ -562,4 +572,12 @@ def edges_summary(db: Session = Depends(get_db)):
         "best_bets": int(best_bets),
         "coverage": dict(coverage) if coverage else None,
         "last_updated": str(last_updated) if last_updated else None,
+        # When the board is next rebuilt, so the site can say so rather than
+        # leaving a visitor to guess whether a quiet board is a stale one.
+        #
+        # Guarded, because this is the one field on the page that nobody needs.
+        # It reads a timezone database that the base image does not ship, and a
+        # missing tzdata would otherwise turn a cosmetic countdown into a 500
+        # on the whole board. The frontend already treats it as optional.
+        "next_update": _next_update_or_none(),
     }
