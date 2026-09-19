@@ -29,6 +29,7 @@ import interval_calibration as ic
 import median_anchor as ma
 import pandas as pd
 import spread_calibration as sc
+import vacated_volume as vv
 from sqlalchemy import create_engine, text
 
 ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
@@ -196,6 +197,9 @@ def main():
     spread_cal = sc.load(ARTIFACT_DIR)
     interval_cal = ic.load(ARTIFACT_DIR)
     anchor_cal = ma.load(ARTIFACT_DIR)
+    # Same adjustment the edge builder applies, built the same way, so a
+    # backup quarterback reads the same number on both pages.
+    vacated_vol = vv.VacatedVolume(engine, ctx, vv.load_params(ARTIFACT_DIR))
 
     print(f"{df['player_id'].nunique()} players, {len(df)} player-market rows, "
           f"{df['game_id'].nunique()} games")
@@ -285,6 +289,13 @@ def main():
                 if demoted >= 1 and stale_days > sf.get("stale_days", 60):
                     factor = float(sf["factor"])
                     pred *= factor
+
+            # Volume inherited from a ruled-out teammate, on the same factor as
+            # the stale-role correction so the range scales with the number.
+            inherit = vacated_vol.factor(r.player_id, market_code, pred)
+            if inherit != 1.0:
+                factor *= inherit
+                pred *= inherit
 
             # Undo the flattening before anything is derived from the point
             # prediction, which is what the edge builder does.

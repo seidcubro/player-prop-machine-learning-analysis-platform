@@ -813,7 +813,11 @@ button:focus-visible, a:focus-visible, [role="option"]:focus-visible {
  * that early would have taken the navigation labels away instead. A horizontal
  * scroll inside a wide data table is the honest trade.
  */
-.ps-table col.c-player { width: 250px; }
+/* The one flexible column. With every column fixed, a table wider than their
+   sum left the remainder as a dead strip past Book: 82px of header band with
+   nothing under it. The table's min-width is the sum of the columns with this
+   one at 250px, so taking the slack can grow it but never squeeze it. */
+.ps-table col.c-player { width: auto; }
 .ps-table col.c-market { width: 146px; }
 .ps-table col.c-num    { width: 96px; }
 .ps-table col.c-narrow { width: 80px; }
@@ -2471,19 +2475,19 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
  * interactive-looking thing on it was the player's name. A left marker on hover
  * gives the whole row an affordance without adding another colour.
  */
-.ps-table tbody tr { position: relative; }
-.ps-table tbody tr::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--accent);
-  opacity: 0;
-  transition: opacity 0.18s var(--ease);
-}
-.ps-table tbody tr:hover::after { opacity: 1; }
+/*
+ * Drawn on the first cell, never on the row.
+ *
+ * This was a `tr::after`, and a pseudo-element on a table row is a table cell
+ * as far as Chrome's layout is concerned, absolute positioning or not. Every
+ * table on the site had an invisible eleventh column, and under fixed layout it
+ * took all the spare width: on a 1,338px board the ten real columns summed to
+ * 1,256 and an 82px band of empty header sat past Book. Measured by switching
+ * the rule off, which filled the width exactly.
+ */
+.ps-table tbody tr > td { transition: background-color 0.12s var(--ease); }
+.ps-table tbody tr:hover > td { background-color: var(--bg-raised-2); }
+.ps-table tbody tr:hover > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The pick cell carries the decision, so it gets a little more presence than a
    coloured word. */

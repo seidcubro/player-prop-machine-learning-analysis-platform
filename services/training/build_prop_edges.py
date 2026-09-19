@@ -31,6 +31,7 @@ import joblib
 import median_anchor as anchor
 import numpy as np
 import pandas as pd
+import vacated_volume as vv
 import spread_calibration as spread
 from odds_markets import ALL_ODDS_TO_MARKET
 from scipy.stats import norm
@@ -160,14 +161,28 @@ PASSING_GAME = {
 }
 
 
-def vacated_role(ctx: dict, *, team, position, market_code) -> str | None:
-    """Why this prop sits in a role the model cannot see, or None if it does not."""
+def vacated_role(ctx: dict, *, team, position, market_code,
+                 adjusted: bool = False) -> str | None:
+    """Why this prop sits in a role the model cannot see, or None if it does not.
+
+    `adjusted` means vacated_volume.py re-projected this player in this market,
+    with a correction that validated out of sample. Only then is a role lifted,
+    and only at the player's own position: a backup quarterback's passing
+    markets come back once his volume is re-projected, but his receivers stay
+    withheld, because a backup throws worse and nothing here models that. A
+    missing rate or an unaccepted pool leaves `adjusted` False, so the default
+    is to keep withholding rather than to publish on a guess.
+    """
     vacated = ctx.get("vacated") or set()
     if not team or not position:
         return None
     if (team, "QB") in vacated and (position == "QB" or market_code in PASSING_GAME):
+        if position == "QB" and adjusted:
+            return None
         return "starting QB ruled out; volume not re-projected"
     if position != "QB" and (team, position) in vacated:
+        if adjusted:
+            return None
         return f"starting {position} ruled out; role not re-projected"
     return None
 
@@ -1173,6 +1188,9 @@ def main():
     interval_cal = interval.load(artifact_dir)
     anchor_cal = anchor.load(artifact_dir)
     ctx = load_current_context(engine)
+    # Who inherits the volume of a ruled-out teammate, and how much. Built once;
+    # only pools that beat "unchanged" on a held-out season are applied.
+    vacated_vol = vv.VacatedVolume(engine, ctx, vv.load_params(artifact_dir))
     stale_factors = load_stale_role_factors(artifact_dir)
     last_played = load_last_played(engine)
     ruled_out: set[str] = set()
@@ -1355,6 +1373,7 @@ def main():
             team=(frow.get("current_team") or frow.get("team")),
             position=frow.get("position"),
             market_code=market_code,
+            adjusted=vacated_vol.covers(frow.get("player_id"), market_code),
         )
         if role:
             skip(role, o["player_name"], market_code)
@@ -1381,6 +1400,15 @@ def main():
             if demoted >= 1 and stale_days > sf.get("stale_days", 60):
                 stale_factor = float(sf["factor"])
                 model_projection *= stale_factor
+
+        # Volume inherited from a ruled-out teammate. Folded into the same
+        # factor as the stale-role correction, so it reaches every quantile
+        # below and the win probability moves with the number, not just the
+        # number. See vacated_volume.py.
+        inherit = vacated_vol.factor(frow.get("player_id"), market_code, model_projection)
+        if inherit != 1.0:
+            stale_factor *= inherit
+            model_projection *= inherit
 
         # Undo the flattening, on the markets where undoing it validated.
         #

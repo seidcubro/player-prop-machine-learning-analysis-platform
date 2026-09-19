@@ -559,6 +559,13 @@ if [ "$MODE" != "--board" ]; then
   # accuracy improves and neither gets worse.
   log "refit median anchor"
   $COMPOSE run --rm training python fit_median_anchor.py
+
+  # Who inherits a ruled-out teammate's volume. Fitted on past absences and
+  # scored on the last complete season; only pools that improve the projection
+  # in yards, not just in shares, are written as accepted. Before the
+  # projections, which read it. See vacated_volume.py.
+  log "refit vacated volume"
+  $COMPOSE run --rm training python fit_vacated_volume.py
 fi
 
 log "project every eligible player"
