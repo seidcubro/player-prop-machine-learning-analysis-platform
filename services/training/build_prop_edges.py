@@ -427,6 +427,26 @@ def load_current_context(engine) -> dict:
     )
     vacated_roles = {(r.team, r.position) for r in vacated.itertuples()}
 
+    # Each home stadium's usual roof, for games whose roof is not decided yet.
+    # See the roof fallback in apply_current_context.
+    home_roof = dict(
+        pd.read_sql(
+            text(
+                """
+                SELECT DISTINCT ON (home_team) home_team, lower(roof) AS roof
+                FROM (
+                    SELECT home_team, roof, count(*) AS n
+                    FROM nfl_games
+                    WHERE roof IS NOT NULL AND home_team IS NOT NULL
+                    GROUP BY home_team, roof
+                ) r
+                ORDER BY home_team, n DESC
+                """
+            ),
+            engine,
+        ).itertuples(index=False, name=None)
+    )
+
     print(
         f"  current context: {len(depth)} depth ranks, {len(inj)} injury rows, "
         f"{len(games)} scheduled games, {len(opp_form)} defense/position form rows"
@@ -439,6 +459,7 @@ def load_current_context(engine) -> dict:
         "team_form": team_form,
         "mates": mates,
         "vacated": vacated_roles,
+        "home_roof": home_roof,
     }
 
 
@@ -537,15 +558,24 @@ def apply_current_context(
 
     # Teammates on this week's injury report at the same position, minus the
     # player himself. Vacated opportunity is a now fact, not a window average.
+    #
+    # Absent means zero. Once `mates` was bounded to the current season, a team
+    # with nobody on this year's report at a position simply has no row, and
+    # the feature used to be written only when a row existed: the player kept
+    # whatever his stored window said, which is last week's count or last
+    # January's. No teammates on the report is a fact about this game, and the
+    # fact is 0.
     mates = ctx["mates"]
-    if position is not None and (team, position) in mates.index:
-        m = mates.loc[(team, position)]
-        out_n = float(m["teammates_out"])
-        q_n = float(m["teammates_questionable"])
-        if status in ("Out", "Doubtful"):
-            out_n = max(0.0, out_n - 1.0)
-        elif status == "Questionable":
-            q_n = max(0.0, q_n - 1.0)
+    if position is not None:
+        out_n = q_n = 0.0
+        if (team, position) in mates.index:
+            m = mates.loc[(team, position)]
+            out_n = float(m["teammates_out"])
+            q_n = float(m["teammates_questionable"])
+            if status in ("Out", "Doubtful"):
+                out_n = max(0.0, out_n - 1.0)
+            elif status == "Questionable":
+                q_n = max(0.0, q_n - 1.0)
         put("pos_teammates_out", out_n)
         put("pos_teammates_questionable", q_n)
 
@@ -606,7 +636,17 @@ def apply_current_context(
     put("game_div_game", game.div_game or 0.0)
     put("rest_days", game.home_rest if is_home else game.away_rest)
 
+    # An unknown roof falls back to the stadium's usual one.
+    #
+    # The schedule leaves roof empty for games not yet played at retractable
+    # stadiums, because whether it closes is decided on the day. Writing
+    # nothing left the player with the roof of his previous game, so a Dallas
+    # receiver coming off a road game in Green Bay was projected outdoors at
+    # home. The home team's most common roof is the best guess available before
+    # kickoff, and a better one than wherever he last played.
     roof = (game.roof or "").strip().lower()
+    if not roof:
+        roof = (ctx.get("home_roof") or {}).get(game.home_team, "")
     if roof:
         put("is_indoor", 1.0 if roof in ("dome", "closed") else 0.0)
     surface = (game.surface or "").strip().lower()
