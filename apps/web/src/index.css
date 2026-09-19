@@ -58,7 +58,10 @@
   /* ---------------------------------------------------------------- geometry */
   --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
   --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
-  --content: 1200px;
+  /* Wide enough for the whole board. Its columns need about 1,300px, which
+     was set when a sidebar took part of the screen; with the sidebar gone a
+     1,200px cap clipped the Book column on every desktop. */
+  --content: 1340px;
   --radius: 4px;
   --radius-sm: 3px;
   /* Kept as a name so older rules still resolve; nothing on the site is a
@@ -250,39 +253,53 @@ h3 {
   line-height: 1.65;
 }
 
-/* When the board was built and when it is next checked.
+/* When the board was built and when it is next refreshed.
  *
- * A rule above and below rather than a card: this is a status line, not a
- * panel, and boxing it would give it the same weight as the board itself.
- * Monospace on the times so a countdown ticking from 22 to 21 minutes does not
- * shift the text beside it. */
+ * A compact strip, not a ruled-off sentence. The live dot pulses because this
+ * is the one element on the page that is literally counting, and the countdown
+ * is monospace so the digits do not jiggle as they tick. */
 .ps-nextup {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: var(--s2) var(--s5);
-  padding: var(--s3) 0;
+  align-items: center;
+  gap: var(--s2) var(--s4);
+  padding: 6px var(--s3);
   margin: 0 0 var(--s5);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   font-size: 0.82rem;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
 }
-
+.ps-nextup-live {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 0 rgba(76, 195, 138, 0.6);
+  animation: ps-pulse 2s ease-out infinite;
+}
+@keyframes ps-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(76, 195, 138, 0.55); }
+  70%  { box-shadow: 0 0 0 7px rgba(76, 195, 138, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(76, 195, 138, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ps-nextup-live { animation: none; }
+}
+.ps-nextup-part { display: inline-flex; align-items: baseline; gap: 6px; }
 .ps-nextup-key {
   font-family: var(--font-display);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-faint);
 }
-
-.ps-nextup strong { color: var(--text); font-weight: 600; }
-.ps-nextup-at { color: var(--text-faint); }
-
-/* The parenthetical is the first thing to go on a phone: the countdown is the
-   point and the exact clock time is not worth a second line. */
-@media (max-width: 560px) {
-  .ps-nextup-at { display: none; }
+.ps-nextup-val { color: var(--text); font-weight: 500; }
+.ps-nextup-clock {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .ps-section { margin-top: var(--s7); }
@@ -777,7 +794,7 @@ button:focus-visible, a:focus-visible, [role="option"]:focus-visible {
    * every width and a matching min-width means the columns keep their
    * proportions and the wrapper scrolls instead of crushing anything.
    */
-  min-width: 1176px;
+  min-width: 1256px; /* the sum of the board's declared columns */
 }
 /*
  * Deliberately wider than a 1440px viewport, so the board scrolls sideways
@@ -1277,27 +1294,112 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
  * of figures between rules, and the method in plain columns. No glow, no
  * centred hero, no card around every idea.
  */
-.ps-landing { max-width: 1040px; padding-bottom: var(--s8); }
+/* The full content width, the same as the masthead above it. Capping this at
+   1040px inside a wider shell is what left the right side of the first screen
+   empty and made the page look pushed to the left. */
+.ps-landing { padding-bottom: var(--s8); }
 
 .ps-landing .hero {
-  padding: var(--s5) 0 var(--s7);
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--s7);
+  align-items: center;
+  padding: var(--s6) 0 var(--s7);
   border-bottom: 1px solid var(--border);
 }
-.ps-landing .mark {
+@media (max-width: 960px) {
+  .ps-landing .hero { grid-template-columns: minmax(0, 1fr); gap: var(--s6); }
+}
+
+/* The live top of the board. A rule of the accent colour across the top is
+   the only decoration: it marks this as the thing that moves, against a page
+   that otherwise does not. */
+.ps-landing .hero-board {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+.hero-board-head {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: var(--s6);
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: var(--s4) var(--s4) var(--s3);
+  border-bottom: 1px solid var(--border);
 }
-.ps-landing .mark svg { flex: none; }
-.ps-landing .mark .word {
+.hero-board-title {
   font-family: var(--font-display);
-  font-size: 1.9rem;
+  font-size: 1.05rem;
   font-weight: 700;
-  line-height: 1;
-  color: var(--text);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
-.ps-landing .mark .word .sig { color: var(--accent); }
+.hero-board-sub { font-size: 0.78rem; color: var(--text-faint); }
+.hero-board-empty { padding: var(--s6) var(--s4); color: var(--text-dim); }
+.hero-board-list { list-style: none; margin: 0; padding: 0; }
+.hero-board-list li + li { border-top: 1px solid var(--border); }
+
+.hero-pick {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  color: var(--text);
+  text-decoration: none;
+  transition: background-color 120ms ease;
+}
+.hero-pick:hover { background: var(--bg-raised-2); }
+.hero-pick-who { display: flex; flex-direction: column; min-width: 0; }
+.hero-pick-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-pick-meta {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-pick-bet {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+.hero-pick-price { font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono); }
+.hero-pick-ev {
+  min-width: 4.5ch;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--green);
+}
+.hero-board-more {
+  display: block;
+  padding: var(--s3) var(--s4);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  text-align: right;
+  text-decoration: none;
+  color: var(--accent);
+}
+.hero-board-more:hover { color: var(--accent-hover); }
+
+/* On a phone the price and EV would crowd the name out, so the EV folds under
+   the bet instead of taking its own column. */
+@media (max-width: 480px) {
+  .hero-pick { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .hero-pick-ev { grid-column: 3; font-size: 0.78rem; }
+}
 
 .ps-landing h1 {
   max-width: 13ch;
@@ -1904,6 +2006,100 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* A game's header inside the projections table when it is grouped by game. */
+.ps-table tbody tr.ps-grouprow th {
+  padding: var(--s3) var(--s4);
+  background: var(--bg-raised-2);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--text);
+}
+.ps-grouprow-date {
+  margin-left: var(--s3);
+  font-family: var(--font-body);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-dim);
+}
+/* The card layout on phones turns every row into a block; the header row has
+   to stay a plain full-width band rather than a labelled card. */
+@media (max-width: 960px) {
+  .ps-table tbody tr.ps-grouprow { display: block; }
+  .ps-table tbody tr.ps-grouprow th { display: block; }
+}
+
+/* The ledger's explanation, folded under its opening line. */
+.ps-ledger-more { margin: 0 0 var(--s4); }
+.ps-ledger-more > summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 0.85rem;
+  color: var(--accent);
+  list-style: none;
+}
+.ps-ledger-more > summary::-webkit-details-marker { display: none; }
+.ps-ledger-more > summary::before { content: "+ "; font-family: var(--font-mono); }
+.ps-ledger-more[open] > summary::before { content: "− "; }
+.ps-ledger-more[open] > summary { margin-bottom: var(--s3); }
+
+/* ================================================================== view tabs */
+/* Elite bets, Best bets, Everything. Underlined tabs in the masthead's own
+   idiom, with the count beside each so an empty view is obvious before it is
+   chosen. */
+.ps-viewtabs {
+  display: flex;
+  gap: var(--s5);
+  margin: 0 0 var(--s4);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ps-viewtabs::-webkit-scrollbar { display: none; }
+.ps-viewtab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) 0;
+  margin-bottom: -1px;
+  background: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ps-viewtab:hover { color: var(--text); background: none; }
+.ps-viewtab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+.ps-viewtab-n {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised-2);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+.ps-viewtab.is-active .ps-viewtab-n { background: var(--accent); color: var(--accent-ink); }
+
+/* The sort control only exists where the column headers do not. */
+.ps-mobile-sort { display: none; }
+@media (max-width: 960px) {
+  .ps-mobile-sort { display: contents; }
 }
 
 /* ================================================================== responsive */
@@ -2888,8 +3084,15 @@ a.ps-link:hover {
  * the numbers keep full contrast so the row stays legible and accessible; what
  * drops is the row's presence, not its readability.
  */
-.ps-table tbody tr.is-context { opacity: 0.72; }
-.ps-table tbody tr.is-context:hover { opacity: 1; }
+/* Bet rows are marked, context rows are not dimmed.
+ *
+ * Context rows used to sit at 72% opacity until hovered, which made half the
+ * board look switched off: headshots greyed, numbers faded, and on a touch
+ * screen there is no hover to bring them back. Marking the rows that are
+ * offered as bets says the same thing without draining the rest. */
+.ps-table tbody tr.is-bet > td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 
 /* The plain-English key under the ledger's opening line. Quieter than the
    statement above it, because it is there for the first reader rather than

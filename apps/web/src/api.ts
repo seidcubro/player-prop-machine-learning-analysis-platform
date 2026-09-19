@@ -503,6 +503,8 @@ export type Projection = {
   position: string | null;
   team: string | null;
   opponent: string | null;
+  /** nflverse game id, for grouping a slate by matchup. */
+  game_id?: string | null;
   game_date: string | null;
   market_code: string;
   projection: number;
@@ -543,6 +545,8 @@ export async function fetchProjections(args?: {
   team?: string | null;
   search?: string | null;
   starters_only?: boolean;
+  /** One game, by nflverse game id. */
+  game_id?: string | null;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -554,6 +558,7 @@ export async function fetchProjections(args?: {
     team: args?.team ?? undefined,
     search: args?.search ?? undefined,
     starters_only: args?.starters_only ?? undefined,
+    game_id: args?.game_id ?? undefined,
     sort: args?.sort ?? "projection",
     order: args?.order ?? "desc",
     limit: args?.limit ?? 100,
@@ -691,4 +696,20 @@ export async function fetchCalibration(
   return http<{ ok: boolean; buckets: CalibrationBucket[] }>(
     `${API_BASE}/record/calibration?${qs({ season, source })}`,
   );
+}
+
+export type ProjectionGame = {
+  game_id: string;
+  game_date: string | null;
+  team_a: string;
+  team_b: string;
+  players: number;
+};
+
+/** Backend: GET /projections/games. The games on the projection slate. */
+export async function fetchProjectionGames(): Promise<ProjectionGame[]> {
+  const data = await http<{ ok: boolean; games: ProjectionGame[] }>(
+    `${getApiBase()}/projections/games`,
+  );
+  return data.games;
 }

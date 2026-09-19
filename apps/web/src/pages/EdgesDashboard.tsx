@@ -334,10 +334,7 @@ export default function EdgesDashboard() {
       {/* Directly under the title, because a visitor reads a thin board as a
           broken one. Saying when it was built and when it is next checked is
           the difference between "nothing today" and "nothing working". */}
-      <NextUpdate
-        next={summary?.next_update}
-        updatedAt={summary?.last_updated ? fullDateTime(summary.last_updated) : null}
-      />
+      <NextUpdate next={summary?.next_update} builtAt={summary?.last_updated} />
       {/*
         One sentence, where there used to be two paragraphs.
 
@@ -489,6 +486,47 @@ export default function EdgesDashboard() {
         </button>
       </section>
 
+      {/*
+        The view, as a control anyone can see.
+
+        The stat cards above filter when pressed, and nothing about them says
+        so: a reader looking for an elite filter scrolled straight past three
+        buttons that looked like numbers. This does the same job out loud.
+      */}
+      <div className="ps-viewtabs" role="tablist" aria-label="Which signals">
+        {(
+          [
+            ["elite", "Elite bets", betCount],
+            ["best", "Best bets", bestCount],
+            ["all", "Everything", allTiersTotal],
+          ] as const
+        ).map(([key, label, count]) => {
+          const active =
+            key === "best"
+              ? bestOnly
+              : key === "elite"
+              ? !bestOnly && exactTier === "elite"
+              : !bestOnly && !exactTier;
+          return (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className={`ps-viewtab${active ? " is-active" : ""}`}
+              onClick={() => {
+                setMinTier("");
+                setBestOnly(key === "best");
+                setExactTier(key === "elite" ? "elite" : "");
+              }}
+            >
+              {label}
+              {count != null && <span className="ps-viewtab-n">{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+
       <section className="ps-filters" aria-label="Filters">
         <input
           className="grow"
@@ -537,6 +575,30 @@ export default function EdgesDashboard() {
             })),
           ]}
         />
+        {/*
+          Sorting, for screens without column headers.
+
+          On a phone the table is a stack of cards and the header row that
+          carries the sort buttons is hidden, so there was no way to sort by
+          EV at all. Shown only there; on a desktop the headers do this.
+        */}
+        <div className="ps-mobile-sort">
+          <Select
+            label="Sort by"
+            value={sort}
+            onChange={(v) => {
+              setSort(v);
+              setOrder("desc");
+            }}
+            minWidth={168}
+            options={[
+              { value: "featured", label: "Featured" },
+              { value: "ev_per_unit", label: "Highest EV" },
+              { value: "win_prob", label: "Highest win %" },
+              { value: "edge", label: "Biggest edge" },
+            ]}
+          />
+        </div>
         <Select
           label="Side"
           value={side}
@@ -604,7 +666,7 @@ export default function EdgesDashboard() {
               return (
                 <tr
                   key={e.id}
-                  className={isBet ? undefined : "is-context"}
+                  className={isBet ? "is-bet" : "is-context"}
                 >
                   <td data-label="Player">
                     <div className="ps-ident">

@@ -2,99 +2,108 @@ import { useEffect, useState } from "react";
 import type { BoardSchedule } from "../api";
 
 /**
- * When the board is next rebuilt.
+ * When the board was built and when it is next checked.
  *
  * An empty board and a stale board look identical, and the difference is the
  * whole question a visitor has: is there nothing today, or is this thing
- * broken? A site that says "next check in 22 minutes" has answered it.
+ * broken? A countdown answers it.
  *
  * The times come from the API, which mirrors the systemd timers. Nothing here
  * knows the schedule; it only counts down to what it was handed.
  *
- * The word is "checks", not "updates". The hourly job rebuilds the board when
- * a game is close enough for its prices to have moved and does nothing when
- * none is, so promising an update every hour would be a lie on a Wednesday.
+ * The first version was a sentence: a full date, a second clause, a
+ * parenthetical. It read like a log line. This is a status strip instead, and
+ * the explanation of what the next run does lives in the tooltip for whoever
+ * wants it.
  */
 
-function useCountdown(target: string | undefined): number | null {
-  const [remaining, setRemaining] = useState<number | null>(null);
+const ET = "America/New_York";
 
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!target) {
-      setRemaining(null);
-      return;
-    }
-    const at = new Date(target).getTime();
-    if (Number.isNaN(at)) {
-      setRemaining(null);
-      return;
-    }
-
-    const tick = () => setRemaining(Math.max(0, at - Date.now()));
-    tick();
-
-    // Every fifteen seconds, not every second. The display is in minutes, so a
-    // per-second timer would re-render sixty times to change nothing, and a
-    // countdown is not worth a wakeup a second on a phone.
-    const id = window.setInterval(tick, 15_000);
+    if (!active) return;
+    // Once a second, because a countdown that visibly ticks is the point. It
+    // pauses while the tab is hidden, so a background tab costs nothing.
+    const id = window.setInterval(() => {
+      if (!document.hidden) setNow(Date.now());
+    }, 1000);
     return () => window.clearInterval(id);
-  }, [target]);
-
-  return remaining;
+  }, [active]);
+  return now;
 }
 
-function phrase(ms: number): string {
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 1) return "any moment";
-  if (minutes === 1) return "in 1 minute";
-  if (minutes < 60) return `in ${minutes} minutes`;
+/** "14:32", or "2:14:32" past the hour, or "3d 4h" past a day. */
+function clock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  const mm = String(m).padStart(h > 0 ? 2 : 1, "0");
+  const ss = String(sec).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
 
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  if (hours < 24) {
-    if (rest === 0) return `in ${hours} ${hours === 1 ? "hour" : "hours"}`;
-    return `in ${hours}h ${rest}m`;
-  }
-  const days = Math.round(hours / 24);
-  return `in ${days} ${days === 1 ? "day" : "days"}`;
+/** Today's time alone, or the date as well when it was not today. */
+function when(iso: string): string {
+  const t = new Date(iso);
+  const day = (d: Date) => d.toLocaleDateString("en-US", { timeZone: ET });
+  const time = t.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: ET,
+  });
+  if (day(t) === day(new Date())) return time;
+  const date = t.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: ET,
+  });
+  return `${date}, ${time}`;
 }
 
 export default function NextUpdate({
   next,
-  updatedAt,
+  builtAt,
 }: {
   next?: BoardSchedule;
-  /** Already formatted for display, or null when the board has never built. */
-  updatedAt?: string | null;
+  /** ISO timestamp of the last board build, or null if it has never built. */
+  builtAt?: string | null;
 }) {
-  const remaining = useCountdown(next?.at);
+  const target = next ? new Date(next.at).getTime() : NaN;
+  const now = useNow(Number.isFinite(target));
 
-  // An API too old to send a schedule still renders the part it does send,
-  // rather than the whole strip vanishing.
-  if (!next && !updatedAt) return null;
+  // An API too old to send a schedule still renders the part it does send.
+  if (!next && !builtAt) return null;
 
-  const clock =
+  const remaining = Number.isFinite(target) ? target - now : null;
+  const nextClock =
     next &&
     new Date(next.at).toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
-      timeZone: "America/New_York",
+      timeZone: ET,
     });
 
   return (
-    <div className="ps-nextup">
-      {updatedAt && (
+    <div className="ps-nextup" role="status">
+      <span className="ps-nextup-live" aria-hidden="true" />
+      {builtAt && (
         <span className="ps-nextup-part">
-          <span className="ps-nextup-key">Board built</span> {updatedAt}
+          <span className="ps-nextup-key">Updated</span>
+          <span className="ps-nextup-val">{when(builtAt)}</span>
         </span>
       )}
       {next && remaining !== null && (
-        <span className="ps-nextup-part">
-          <span className="ps-nextup-key">Next check</span>{" "}
-          <strong>{phrase(remaining)}</strong>
-          <span className="ps-nextup-at">
-            {" "}
-            ({clock} ET, {next.does})
+        <span
+          className="ps-nextup-part"
+          title={`${nextClock} ET: ${next.does}`}
+        >
+          <span className="ps-nextup-key">Next refresh</span>
+          <span className="ps-nextup-val ps-nextup-clock">
+            {remaining > 0 ? clock(remaining) : "now"}
           </span>
         </span>
       )}

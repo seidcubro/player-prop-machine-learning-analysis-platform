@@ -16,13 +16,17 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import Logo from "../components/Logo";
+import Avatar from "../components/Avatar";
 import { asPct, countWord, useHeadlineRecord } from "../lib/headline-record";
+import { kickoff, price as fmtOdds } from "../lib/format";
+import { marketLabel, sideLabel } from "../lib/markets";
 import {
+  fetchEdges,
   fetchEdgesSummary,
   fetchSeasonRecord,
   fetchTierRecord,
   type EdgesSummary,
+  type PropEdge,
   type SeasonRecord,
   type TierRecord,
 } from "../api";
@@ -36,6 +40,7 @@ export default function Landing() {
   const [tiers, setTiers] = useState<TierRecord[] | null>(null);
   const [seasons, setSeasons] = useState<SeasonRecord[] | null>(null);
   const [summary, setSummary] = useState<EdgesSummary | null>(null);
+  const [top, setTop] = useState<PropEdge[] | null>(null);
   const rec = useHeadlineRecord();
 
   useEffect(() => {
@@ -45,11 +50,15 @@ export default function Landing() {
       // Elite only, matching the number quoted at the top of the page.
       fetchSeasonRecord("all", "elite"),
       fetchEdgesSummary(),
-    ]).then(([t, s, e]) => {
+      // The strongest few on the board, so the front page shows the product
+      // instead of describing it.
+      fetchEdges({ tier: "elite", sort: "ev_per_unit", order: "desc", limit: 4 }),
+    ]).then(([t, s, e, b]) => {
       if (dead) return;
       if (t.status === "fulfilled") setTiers(t.value.tiers);
       if (s.status === "fulfilled") setSeasons(s.value.seasons);
       if (e.status === "fulfilled") setSummary(e.value);
+      setTop(b.status === "fulfilled" ? b.value.edges : []);
     });
     return () => {
       dead = true;
@@ -65,16 +74,18 @@ export default function Landing() {
 
   return (
     <div className="ps-landing">
-      <section className="hero">
-        {/* The mark and the name together. The icon alone reads as decoration;
-            the lockup is what a visitor recognises as a brand. */}
-        <div className="mark">
-          <Logo size={40} title="" />
-          <span className="word">
-            Prior<span className="sig">Line</span>
-          </span>
-        </div>
+      {/* Two columns: the pitch, and the board it is pitching.
 
+          The hero used to be one column of text in a page twice its width, so
+          the right half of the first screen was empty and the whole page read
+          as pushed to one side. Filling it with the live top of the board
+          fixes the balance and puts the actual product above the fold, which
+          prose about the product never managed.
+
+          The logo lockup that sat above the headline is gone: the masthead
+          directly above it already carries the same mark. */}
+      <section className="hero">
+        <div className="hero-copy">
         <h1>
           Our prior.<span className="accent"> Their line.</span>
         </h1>
@@ -117,6 +128,58 @@ export default function Landing() {
             </>
           )}
         </p>
+        </div>
+
+        <aside className="hero-board" aria-label="Top of today's board">
+          <div className="hero-board-head">
+            <span className="hero-board-title">Top of the board</span>
+            <span className="hero-board-sub">elite, by expected return</span>
+          </div>
+          {top === null ? (
+            <div className="hero-board-empty">Loading the board…</div>
+          ) : top.length === 0 ? (
+            <div className="hero-board-empty">
+              No elite signals right now. The board fills as kickoff approaches.
+            </div>
+          ) : (
+            <ol className="hero-board-list">
+              {top.map((e) => (
+                <li key={e.id}>
+                  <Link
+                    className="hero-pick"
+                    to={e.player_id ? `/players/${e.player_id}` : "/signals"}
+                  >
+                    <Avatar name={e.player_name} src={e.headshot} />
+                    <span className="hero-pick-who">
+                      <span className="hero-pick-name">{e.player_name}</span>
+                      <span className="hero-pick-meta">
+                        {marketLabel(e.market_code)}
+                        {e.commence_time ? ` · ${kickoff(e.commence_time)}` : ""}
+                      </span>
+                    </span>
+                    <span className="hero-pick-bet">
+                      <span className={`side-${e.recommended_side}`}>
+                        {sideLabel(e.market_code, e.recommended_side)}{" "}
+                        {e.line ?? ""}
+                      </span>
+                      <span className="hero-pick-price">
+                        {fmtOdds(e.price_american)}
+                      </span>
+                    </span>
+                    <span className="hero-pick-ev">
+                      {e.ev_per_unit != null
+                        ? `${e.ev_per_unit >= 0 ? "+" : "−"}${Math.abs(e.ev_per_unit * 100).toFixed(1)}%`
+                        : ""}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          )}
+          <Link className="hero-board-more" to="/signals">
+            Full board →
+          </Link>
+        </aside>
       </section>
 
       {/* The record, which is the only reason to trust any of it. */}

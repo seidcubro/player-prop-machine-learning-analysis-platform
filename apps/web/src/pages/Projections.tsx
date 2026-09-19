@@ -11,14 +11,19 @@
  * hides that completely.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import Select from "../components/Select";
 import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { shortDate as fmtDate } from "../lib/format";
-import { fetchProjections, type Projection } from "../api";
+import {
+  fetchProjectionGames,
+  fetchProjections,
+  type Projection,
+  type ProjectionGame,
+} from "../api";
 
 import {
   MARKET_OPTIONS,
@@ -95,13 +100,21 @@ export default function Projections() {
   const [debounced, setDebounced] = useState("");
   const [startersOnly, setStartersOnly] = useState(false);
   const [page, setPage] = useState(0);
+  // "projection" is biggest first; "game" groups the slate by matchup.
+  const [sort, setSort] = useState<"projection" | "game">("projection");
+  const [gameId, setGameId] = useState("");
+  const [games, setGames] = useState<ProjectionGame[]>([]);
+
+  useEffect(() => {
+    fetchProjectionGames().then(setGames).catch(() => setGames([]));
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 250);
     return () => clearTimeout(t);
   }, [search]);
 
-  useEffect(() => setPage(0), [market, position, debounced, startersOnly]);
+  useEffect(() => setPage(0), [market, position, debounced, startersOnly, sort, gameId]);
 
   const reqId = useRef(0);
   useEffect(() => {
@@ -113,6 +126,8 @@ export default function Projections() {
       position: position || undefined,
       search: debounced || undefined,
       starters_only: startersOnly,
+      game_id: gameId || undefined,
+      sort,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     })
@@ -128,7 +143,7 @@ export default function Projections() {
       .finally(() => {
         if (mine === reqId.current) setLoading(false);
       });
-  }, [market, position, debounced, startersOnly, page]);
+  }, [market, position, debounced, startersOnly, page, sort, gameId]);
 
 
   return (
@@ -167,6 +182,31 @@ export default function Projections() {
             label: p || "All positions",
           }))}
         />
+        <Select
+          label="Game"
+          value={gameId}
+          onChange={setGameId}
+          minWidth={200}
+          options={[
+            { value: "", label: "All games" },
+            ...games.map((g) => ({
+              value: g.game_id,
+              label: `${g.team_a} vs ${g.team_b}${
+                g.game_date ? ` · ${fmtDate(g.game_date)}` : ""
+              }`,
+            })),
+          ]}
+        />
+        <Select
+          label="Sort"
+          value={sort}
+          onChange={(v) => setSort(v as "projection" | "game")}
+          minWidth={170}
+          options={[
+            { value: "projection", label: "Biggest first" },
+            { value: "game", label: "By game" },
+          ]}
+        />
         <label className="ps-toggle">
           <input
             type="checkbox"
@@ -195,10 +235,30 @@ export default function Projections() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr
-                key={`${r.player_id}-${r.market_code}-${r.game_date}`}
-              >
+            {rows.map((r, i) => {
+              // A header row wherever a new game starts, when the slate is
+              // grouped by game. Without it "by game" is just an ordering the
+              // reader has to notice.
+              const matchup = [r.team, r.opponent].sort().join(" vs ");
+              const prev = rows[i - 1];
+              const newGame =
+                sort === "game" &&
+                (!prev ||
+                  prev.game_date !== r.game_date ||
+                  [prev.team, prev.opponent].sort().join(" vs ") !== matchup);
+              return (
+              <Fragment key={`${r.player_id}-${r.market_code}-${r.game_date}`}>
+              {newGame && (
+                <tr className="ps-grouprow">
+                  <th colSpan={5} scope="rowgroup">
+                    {matchup}
+                    {r.game_date ? (
+                      <span className="ps-grouprow-date">{fmtDate(r.game_date)}</span>
+                    ) : null}
+                  </th>
+                </tr>
+              )}
+              <tr>
                 <td data-label="Player">
                   <div className="ps-ident">
                     <Avatar name={r.player_name} src={r.headshot} />
@@ -255,7 +315,9 @@ export default function Projections() {
                   )}
                 </td>
               </tr>
-            ))}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
         </div>

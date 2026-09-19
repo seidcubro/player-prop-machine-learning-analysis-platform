@@ -478,6 +478,7 @@ def list_projections(
     team: str | None = Query(None),
     search: str | None = Query(None, description="Player name, case insensitive"),
     starters_only: bool = Query(False, description="Depth chart rank 1 only"),
+    game_id: str | None = Query(None, description="One game, by nflverse game id"),
     sort: str = Query("projection"),
     order: str = Query("desc"),
     limit: int = Query(100, ge=1, le=500),
@@ -498,14 +499,27 @@ def list_projections(
         # shows the expected count instead; sorting on the median there would
         # have put nearly every row in a tie at zero. Kept in step with
         # `displayProjection` in apps/web/src/lib/markets.ts.
+        #
+        # Passing touchdowns joined the list when the site started showing
+        # their mean: a median of 1 or 2 for every starter sorted as a tie.
         "projection": (
-            "CASE WHEN market_code IN ('any_td', 'rush_td', 'rec_td')"
+            "CASE WHEN market_code IN ('any_td', 'rush_td', 'rec_td', 'pass_td')"
             "     THEN projection ELSE COALESCE(p50, projection) END"
         ),
         "mean": "projection",
         "player_name": "player_name",
         "game_date": "game_date",
         "depth_rank": "depth_rank",
+        # Grouped by game: kickoff order, then each matchup together, then the
+        # biggest numbers first inside it. The matchup key is the two teams in
+        # a fixed order, so both sides of one game land in one block rather
+        # than splitting on whose row it is. Always chronological, whatever
+        # `order` says, because a slate read backwards is not a useful view.
+        "game": (
+            "game_date ASC, LEAST(team, opponent), GREATEST(team, opponent), "
+            "CASE WHEN market_code IN ('any_td', 'rush_td', 'rec_td', 'pass_td')"
+            "     THEN projection ELSE COALESCE(p50, projection) END"
+        ),
     }
     if sort not in sorts:
         raise HTTPException(status_code=400, detail=f"Invalid sort key: {sort}")
@@ -536,9 +550,16 @@ def list_projections(
         params["search"] = f"%{search.strip()}%"
     if starters_only:
         where.append("pr.depth_rank <= 1")
+    if game_id:
+        where.append("pr.game_id = :game_id")
+        params["game_id"] = game_id
 
     where_sql = " AND ".join(where)
     order_sql = f"{sorts[sort]} {'ASC' if order == 'asc' else 'DESC'} NULLS LAST"
+    if sort == "game":
+        # The direction applies to the size ordering inside each game, never
+        # to the games themselves; see the comment on the sort key.
+        order_sql = f"{sorts[sort]} DESC NULLS LAST, player_name"
 
     # One row per player and market: the next game, not every game in the
     # projection window.
@@ -570,7 +591,7 @@ def list_projections(
             f"""
             WITH next_game AS ({dedup_sql})
             SELECT pr.player_id, pr.player_name, pr.position, pr.team, pr.opponent,
-                   pr.game_date, pr.market_code, pr.projection,
+                   pr.game_id, pr.game_date, pr.market_code, pr.projection,
                    pr.p10, pr.p25, pr.p50, pr.p75, pr.p90,
                    pr.model_name, pr.depth_rank, pr.is_starter,
                    p.id AS app_player_id, p.headshot,
@@ -603,6 +624,37 @@ def list_projections(
         "limit": limit,
         "offset": offset,
         "projections": [dict(r) for r in rows],
+    }
+
+
+@router.get("/projections/games")
+def list_projection_games(db: Session = Depends(get_db)):
+    """The games on the current projection slate, for a game picker.
+
+    One row per game, both teams in a fixed order, soonest first. Read from the
+    projections themselves rather than the schedule, so a game appears here
+    exactly when there is something to show for it.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT game_id, MIN(game_date) AS game_date,
+                   MIN(LEAST(team, opponent))    AS team_a,
+                   MIN(GREATEST(team, opponent)) AS team_b,
+                   COUNT(DISTINCT player_id)     AS players
+            FROM player_projections
+            WHERE game_id IS NOT NULL
+            GROUP BY game_id
+            ORDER BY MIN(game_date), MIN(LEAST(team, opponent))
+            """
+        )
+    ).mappings().all()
+    return {
+        "ok": True,
+        "games": [
+            {**dict(r), "game_date": str(r["game_date"]) if r["game_date"] else None}
+            for r in rows
+        ],
     }
 
 

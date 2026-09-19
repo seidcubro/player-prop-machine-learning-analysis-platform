@@ -86,6 +86,13 @@ export default function TierLedger({
         being misread costs somebody money. The glossary is for looking
         something up; this is for not needing to.
       */}
+      {/*
+        Folded, not removed. Every visitor needed this once and nobody needs
+        it twice, and open it pushed the first pick on the board below the fold
+        on a laptop: the box was 497px of prose between the title and the data.
+      */}
+      <details className="ps-ledger-more">
+        <summary>How to read these numbers</summary>
       <p className="ps-ledger-key">
         <b>Return per unit</b> is profit on every 1 unit staked, so elite&rsquo;s
         figure means a 100 dollar bet came back as 104 on average, across
@@ -96,6 +103,7 @@ export default function TierLedger({
         sportsbook&rsquo;s cut is paid, so a tier winning half its picks is
         losing money.
       </p>
+      </details>
 
       <div className="ps-ledger-rows">
         {rows.map((r) => {
