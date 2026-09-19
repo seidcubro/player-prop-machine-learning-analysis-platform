@@ -1,0 +1,23 @@
+# Carries a failed run off the machine.
+#
+# Started by OnFailure= in priorline@.service, with the same instance name, so
+# priorline@daily failing starts priorline-alert@daily.
+#
+# Runs as root rather than as priorline, because the only thing it needs is to
+# read /var/log/priorline and reach the network, and because an alert that
+# fails for a permissions reason is worse than no alert.
+
+[Unit]
+Description=PriorLine failure alert (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/priorline
+# ALERT_NTFY_TOPIC and ALERT_WEBHOOK live here beside the other secrets.
+EnvironmentFile=/etc/priorline/env
+ExecStart=/bin/sh deploy/alert.sh %i
+# An alert that cannot be delivered must not retry forever or mask the original
+# failure, which is already recorded against the unit that actually failed.
+TimeoutStartSec=90

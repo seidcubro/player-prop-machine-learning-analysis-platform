@@ -94,6 +94,23 @@ export function isYesNo(code: string): boolean {
 }
 
 /**
+ * Touchdown counts, where the median throws away the information.
+ *
+ * For every other market the median is the honest number to show beside a
+ * pick. A touchdown count is small enough that its median is always a whole
+ * number, so a quarterback expected to throw 1.9 and one expected to throw 1.1
+ * both printed "2.0" against a 1.5 line and looked equally confident. They are
+ * not, and the win probability already knew it; only the displayed number hid
+ * it. On a half-point line the mean and the median agree on the side, so
+ * showing the mean here cannot put an over beside a number below the line.
+ */
+const TD_COUNT_MARKETS = new Set(["pass_td", "rush_td", "rec_td"]);
+
+export function isTdCount(code: string): boolean {
+  return TD_COUNT_MARKETS.has(code);
+}
+
+/**
  * What to call the side of a bet.
  *
  * A yes-or-no market has no over and no under. The board rendered "OVER" on
@@ -118,8 +135,13 @@ export function sideLabel(marketCode: string, side: string): string {
  *
  * These three are never priced, so there is no board figure to contradict, and
  * the expected count is the informative number.
+ *
+ * Passing touchdowns joined them once the board started showing the mean for
+ * touchdown counts too (see isTdCount). Its median is a whole number as well,
+ * 1 or 2 for nearly every starter, and the rule that both pages print the same
+ * figure still holds: they now both print the mean.
  */
-export const PROJECTION_ONLY_MARKETS = new Set(["any_td", "rush_td", "rec_td"]);
+export const PROJECTION_ONLY_MARKETS = new Set(["any_td", "rush_td", "rec_td", "pass_td"]);
 
 /** The figure a projection row should lead with. */
 export function displayProjection(row: {

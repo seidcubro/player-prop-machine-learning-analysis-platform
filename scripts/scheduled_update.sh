@@ -67,6 +67,31 @@ INGEST_DATABASE_URL="${INGEST_DATABASE_URL:-postgresql://app:app@postgres:5432/a
 
 log() { printf '\n[%s] ==> %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
 
+# Re-read the injury report and depth charts, then rebuild projections and the
+# board on them.
+#
+# The hourly refresh used to rebuild the board on fresh prices and stale news.
+# Prices are what it bought, but the reason a line moves on a Saturday is
+# usually a player: Sam Darnold was ruled out, the book moved Drew Lock to a
+# starter's number, and the refresh rebuilt a board that still thought Lock was
+# the backup. Both reads are free, so the only cost is a few minutes, and the
+# projections are rebuilt as well as the edges because the edge builder reads
+# who is ruled out from the same tables.
+rebuild_on_current_news() {
+  log "re-read injuries and depth charts"
+  docker build -q -f jobs/ingestion/Dockerfile -t priorline-ingest . >/dev/null
+  docker run --rm --network "$INGEST_NETWORK" \
+    -e DATABASE_URL="$INGEST_DATABASE_URL" \
+    -e SEASON_START="$SEASON_START" -e SEASON_END="$SEASON_END" \
+    -e ONLY=injuries,depth_charts priorline-ingest
+
+  $COMPOSE build -q training >/dev/null
+  log "rebuild projections"
+  $COMPOSE run --rm training python build_projections.py
+  log "rebuild the board"
+  $COMPOSE run --rm training python build_prop_edges.py
+}
+
 case "$MODE" in
   --closing|--early|--board|--daily|--weekly) ;;
   *) echo "usage: $0 [--closing|--early|--board|--daily|--weekly]"; exit 2 ;;
@@ -175,9 +200,7 @@ ON CONFLICT (provider_event_id, bookmaker_key, market_key,
              player_name, outcome_name, observed_at) DO NOTHING;
 SQL
 
-    log "rebuild the board on the refreshed prices"
-    $COMPOSE build -q training >/dev/null
-    $COMPOSE run --rm training python build_prop_edges.py
+    rebuild_on_current_news
   fi
 
   # Count only the games not already captured.
@@ -240,9 +263,7 @@ ON CONFLICT (provider_event_id, bookmaker_key, market_key,
              player_name, outcome_name, observed_at) DO NOTHING;
 SQL
 
-  log "rebuild the board on the fresh prices"
-  $COMPOSE build -q training >/dev/null
-  $COMPOSE run --rm training python build_prop_edges.py
+  rebuild_on_current_news
   log "done"
   exit 0
 fi

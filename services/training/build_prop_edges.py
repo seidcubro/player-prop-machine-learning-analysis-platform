@@ -151,6 +151,27 @@ def edge_tier(raw_edge: float) -> str:
     return "none"
 
 
+# Everything a change of quarterback moves. Rushing volume for a running back
+# is left alone: it follows the game script and the offensive line far more
+# than who is under centre.
+PASSING_GAME = {
+    "pass_yds", "pass_att", "pass_completions", "pass_td",
+    "recs", "rec_yds", "rec_td",
+}
+
+
+def vacated_role(ctx: dict, *, team, position, market_code) -> str | None:
+    """Why this prop sits in a role the model cannot see, or None if it does not."""
+    vacated = ctx.get("vacated") or set()
+    if not team or not position:
+        return None
+    if (team, "QB") in vacated and (position == "QB" or market_code in PASSING_GAME):
+        return "starting QB ruled out; volume not re-projected"
+    if position != "QB" and (team, position) in vacated:
+        return f"starting {position} ruled out; role not re-projected"
+    return None
+
+
 def load_current_context(engine) -> dict:
     """Look up the state of the world for the games being predicted.
 
@@ -318,6 +339,11 @@ def load_current_context(engine) -> dict:
     ).set_index("defense_team")
 
     # Teammates on this week's injury report, by team/position.
+    #
+    # Bounded to the current season, the same way `inj` above is. This query
+    # was missed when that one was fixed, so it took every player's latest
+    # report ever and counted last January's "Out" as this week's: a receiver
+    # who ended 2025 on the report was still vacating targets in September.
     mates = pd.read_sql(
         text(
             """
@@ -325,6 +351,8 @@ def load_current_context(engine) -> dict:
                 SELECT DISTINCT ON (player_id) player_id, team, position,
                        report_status, season, week
                 FROM injuries
+                WHERE season = (SELECT max(season) FROM nfl_games
+                                WHERE game_date <= CURRENT_DATE + 14)
                 ORDER BY player_id, season DESC, week DESC
             )
             SELECT team, position,
@@ -340,6 +368,65 @@ def load_current_context(engine) -> dict:
         engine,
     ).set_index(["team", "position"])
 
+    # Starting roles this week's report has emptied.
+    #
+    # The model projects a player from his own last five games, so it cannot
+    # see a promotion. Sam Darnold was ruled out for Week 2 and Drew Lock, who
+    # starts in his place, was projected for 124.7 passing yards on 17.1
+    # attempts: backup volume, because backup volume is all his window holds.
+    # The book priced him as the starter at 204.5, and the board published the
+    # under as an elite best bet. That 80 yard gap was not an edge, it was the
+    # model not knowing who the quarterback is. Zay Flowers doubtful left
+    # Rashod Bateman at 1.5 receptions the same way.
+    #
+    # `pos_teammates_out` was meant to carry this and cannot: it is one feature
+    # among many, trained on a history where a backup's own numbers almost
+    # never have to stand in for a starter's. Until the vacated volume is
+    # actually re-projected and that is validated, a pick in one of these roles
+    # is a guess the model does not know it is making, so none is published.
+    #
+    # A starter is depth 1 on the latest chart. Receivers list three starting
+    # slots, so any starting receiver out empties a receiver role.
+    vacated = pd.read_sql(
+        text(
+            """
+            WITH cur AS (
+                SELECT max(season) AS s FROM nfl_games
+                WHERE game_date <= CURRENT_DATE + 14
+            ),
+            latest_inj AS (
+                SELECT DISTINCT ON (i.player_id) i.player_id, i.team,
+                       i.position, i.report_status
+                FROM injuries i, cur
+                WHERE i.season = cur.s
+                ORDER BY i.player_id, i.week DESC
+            ),
+            latest_depth AS (
+                SELECT DISTINCT ON (player_id) player_id, depth_team
+                FROM (
+                    SELECT player_id, season, week, MIN(depth_team) AS depth_team
+                    FROM depth_charts
+                    WHERE depth_team IS NOT NULL
+                    GROUP BY player_id, season, week
+                ) d
+                ORDER BY player_id, season DESC, week DESC
+            )
+            SELECT DISTINCT i.team, i.position
+            FROM latest_inj i
+            JOIN latest_depth d ON d.player_id = i.player_id
+            WHERE i.report_status IN ('Out', 'Doubtful')
+              -- CASE rather than a bare cast: Postgres does not promise to
+              -- evaluate a regex guard before a cast in the same WHERE, and a
+              -- single odd value would fail the whole board build.
+              AND CASE WHEN d.depth_team::text ~ '^[0-9]+([.][0-9]+)?$'
+                       THEN d.depth_team::text::numeric END = 1
+              AND i.team IS NOT NULL AND i.position IS NOT NULL
+            """
+        ),
+        engine,
+    )
+    vacated_roles = {(r.team, r.position) for r in vacated.itertuples()}
+
     print(
         f"  current context: {len(depth)} depth ranks, {len(inj)} injury rows, "
         f"{len(games)} scheduled games, {len(opp_form)} defense/position form rows"
@@ -351,6 +438,7 @@ def load_current_context(engine) -> dict:
         "opp_form": opp_form,
         "team_form": team_form,
         "mates": mates,
+        "vacated": vacated_roles,
     }
 
 
@@ -1216,6 +1304,20 @@ def main():
         if row_features.get("injury_out", 0.0) >= 1.0:
             ruled_out.add(o["player_name"])
             skip("ruled out or doubtful", o["player_name"], market_code)
+            continue
+
+        # A role this week's report emptied. See `vacated` in
+        # load_current_context: the model projects from the player's own
+        # history and cannot see that he is now the starter, or that his
+        # quarterback is not the one his numbers were built with.
+        role = vacated_role(
+            ctx,
+            team=(frow.get("current_team") or frow.get("team")),
+            position=frow.get("position"),
+            market_code=market_code,
+        )
+        if role:
+            skip(role, o["player_name"], market_code)
             continue
 
         x = pd.DataFrame([row_features])

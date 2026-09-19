@@ -37,7 +37,9 @@ function fmt(v: number | null, market: string): string {
   return market.endsWith("_yds") || market.endsWith("_att") ||
     market === "pass_completions"
     ? v.toFixed(market.endsWith("_yds") ? 0 : 1)
-    : v.toFixed(1);
+    : market.endsWith("_td")
+      ? v.toFixed(2)
+      : v.toFixed(1);
 }
 
 /**

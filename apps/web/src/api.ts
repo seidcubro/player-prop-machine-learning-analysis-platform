@@ -173,6 +173,18 @@ export type PropEdge = {
     line: number | null;
     price_american: number | null;
   }>;
+  /**
+   * Every book's number on the recommended side, whether or not it qualified
+   * as a signal. `alts` only carries books that beat their own price, so a
+   * book posting a different line is absent from it entirely: the board showed
+   * "under 3.5, FanDuel" while DraftKings and BetMGM sat at 4.5 and said
+   * nothing about it. Optional, because a frontend can outrun its API.
+   */
+  market_lines?: Array<{
+    bookmaker_title: string | null;
+    line: number | null;
+    price_american: number | null;
+  }>;
 };
 
 export type EdgesResponse = {

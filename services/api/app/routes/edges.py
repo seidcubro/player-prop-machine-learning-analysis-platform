@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..odds_market_map import ODDS_API_MARKET_MAP  # noqa: F401 - documents the map bound below
 from ..schedule import next_board_update
 
 router = APIRouter()
@@ -337,7 +338,17 @@ def list_edges(
               -- alternates itself. They come back as an array so the Book
               -- column can still show where else the prop is available and at
               -- what number, which is the whole point of shopping a line.
-              COALESCE(alts.books, '[]'::json) AS alts
+              COALESCE(alts.books, '[]'::json) AS alts,
+              -- Every book's number for this prop, qualifying or not.
+              --
+              -- `alts` above reads prop_edges, which only holds rows that beat
+              -- their price, so a book sitting a full point away on a line we
+              -- do not like is invisible. Kincaid was published at under 3.5 on
+              -- FanDuel while DraftKings and BetMGM were both at 4.5, and the
+              -- board said nothing: a reader on DraftKings was shown a bet that
+              -- did not exist at their book. This reads the raw odds instead,
+              -- so the row can say where the rest of the market is.
+              COALESCE(market_lines.books, '[]'::json) AS market_lines
             FROM (
                 -- One row per prop, keeping the strongest, and only then the
                 -- filters that describe that row.
@@ -381,11 +392,48 @@ def list_edges(
                   AND a.commence_time = prop_edges.commence_time
                   AND a.id <> prop_edges.id
             ) alts ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT json_agg(json_build_object(
+                           'bookmaker_title', b.bookmaker_title,
+                           'line', b.line,
+                           'price_american', b.price_american
+                       ) ORDER BY b.line, b.bookmaker_title) AS books
+                FROM (
+                    -- One row per book: the most recent price it posted on the
+                    -- side actually being recommended. Comparing an under
+                    -- against another book's over would be meaningless.
+                    SELECT DISTINCT ON (o.bookmaker_key)
+                           o.bookmaker_title, o.line, o.price_american
+                    FROM odds_player_props o
+                    JOIN (VALUES (:mk_c0, :mk_k0), (:mk_c1, :mk_k1), (:mk_c2, :mk_k2), (:mk_c3, :mk_k3), (:mk_c4, :mk_k4), (:mk_c5, :mk_k5), (:mk_c6, :mk_k6), (:mk_c7, :mk_k7), (:mk_c8, :mk_k8)) AS mk(code, key)
+                      ON mk.code = prop_edges.market_code
+                    WHERE o.provider_event_id = prop_edges.event_id
+                      AND o.player_name = prop_edges.player_name
+                      AND o.market_key = mk.key
+                      AND lower(o.outcome_name) = prop_edges.recommended_side
+                      AND o.line IS NOT NULL
+                    ORDER BY o.bookmaker_key, o.last_update DESC NULLS LAST
+                ) b
+            ) market_lines ON TRUE
             ORDER BY {order_sql}
             LIMIT :limit OFFSET :offset
             """
         ),
-        {**params, "limit": limit, "offset": offset},
+        {
+            **params,
+            "limit": limit,
+            "offset": offset,
+            # The market map, bound rather than interpolated into the SQL.
+            "mk_c0": 'pass_att', "mk_k0": 'player_pass_attempts',
+            "mk_c1": 'pass_completions', "mk_k1": 'player_pass_completions',
+            "mk_c2": 'pass_yds', "mk_k2": 'player_pass_yds',
+            "mk_c3": 'pass_td', "mk_k3": 'player_pass_tds',
+            "mk_c4": 'rush_att', "mk_k4": 'player_rush_attempts',
+            "mk_c5": 'rush_yds', "mk_k5": 'player_rush_yds',
+            "mk_c6": 'recs', "mk_k6": 'player_receptions',
+            "mk_c7": 'rec_yds', "mk_k7": 'player_reception_yds',
+            "mk_c8": 'any_td', "mk_k8": 'player_anytime_td',
+        },
     ).mappings().all()
 
     return {

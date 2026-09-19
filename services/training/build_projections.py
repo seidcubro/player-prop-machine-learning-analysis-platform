@@ -203,6 +203,8 @@ def main():
     cache = {}
     rows = []
     skipped = 0
+    ruled_out = 0
+    inj_status = ctx["injuries"]
 
     for market_code, grp in df.groupby("market_code"):
         if market_code not in cache:
@@ -236,6 +238,21 @@ def main():
                 "aux_mean": r.aux_mean, "aux_trend": r.aux_trend,
                 "recs_mean": r.recs_mean, "recs_trend": r.recs_trend,
             }
+            # A player ruled out or doubtful is not projected at all.
+            #
+            # The edge builder already refused picks on these players, but this
+            # page kept them: Sam Darnold was listed for Week 2 at 21.6 pass
+            # attempts after Seattle ruled him out, beside the Drew Lock
+            # projection that should have had them. A projection for someone
+            # who is not dressing is not conservative, it is wrong, and it
+            # reads as the site not knowing the news.
+            if r.player_id in inj_status.index and (
+                str(inj_status.at[r.player_id, "report_status"] or "").strip()
+                in ("Out", "Doubtful")
+            ):
+                ruled_out += 1
+                continue
+
             feats = {
                 c: num(base[c]) if c in base else num(extra.get(c, 0.0))
                 for c in feature_cols
@@ -409,6 +426,8 @@ def main():
     print(f"  starters        : {out[out['is_starter']]['player_id'].nunique()}")
     if skipped:
         print(f"  skipped (no active model): {skipped} rows")
+    if ruled_out:
+        print(f"  not projected (ruled out or doubtful): {ruled_out} rows")
     print("\nby market:")
     print(out.groupby("market_code").agg(
         players=("player_id", "nunique"),

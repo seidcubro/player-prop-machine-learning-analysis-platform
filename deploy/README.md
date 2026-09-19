@@ -229,6 +229,37 @@ systemctl enable --now priorline@closing.timer priorline@early.timer \
 systemctl list-timers 'priorline@*'
 ```
 
+`cp deploy/systemd/*` also installs `priorline-alert@.service`, which every mode
+names as its `OnFailure=`. It needs no timer and no enabling: systemd starts it
+when a run fails.
+
+### Being told when it breaks
+
+Every mode already exits non-zero on failure and systemd already records it,
+which is worth nothing on its own. The odds sync failed at 08:00 on two
+consecutive mornings, both failures were logged correctly, and nobody found out
+until a stale line turned up on the site three days later. Week 1 was played in
+between and never reached the models.
+
+So set at least one of these in `/etc/priorline/env`:
+
+| Variable | What it does |
+| --- | --- |
+| `ALERT_NTFY_TOPIC` | A topic on ntfy.sh. Install the app, subscribe to the same topic, and failures arrive on your phone. No account needed, so make the topic long and random: anyone who guesses it can read your alerts. |
+| `ALERT_WEBHOOK` | A Discord or Slack incoming webhook. |
+| `ALERT_WEBHOOK_FIELD` | `content` by default, which is what Discord wants. Slack wants `text`. |
+
+Neither set means failures stay on the machine, which is the state that caused
+this. Alerts carry the last twelve log lines with anything shaped like a token
+or a database URL redacted, because they leave the server.
+
+Prove it works before trusting it:
+
+```bash
+systemctl start priorline-alert@daily.service
+journalctl -u priorline-alert@daily.service -n 20 --no-pager
+```
+
 `Persistent=true` on every timer, which is the thing Windows Task Scheduler was
 missing: a run the machine was down for happens when it comes back rather than
 being skipped in silence. That is why the laptop captured no closing lines for

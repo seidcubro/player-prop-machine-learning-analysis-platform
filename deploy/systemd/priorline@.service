@@ -14,6 +14,15 @@ Description=PriorLine refresh (%i)
 After=docker.service network-online.target
 Requires=docker.service
 Wants=network-online.target
+# Tell somebody when this fails.
+#
+# Every mode already exits non-zero on failure and systemd already records it,
+# which is exactly as useful as it sounds: the odds sync failed at 08:00 on two
+# consecutive mornings, both failures were logged correctly, and the first
+# anyone knew was noticing a stale line on the site three days later. The
+# instance name carries across, so priorline@daily failing starts
+# priorline-alert@daily.
+OnFailure=priorline-alert@%i.service
 
 [Service]
 Type=oneshot

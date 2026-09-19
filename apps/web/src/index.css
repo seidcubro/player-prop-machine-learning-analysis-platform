@@ -935,6 +935,20 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .pos-chip.starter { background: var(--accent-soft); color: var(--accent); border-color: #2e3a57; }
 .book-chip { background: var(--bg-raised-2); color: var(--text-dim); border-color: var(--border); text-transform: none; letter-spacing: 0; }
 
+/* Books posting a different line than the signal.
+ *
+ * Deliberately not a chip. The chips beside it are places you can take this
+ * bet, and this is the opposite: a book where this bet does not exist at this
+ * number. Making it look like the others would invite a reader to treat 4.5 as
+ * a better price for the same thing. */
+.ps-offline {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .ps-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
 /* ================================================================== semantics */

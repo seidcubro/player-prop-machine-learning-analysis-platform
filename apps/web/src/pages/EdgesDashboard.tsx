@@ -21,7 +21,7 @@ import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { fullDateTime, kickoff, price as fmtOdds } from "../lib/format";
 
-import { MARKET_ORDER, isYesNo, marketLabel, sideLabel } from "../lib/markets";
+import { MARKET_ORDER, isTdCount, isYesNo, marketLabel, sideLabel } from "../lib/markets";
 import {
   fetchEdges,
   fetchEdgesSummary,
@@ -29,6 +29,32 @@ import {
   type EdgeTier,
   type PropEdge,
 } from "../api";
+
+/**
+ * Books posting a different number than the one being recommended.
+ *
+ * A signal names one book and one line, and a reader at a different book has
+ * no way to tell whether their own book is offering the same bet. Kincaid was
+ * published at under 3.5 on FanDuel while DraftKings and BetMGM were both at
+ * 4.5, which is not a worse price for the same bet, it is a different bet, and
+ * the row said nothing at all about it.
+ *
+ * Grouped by line rather than listed per book, because "DraftKings, BetMGM at
+ * 4.5" is the sentence a reader needs and three separate chips saying 4.5 is
+ * not.
+ */
+function offConsensus(e: PropEdge): { line: number; books: string[] }[] {
+  const byLine = new Map<number, string[]>();
+  for (const b of e.market_lines ?? []) {
+    if (b.line == null || b.line === e.line) continue;
+    const books = byLine.get(b.line) ?? [];
+    books.push(b.bookmaker_title ?? "another book");
+    byLine.set(b.line, books);
+  }
+  return [...byLine.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([line, books]) => ({ line, books }));
+}
 
 // Tiers the board publishes, matching PUBLISHED_TIERS in routes/edges.py.
 //
@@ -623,7 +649,7 @@ export default function EdgesDashboard() {
                       UNDER". The mean stays in the tooltip: it is the right
                       number for a projection, just not for a pick.
                     */}
-                    {isYesNo(e.market_code)
+                    {isYesNo(e.market_code) || isTdCount(e.market_code)
                       ? e.projection.toFixed(2)
                       : (e.projection_median ?? e.projection).toFixed(1)}
                   </td>
@@ -651,10 +677,20 @@ export default function EdgesDashboard() {
                     {isYesNo(e.market_code) ? (
                       <span className="matchup">n/a</span>
                     ) : (
-                      <>
-                        {e.raw_edge > 0 ? "+" : e.raw_edge < 0 ? "−" : ""}
-                        {Math.abs(e.raw_edge).toFixed(1)}
-                      </>
+                      (() => {
+                        // Touchdown counts measure the edge from the mean, the
+                        // same number the Model column shows for them, or every
+                        // pass TD over read +0.5 however strong it was.
+                        const edge = isTdCount(e.market_code) && e.line !== null
+                          ? e.projection - e.line
+                          : e.raw_edge;
+                        return (
+                          <>
+                            {edge > 0 ? "+" : edge < 0 ? "−" : ""}
+                            {Math.abs(edge).toFixed(isTdCount(e.market_code) ? 2 : 1)}
+                          </>
+                        );
+                      })()
                     )}
                   </td>
                   <td
@@ -705,6 +741,19 @@ export default function EdgesDashboard() {
                     {e.alts.map((a) => (
                       <span className="book-chip" key={a.id}>
                         {a.bookmaker_title ?? a.bookmaker_key} {a.line ?? "-"}
+                      </span>
+                    ))}
+                    {/* Where the rest of the market is, when it is somewhere
+                        else. Silent when every book agrees, which is most of
+                        them, so this only appears when it is telling you
+                        something. */}
+                    {offConsensus(e).map((o) => (
+                      <span
+                        className="ps-offline"
+                        key={o.line}
+                        title={`This signal is priced at ${e.line}. These books are posting ${o.line}, which is a different bet, not a different price for the same one.`}
+                      >
+                        {o.books.join(", ")} at {o.line}
                       </span>
                     ))}
                   </td>
