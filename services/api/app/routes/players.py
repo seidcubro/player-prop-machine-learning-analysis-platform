@@ -471,6 +471,57 @@ def player_game_detail(
     }
 
 
+# Anytime touchdown, side by side with the book, for any query that aliases
+# player_projections as `pr`. Shared so the projections page and a player's own
+# page can never show two different numbers for the same player.
+TD_COLUMNS = """
+-- Anytime touchdown, side by side with the book. No pick.
+--
+-- The model's chance to score is the Poisson survival at
+-- zero, 1 - e^-rate: the same distribution the edge builder
+-- reads this market through, so the two can never disagree.
+-- The book's is the implied probability of its best Yes
+-- price. Taking the best of the books measured at about a
+-- tenth of a point of margin, so the raw implied figure is
+-- close enough to fair to set beside the model's.
+--
+-- Deliberately not a signal. Scored on the same player
+-- games the market ranks scorers better than this model
+-- does, and betting its disagreements returned -25%. See
+-- SUPPRESSED_MARKETS in build_prop_edges.py. So this shows
+-- both numbers and recommends neither.
+CASE WHEN pr.market_code = 'any_td'
+     THEN 1 - exp(-GREATEST(pr.projection, 0)) END AS td_model_prob,
+td.price_american AS td_book_price,
+td.bookmaker_title AS td_book,
+CASE
+  WHEN td.price_american > 0 THEN 100.0 / (td.price_american + 100)
+  WHEN td.price_american < 0 THEN -td.price_american / (100.0 - td.price_american)
+END AS td_book_prob
+"""
+
+TD_JOIN = """
+LEFT JOIN LATERAL (
+    -- The best Yes price on this player for this game's date.
+    -- Matched on the normalised name the edge builder uses, and on
+    -- the Eastern date, because a player plays one game a day.
+    SELECT o.price_american, o.bookmaker_title
+    FROM odds_player_props o
+    JOIN odds_events e ON e.provider_event_id = o.provider_event_id
+    WHERE pr.market_code = 'any_td'
+      AND o.market_key = 'player_anytime_td'
+      AND lower(o.outcome_name) IN ('yes', 'over')
+      AND o.price_american IS NOT NULL
+      AND e.commence_time >= NOW()
+      AND (e.commence_time AT TIME ZONE 'America/New_York')::date = pr.game_date
+      AND lower(replace(replace(o.player_name, '.', ''), '-', ' ')) =
+          lower(replace(replace(pr.player_name, '.', ''), '-', ' '))
+    ORDER BY o.price_american DESC
+    LIMIT 1
+) td ON TRUE
+"""
+
+
 @router.get("/projections")
 def list_projections(
     market_code: str | None = Query(None, description="Filter to one market"),
@@ -604,8 +655,10 @@ def list_projections(
                    -- depth chart is right about them and the number is built on
                    -- twenty month old football, which the page had no way to
                    -- say.
-                   lg.last_game
+                   lg.last_game,
+                   {TD_COLUMNS}
             FROM next_game pr
+            {TD_JOIN}
             LEFT JOIN players p ON p.external_id = pr.player_id
             LEFT JOIN (
                 SELECT player_id, max(game_date) AS last_game
@@ -668,13 +721,19 @@ def player_projections(player_id: int, db: Session = Depends(get_db)):
     rows = db.execute(
         text(
             """
-            SELECT DISTINCT ON (market_code)
-                   market_code, game_date, opponent, projection,
-                   p10, p25, p50, p75, p90, model_name, depth_rank
-            FROM player_projections
-            WHERE player_id = :ext
-            ORDER BY market_code, game_date
-            """
+            SELECT pr.market_code, pr.game_date, pr.opponent, pr.projection,
+                   pr.p10, pr.p25, pr.p50, pr.p75, pr.p90, pr.model_name,
+                   pr.depth_rank,
+                   {TD_COLUMNS}
+            FROM (
+                SELECT DISTINCT ON (market_code) *
+                FROM player_projections
+                WHERE player_id = :ext
+                ORDER BY market_code, game_date
+            ) pr
+            {TD_JOIN}
+            ORDER BY pr.market_code
+            """.format(TD_COLUMNS=TD_COLUMNS.strip(), TD_JOIN=TD_JOIN.strip())
         ),
         {"ext": player["external_id"]},
     ).mappings().all()

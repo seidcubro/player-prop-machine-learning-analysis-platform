@@ -522,6 +522,16 @@ export type Projection = {
    *  as the games behind it, and some listed starters have not played in over
    *  a year. */
   last_game?: string | null;
+  /**
+   * Anytime touchdown only: the model's chance to score beside the book's.
+   * Shown side by side and never as a pick. The market ranks scorers better
+   * than this model does and betting their disagreements lost 25%, so the
+   * site states both numbers and recommends neither.
+   */
+  td_model_prob?: number | null;
+  td_book_price?: number | null;
+  td_book?: string | null;
+  td_book_prob?: number | null;
 };
 
 export type ProjectionsResponse = {

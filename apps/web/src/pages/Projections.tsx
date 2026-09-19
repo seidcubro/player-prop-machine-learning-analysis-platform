@@ -18,6 +18,7 @@ import Select from "../components/Select";
 import Pager from "../components/Pager";
 import PageTitle from "../components/PageTitle";
 import { shortDate as fmtDate } from "../lib/format";
+import TdCompare from "../components/TdCompare";
 import {
   fetchProjectionGames,
   fetchProjections,
@@ -230,7 +231,9 @@ export default function Projections() {
               <th scope="col">Player</th>
               <th scope="col">Game</th>
               <th scope="col">{marketLabel(market)}</th>
-              <th scope="col">Range (p10-p90)</th>
+              <th scope="col">
+                {market === "any_td" ? "To score: model vs book" : "Range (p10-p90)"}
+              </th>
               <th scope="col">Depth</th>
             </tr>
           </thead>
@@ -302,9 +305,15 @@ export default function Projections() {
                       and 75.8 on the board. */}
                   <strong>{fmt(displayProjection(r), r.market_code)}</strong>
                 </td>
-                <td data-label="Range">
-                  <RangeBar p={r} />
-                </td>
+                {r.market_code === "any_td" ? (
+                  <td data-label="To score">
+                    <TdCompare r={r} />
+                  </td>
+                ) : (
+                  <td data-label="Range">
+                    <RangeBar p={r} />
+                  </td>
+                )}
                 <td data-label="Depth">
                   {r.depth_rank ? (
                     <span className={`pos-chip${r.is_starter ? " starter" : ""}`}>

@@ -17,6 +17,7 @@ import { fetchPlayerProjections, type Projection } from "../api";
 import { fullDate as fmtDate } from "../lib/format";
 
 import { displayProjection, marketLabel } from "../lib/markets";
+import TdCompare from "./TdCompare";
 
 /** Counting stats read better with a decimal, yardage as whole numbers. */
 function fmt(v: number | null | undefined, market: string): string {
@@ -135,7 +136,10 @@ export default function WeekProjections({ playerId }: { playerId: number }) {
             <div className="ps-wp-value">
               {fmt(displayProjection(r), r.market_code)}
             </div>
-            <Range p={r} />
+            {/* Anytime touchdown gets the model and the book side by side
+                instead of a range, which for a yes-or-no market is just 0 to
+                1. Never a pick: see TdCompare. */}
+            {r.market_code === "any_td" ? <TdCompare r={r} /> : <Range p={r} />}
           </div>
         ))}
       </div>

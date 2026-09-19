@@ -2050,6 +2050,30 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-ledger-more[open] > summary::before { content: "− "; }
 .ps-ledger-more[open] > summary { margin-bottom: var(--s3); }
 
+/* Anytime touchdown: model and book side by side. Two neutral bars, the
+   model's in the accent and the book's in plain grey, so neither reads as
+   winning. See TdCompare in Projections.tsx for why there is no pick. */
+.ps-tdc { display: grid; gap: 4px; min-width: 190px; }
+.ps-tdc-row {
+  display: grid;
+  grid-template-columns: 3.4em minmax(60px, 1fr) 3.6em;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 0.8rem;
+}
+.ps-tdc-key { color: var(--text-faint); }
+.ps-tdc-track {
+  height: 6px;
+  background: var(--bg-raised-2);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.ps-tdc-bar { display: block; height: 100%; border-radius: var(--radius-sm); }
+.ps-tdc-bar.is-model { background: var(--accent); }
+.ps-tdc-bar.is-book { background: var(--text-faint); }
+.ps-tdc-val { text-align: right; font-family: var(--font-mono); color: var(--text); }
+.ps-tdc-price { font-size: 0.74rem; color: var(--text-faint); font-family: var(--font-mono); }
+
 /* ================================================================== view tabs */
 /* Elite bets, Best bets, Everything. Underlined tabs in the masthead's own
    idiom, with the count beside each so an empty view is obvious before it is
