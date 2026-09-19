@@ -68,13 +68,17 @@ def sigmoid(z):
 
 def implied(price):
     price = np.asarray(price, dtype=float)
-    return np.where(price > 0, 100.0 / (price + 100.0), -price / (-price + 100.0))
+    # np.where evaluates both branches, so the unused one divides by zero at
+    # exactly -100 and +100. The result is right; the warning is noise.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(price > 0, 100.0 / (price + 100.0), -price / (-price + 100.0))
 
 
 def payout(price):
     """Profit on a winning one-unit stake."""
     price = np.asarray(price, dtype=float)
-    return np.where(price > 0, price / 100.0, 100.0 / -price)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(price > 0, price / 100.0, 100.0 / -price)
 
 
 def log_loss(y, p):
@@ -131,7 +135,7 @@ def main():
         text(
             """
             SELECT market_code, recommended_side AS side, game_date,
-                   win_prob, price_american, hit
+                   edge_tier, win_prob, price_american, hit
             FROM prop_edge_results
             WHERE hit IS NOT NULL
               AND win_prob > 0 AND win_prob < 1
@@ -147,13 +151,20 @@ def main():
     df["implied"] = implied(df["price_american"])
     df["season"] = season_of(df["game_date"])
 
-    # Same holdout rule as the calibrators: the latest season with at least
-    # half a typical season's rows, so a week of September is never the test.
-    counts = df.groupby("season").size()
-    eligible = counts[counts >= 0.5 * counts.median()]
-    holdout = int(eligible.index.max())
+    # The last complete season, never the one in progress.
+    #
+    # The first version borrowed the calibrators' rule, the latest season with
+    # at least half a typical season's rows, and in September it chose 2026 on
+    # 337 picks: two weeks of football is not a holdout. The season in progress
+    # is reported on its own at the end instead, as the live check it is.
+    current = int(season_of(pd.Series([pd.Timestamp.today()])).iloc[0])
+    complete = sorted(x for x in df["season"].unique() if x < current)
+    if len(complete) < 2:
+        raise SystemExit("need at least two complete seasons: one to fit, one to score")
+    holdout = int(complete[-1])
     fit_all = df[df["season"] < holdout]
     test_all = df[df["season"] == holdout]
+    live = df[df["season"] == current]
     print(f"fitting on seasons before {holdout} ({len(fit_all)} picks), "
           f"scoring on {holdout} ({len(test_all)} picks)\n")
 
@@ -180,6 +191,13 @@ def main():
 
     # Pooled first: the most rows, so the steadiest estimate of the dial.
     row("ALL", fit_all, test_all)
+    # Elite on its own, because it is the only tier offered as a bet. A dial
+    # that helps the whole board and hurts elite is the wrong dial.
+    elite_f = fit_all[fit_all["edge_tier"] == "elite"]
+    elite_t = test_all[test_all["edge_tier"] == "elite"]
+    row("elite only", elite_f, elite_t)
+    row("elite unders", elite_f[elite_f["side"] == "under"],
+        elite_t[elite_t["side"] == "under"])
     for side in ("under", "over"):
         row(f"all {side}s", fit_all[fit_all["side"] == side],
             test_all[test_all["side"] == side])
@@ -189,6 +207,15 @@ def main():
             f = fit_all[(fit_all["market_code"] == market) & (fit_all["side"] == side)]
             t = test_all[(test_all["market_code"] == market) & (test_all["side"] == side)]
             row(f"{market} {side}", f, t)
+
+    # The season in progress, scored with the dial fitted on every complete
+    # season. Small, and reported as a check rather than a verdict.
+    if len(live):
+        print(f"\nlive {current}, dial fitted on every complete season:")
+        everything = df[df["season"] < current]
+        row(f"{current} all", everything, live)
+        row(f"{current} elite", everything[everything["edge_tier"] == "elite"],
+            live[live["edge_tier"] == "elite"])
 
     print(
         "\n* = the blend predicts the holdout better than the published "
