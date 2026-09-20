@@ -537,12 +537,12 @@ if [ "$MODE" != "--board" ]; then
   log "refit probability calibrator"
   $COMPOSE run --rm training python fit_probability_calibrator.py
 
-  # How far to believe the model against the line, per side. After the
-  # calibrator, because it blends the calibrated probability. It changes the
-  # published probability and EV, never which picks are made. See
-  # fit_market_blend.py.
-  log "refit market blend"
-  $COMPOSE run --rm training python fit_market_blend.py
+  # Correct the model's confidence to the rate that confidence actually hits,
+  # per side. After the calibrator, because it corrects the calibrated
+  # probability. It changes the published probability and EV, never which picks
+  # are made. See fit_display_probability.py.
+  log "refit display probability"
+  $COMPOSE run --rm training python fit_display_probability.py
 
   # Refit the level-dependent correction on the projection history.
   #

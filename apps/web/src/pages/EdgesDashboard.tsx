@@ -56,6 +56,26 @@ function offConsensus(e: PropEdge): { line: number; books: string[] }[] {
     .map(([line, books]) => ({ line, books }));
 }
 
+/**
+ * What a pick's price is worth, as a letter.
+ *
+ * Expected value is the right quantity and an unreadable label: "+3.5% EV"
+ * means nothing to anyone who has not priced a bet, and it reads as small
+ * whatever it is. The grade says the same thing in the units people already
+ * use, and the exact figure stays in the tooltip for anyone who wants it.
+ *
+ * Cut where the graded record cuts. Elite unders have returned about +4% per
+ * unit, so an A is a pick priced better than that, and anything at or below
+ * zero is a bet the price already covers.
+ */
+function grade(ev: number | null): { letter: string; cls: string } | null {
+  if (ev === null || !Number.isFinite(ev)) return null;
+  if (ev >= 0.06) return { letter: "A", cls: "is-a" };
+  if (ev >= 0.03) return { letter: "B", cls: "is-b" };
+  if (ev > 0) return { letter: "C", cls: "is-c" };
+  return { letter: "D", cls: "is-d" };
+}
+
 /** The win rate a price needs to break even, vig included. */
 function breakEven(price: number | null | undefined): number | null {
   if (price == null || !Number.isFinite(price) || price === 0) return null;
@@ -504,6 +524,7 @@ export default function EdgesDashboard() {
           [
             ["elite", "Elite bets", betCount],
             ["best", "Best bets", bestCount],
+            ["likely", "Most likely", null],
             ["all", "Everything", allTiersTotal],
           ] as const
         ).map(([key, label, count]) => {
@@ -512,7 +533,9 @@ export default function EdgesDashboard() {
               ? bestOnly
               : key === "elite"
               ? !bestOnly && exactTier === "elite"
-              : !bestOnly && !exactTier;
+              : key === "likely"
+              ? !bestOnly && !exactTier && sort === "win_prob"
+              : !bestOnly && !exactTier && sort !== "win_prob";
           return (
             <button
               key={key}
@@ -524,6 +547,11 @@ export default function EdgesDashboard() {
                 setMinTier("");
                 setBestOnly(key === "best");
                 setExactTier(key === "elite" ? "elite" : "");
+                // "Most likely" is an ordering, not a filter: every tier, the
+                // ones that land most often first. It is the view for a reader
+                // who wants picks that hit rather than picks that pay.
+                setSort(key === "likely" ? "win_prob" : "featured");
+                setOrder("desc");
               }}
             >
               {label}
@@ -599,8 +627,8 @@ export default function EdgesDashboard() {
             minWidth={168}
             options={[
               { value: "featured", label: "Featured" },
-              { value: "ev_per_unit", label: "Highest EV" },
-              { value: "win_prob", label: "Highest win %" },
+              { value: "win_prob", label: "Most likely to hit" },
+              { value: "ev_per_unit", label: "Best value" },
               { value: "edge", label: "Biggest edge" },
             ]}
           />
@@ -654,8 +682,8 @@ export default function EdgesDashboard() {
                   displayed in wherever the two disagreed. */}
               {sortableTh("projection_median", "Model")}
               {sortableTh("edge", "Edge")}
-              {sortableTh("ev_per_unit", "EV")}
-              {sortableTh("win_prob", "Win %")}
+              {sortableTh("win_prob", "Chance")}
+              {sortableTh("ev_per_unit", "Value")}
               <th>Pick</th>
               <th>Tier</th>
               <th>Book</th>
@@ -761,23 +789,15 @@ export default function EdgesDashboard() {
                       })()
                     )}
                   </td>
-                  <td
-                    data-label="EV"
-                    className={`num ${(e.ev_per_unit ?? 0) > 0 ? "pos" : "neg"}`}
-                    title="Expected profit per unit staked, at this price. The column used to print the model's probability minus the break-even instead, which is a probability edge: worth about twice as much on a plus price as on a heavy minus one, and shown as the same number either way. The tiers are still cut on that probability edge, because that is the quantity their thresholds were measured against."
-                  >
-                    {e.ev_per_unit === null
-                      ? "-"
-                      : `${e.ev_per_unit > 0 ? "+" : ""}${(e.ev_per_unit * 100).toFixed(1)}%`}
-                  </td>
                   {/*
-                    The win probability beside the one it has to beat.
+                    How often this pick lands, and the bar it has to clear.
 
-                    Once the published probability was made honest, a plus-money
-                    elite pick reads 44%, and on its own that says "the model
-                    thinks this loses". At +135 it needs 42.6%, so 44% is a
-                    winning bet. The tick on the bar is the break-even, and the
-                    bar clearing it is the whole question.
+                    The published figure is the model's confidence corrected by
+                    what that confidence has actually been worth at this price
+                    (fit_display_probability.py), so it is the honest answer to
+                    the only question most readers have. The tick is the price's
+                    break-even: the fill clearing it is the edge, without
+                    needing the word.
                   */}
                   {(() => {
                     const win = e.win_prob ?? 0;
@@ -798,12 +818,27 @@ export default function EdgesDashboard() {
                           </span>
                           <span className="num">{Math.round(win * 100)}%</span>
                         </span>
-                        {be != null && (
-                          <span className="prob-need">needs {Math.round(be * 100)}%</span>
-                        )}
+
                       </td>
                     );
                   })()}
+                  <td
+                    data-label="Value"
+                    title={
+                      e.ev_per_unit === null
+                        ? undefined
+                        : `At this price, 100 dollars returns about ${(100 * (1 + e.ev_per_unit)).toFixed(0)} on average. A is better than the top tier's long-run return, D means the price already covers it.`
+                    }
+                  >
+                    {(() => {
+                      const g = grade(e.ev_per_unit);
+                      return g === null ? (
+                        "-"
+                      ) : (
+                        <span className={`ps-grade ${g.cls}`}>{g.letter}</span>
+                      );
+                    })()}
+                  </td>
                   <td data-label="Pick">
                     <span className={over ? "side-over" : "side-under"}>
                       {sideLabel(e.market_code, e.recommended_side)}

@@ -29,7 +29,7 @@ from pathlib import Path
 import interval_calibration as interval
 import joblib
 import median_anchor as anchor
-import fit_market_blend as market_blend
+import fit_display_probability as display_prob
 import numpy as np
 import pandas as pd
 import vacated_volume as vv
@@ -188,60 +188,46 @@ def vacated_role(ctx: dict, *, team, position, market_code,
     return None
 
 
-def demote_overs(out: pd.DataFrame) -> pd.DataFrame:
-    """Overs are not offered as bets.
+def publish_calibrated(out: pd.DataFrame, curves: dict) -> pd.DataFrame:
+    """Publish the model's confidence, corrected to what that confidence hits.
 
-    Graded by season, elite overs returned -6.9% (2023), -16.6% (2024) and
-    +3.7% (2025): -1.6% across 615 picks, up in one season of three, while
-    elite unders made money in every season on record. The confidence blend
-    agrees from the other direction: fitted on graded picks, the weight it
-    puts on the model's disagreement with the line is 0.00 for overs. So an
-    over the model rates elite is published as strong, which is shown and
-    labelled as not a bet. Not hidden: the pick is still the model's opinion,
-    it just is not one worth staking.
-    """
-    if len(out):
-        demoted = (out["recommended_side"] == "over") & (out["edge_tier"] == "elite")
-        out.loc[demoted, "edge_tier"] = "strong"
-        if demoted.any():
-            print(f"published {int(demoted.sum())} elite-rated over(s) as strong: "
-                  "overs are not offered as bets")
-    return out
+    The model ranks well and claims too much: rated at 70% or better it won 57%
+    on unders and 65% on overs in 2025. fit_display_probability.py maps its
+    claim through an isotonic curve fitted per side on graded picks, so the
+    number on the board is what that confidence has been worth. Monotone, so
+    the board's ordering by confidence is unchanged: the pick the model likes
+    most is still the one the site leads with.
 
-
-def publish_blended(out: pd.DataFrame, blend_w: dict) -> pd.DataFrame:
-    """Publish an honest probability, after every selection is made.
-
-    The model's win probability runs hot: graded on 2025, elite picks claimed
-    65.9% and won 53.5%. fit_market_blend.py shrinks it toward the probability
-    the price implies, by a weight fitted on graded picks and accepted only
-    where it predicts a held-out season better. The published win_prob,
-    expected_value and ev_per_unit all come from the blended probability.
-
-    Last, and deliberately. Tiers, best bets and value flags above were
-    chosen on the model's own edge, and the backtest that validated the blend
-    also showed that re-selecting elite by the blended edge made it worse
-    (+3.9% to +2.9%). So the blend changes what the board says about a pick,
-    never which picks it makes. The model's own figure is kept as
-    win_prob_model, which is what the next fit reads so it never learns from
-    its own output.
+    Last, and deliberately. Tiers, best bets and value flags above are chosen
+    on the model's own edge, and re-selecting them by a corrected probability
+    tested worse. This changes what the board says about a pick, never which
+    picks it makes. The model's own figure is kept as win_prob_model, which is
+    what the next fit reads so it never learns from its own output.
     """
     out["win_prob_model"] = out["win_prob"]
-    if len(out) and blend_w:
-        side_w = out["recommended_side"].map(blend_w)
-        has = side_w.notna() & out["price_american"].notna() & out["win_prob"].notna()
-        if has.any():
-            imp = out.loc[has, "price_american"].map(implied_prob).astype(float)
-            p = market_blend.blend(out.loc[has, "win_prob"].astype(float).to_numpy(),
-                                   imp.to_numpy(), side_w[has].to_numpy())
-            out.loc[has, "win_prob"] = p
-            out.loc[has, "expected_value"] = p - imp.to_numpy()
-            out.loc[has, "ev_per_unit"] = [
-                ev_per_unit_staked(e, pr)
-                for e, pr in zip(out.loc[has, "expected_value"], out.loc[has, "price_american"])
-            ]
-            print(f"published blended probabilities on {int(has.sum())} rows "
-                  f"(weights {', '.join(f'{k} {v:.2f}' for k, v in sorted(blend_w.items()))})")
+    if not len(out) or not curves:
+        return out
+    done = 0
+    for side, curve in curves.items():
+        # The price is an input, not just what the answer is measured against,
+        # so a row without one is left as the model had it.
+        m = ((out["recommended_side"] == side) & out["win_prob"].notna()
+             & out["price_american"].notna())
+        if not m.any():
+            continue
+        imp = out.loc[m, "price_american"].map(implied_prob).astype(float).to_numpy()
+        p = np.array([display_prob.apply_curve(curve, mp, kp) for mp, kp
+                      in zip(out.loc[m, "win_prob"].astype(float), imp)])
+        out.loc[m, "win_prob"] = p
+        out.loc[m, "expected_value"] = p - imp
+        out.loc[m, "ev_per_unit"] = [
+            ev_per_unit_staked(e, pr) for e, pr in
+            zip(p - imp, out.loc[m, "price_american"])
+        ]
+        done += int(m.sum())
+    if done:
+        print(f"published calibrated probabilities on {done} rows "
+              f"({', '.join(sorted(curves))})")
     return out
 
 
@@ -1883,8 +1869,6 @@ def main():
     # Deliberately narrow. It marks a handful of rows a week, which is the point:
     # a board of sixty picks is a research tool, and this is the part of it that
     # has actually been shown to work.
-    out = demote_overs(out)
-
     out["best_bet"] = False
     if len(out):
         eligible = out[
@@ -1942,7 +1926,7 @@ def main():
             out.loc[mask, "value_flag"] = True
         print(f"value-flagged {int(out['value_flag'].sum())} of {len(out)} edges")
 
-    out = publish_blended(out, market_blend.load(artifact_dir))
+    out = publish_calibrated(out, display_prob.load(artifact_dir))
 
     # Write only the columns the table has. win_prob_model arrives with a
     # migration, and the hourly timer can run this code in the window between a
