@@ -39,7 +39,7 @@ GRADE_SQL = """
 INSERT INTO prop_edge_results (
     edge_id, player_id, player_name, game_date, market_code, line, projection,
     projection_median,
-    recommended_side, win_prob, win_prob_raw, edge_tier, actual, hit,
+    recommended_side, win_prob, win_prob_raw, win_prob_model, edge_tier, actual, hit,
     home_team, away_team, bookmaker_title, price_american,
     -- Carried through from the board, not left for the backfill to supply.
     --
@@ -76,6 +76,7 @@ SELECT DISTINCT ON (g.player_id, g.game_date, e.market_code)
     e.recommended_side,
     e.win_prob,
     e.win_prob_raw,
+    e.win_prob_model,
     e.edge_tier,
     g.actual,
     CASE
@@ -172,6 +173,7 @@ ON CONFLICT (player_id, game_date, market_code) DO UPDATE SET
     recommended_side = EXCLUDED.recommended_side,
     win_prob  = EXCLUDED.win_prob,
     win_prob_raw = EXCLUDED.win_prob_raw,
+    win_prob_model = EXCLUDED.win_prob_model,
     edge_tier = EXCLUDED.edge_tier,
     actual    = EXCLUDED.actual,
     hit       = EXCLUDED.hit,

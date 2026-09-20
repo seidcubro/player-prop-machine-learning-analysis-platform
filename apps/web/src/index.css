@@ -1001,6 +1001,26 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
   background: var(--accent);
 }
 .prob .num { font-size: 0.82rem; color: var(--text-dim); }
+/* Break-even on the win bar: a hairline the fill has to clear. It stands a
+   little proud of the bar so it reads as a mark, which needs the bar to stop
+   clipping; the fill is a percentage of the bar's width and cannot spill. */
+.prob-bar { position: relative; overflow: visible; }
+.prob-be {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text);
+  border-radius: 1px;
+}
+.prob-need {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
 
 /* ================================================================== range bar */
 .ps-range { display: flex; align-items: center; gap: var(--s3); }

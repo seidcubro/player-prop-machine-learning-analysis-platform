@@ -56,6 +56,12 @@ function offConsensus(e: PropEdge): { line: number; books: string[] }[] {
     .map(([line, books]) => ({ line, books }));
 }
 
+/** The win rate a price needs to break even, vig included. */
+function breakEven(price: number | null | undefined): number | null {
+  if (price == null || !Number.isFinite(price) || price === 0) return null;
+  return price > 0 ? 100 / (price + 100) : -price / (-price + 100);
+}
+
 // Tiers the board publishes, matching PUBLISHED_TIERS in routes/edges.py.
 //
 // Medium and small are still computed, stored and graded, and the tier table on
@@ -764,14 +770,40 @@ export default function EdgesDashboard() {
                       ? "-"
                       : `${e.ev_per_unit > 0 ? "+" : ""}${(e.ev_per_unit * 100).toFixed(1)}%`}
                   </td>
-                  <td data-label="Win %">
-                    <span className="prob">
-                      <span className="prob-bar" aria-hidden="true">
-                        <span style={{ width: `${Math.round((e.win_prob ?? 0) * 100)}%` }} />
-                      </span>
-                      <span className="num">{Math.round((e.win_prob ?? 0) * 100)}%</span>
-                    </span>
-                  </td>
+                  {/*
+                    The win probability beside the one it has to beat.
+
+                    Once the published probability was made honest, a plus-money
+                    elite pick reads 44%, and on its own that says "the model
+                    thinks this loses". At +135 it needs 42.6%, so 44% is a
+                    winning bet. The tick on the bar is the break-even, and the
+                    bar clearing it is the whole question.
+                  */}
+                  {(() => {
+                    const win = e.win_prob ?? 0;
+                    const be = breakEven(e.price_american);
+                    return (
+                      <td
+                        data-label="Win %"
+                        title={be != null
+                          ? `The model gives this ${(win * 100).toFixed(1)}%. At ${fmtOdds(e.price_american)} it needs ${(be * 100).toFixed(1)}% to break even.`
+                          : undefined}
+                      >
+                        <span className="prob">
+                          <span className="prob-bar" aria-hidden="true">
+                            <span style={{ width: `${Math.round(win * 100)}%` }} />
+                            {be != null && (
+                              <i className="prob-be" style={{ left: `${be * 100}%` }} />
+                            )}
+                          </span>
+                          <span className="num">{Math.round(win * 100)}%</span>
+                        </span>
+                        {be != null && (
+                          <span className="prob-need">needs {Math.round(be * 100)}%</span>
+                        )}
+                      </td>
+                    );
+                  })()}
                   <td data-label="Pick">
                     <span className={over ? "side-over" : "side-under"}>
                       {sideLabel(e.market_code, e.recommended_side)}

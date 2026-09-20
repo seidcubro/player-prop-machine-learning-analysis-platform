@@ -29,6 +29,7 @@ from pathlib import Path
 import interval_calibration as interval
 import joblib
 import median_anchor as anchor
+import fit_market_blend as market_blend
 import numpy as np
 import pandas as pd
 import vacated_volume as vv
@@ -185,6 +186,63 @@ def vacated_role(ctx: dict, *, team, position, market_code,
             return None
         return f"starting {position} ruled out; role not re-projected"
     return None
+
+
+def demote_overs(out: pd.DataFrame) -> pd.DataFrame:
+    """Overs are not offered as bets.
+
+    Graded by season, elite overs returned -6.9% (2023), -16.6% (2024) and
+    +3.7% (2025): -1.6% across 615 picks, up in one season of three, while
+    elite unders made money in every season on record. The confidence blend
+    agrees from the other direction: fitted on graded picks, the weight it
+    puts on the model's disagreement with the line is 0.00 for overs. So an
+    over the model rates elite is published as strong, which is shown and
+    labelled as not a bet. Not hidden: the pick is still the model's opinion,
+    it just is not one worth staking.
+    """
+    if len(out):
+        demoted = (out["recommended_side"] == "over") & (out["edge_tier"] == "elite")
+        out.loc[demoted, "edge_tier"] = "strong"
+        if demoted.any():
+            print(f"published {int(demoted.sum())} elite-rated over(s) as strong: "
+                  "overs are not offered as bets")
+    return out
+
+
+def publish_blended(out: pd.DataFrame, blend_w: dict) -> pd.DataFrame:
+    """Publish an honest probability, after every selection is made.
+
+    The model's win probability runs hot: graded on 2025, elite picks claimed
+    65.9% and won 53.5%. fit_market_blend.py shrinks it toward the probability
+    the price implies, by a weight fitted on graded picks and accepted only
+    where it predicts a held-out season better. The published win_prob,
+    expected_value and ev_per_unit all come from the blended probability.
+
+    Last, and deliberately. Tiers, best bets and value flags above were
+    chosen on the model's own edge, and the backtest that validated the blend
+    also showed that re-selecting elite by the blended edge made it worse
+    (+3.9% to +2.9%). So the blend changes what the board says about a pick,
+    never which picks it makes. The model's own figure is kept as
+    win_prob_model, which is what the next fit reads so it never learns from
+    its own output.
+    """
+    out["win_prob_model"] = out["win_prob"]
+    if len(out) and blend_w:
+        side_w = out["recommended_side"].map(blend_w)
+        has = side_w.notna() & out["price_american"].notna() & out["win_prob"].notna()
+        if has.any():
+            imp = out.loc[has, "price_american"].map(implied_prob).astype(float)
+            p = market_blend.blend(out.loc[has, "win_prob"].astype(float).to_numpy(),
+                                   imp.to_numpy(), side_w[has].to_numpy())
+            out.loc[has, "win_prob"] = p
+            out.loc[has, "expected_value"] = p - imp.to_numpy()
+            out.loc[has, "ev_per_unit"] = [
+                ev_per_unit_staked(e, pr)
+                for e, pr in zip(out.loc[has, "expected_value"], out.loc[has, "price_american"])
+            ]
+            print(f"published blended probabilities on {int(has.sum())} rows "
+                  f"(weights {', '.join(f'{k} {v:.2f}' for k, v in sorted(blend_w.items()))})")
+    return out
 
 
 def load_current_context(engine) -> dict:
@@ -1825,6 +1883,8 @@ def main():
     # Deliberately narrow. It marks a handful of rows a week, which is the point:
     # a board of sixty picks is a research tool, and this is the part of it that
     # has actually been shown to work.
+    out = demote_overs(out)
+
     out["best_bet"] = False
     if len(out):
         eligible = out[
@@ -1882,6 +1942,22 @@ def main():
             out.loc[mask, "value_flag"] = True
         print(f"value-flagged {int(out['value_flag'].sum())} of {len(out)} edges")
 
+    out = publish_blended(out, market_blend.load(artifact_dir))
+
+    # Write only the columns the table has. win_prob_model arrives with a
+    # migration, and the hourly timer can run this code in the window between a
+    # pull and that migration: without this the build fails and the board goes
+    # empty over a column nothing on the site reads. Dropped with a warning, so
+    # the gap is visible rather than silent.
+    with engine.connect() as conn:
+        have = {r[0] for r in conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'prop_edges'"))}
+    missing = [c for c in out.columns if c not in have]
+    if missing:
+        print(f"WARN: prop_edges has no column(s) {missing}; run the migrations. "
+              "Writing without them.")
+        out = out.drop(columns=missing)
 
     with engine.begin() as conn:
         # prop_edge_results is intentionally NOT cascaded: the graded track
