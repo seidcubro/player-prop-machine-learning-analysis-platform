@@ -168,13 +168,23 @@ def check_opponent_features(engine):
           ORDER BY f.as_of_game_date DESC LIMIT 200
         )
         SELECT r.stored,
+               -- The same window the feature is built from: that defense's
+               -- previous eight games, not a fixed number of days.
+               --
+               -- This compared against 200 days, which in September is most of
+               -- last season plus two weeks of this one, and the check drifted
+               -- to a correlation of 0.30 and failed the pipeline every hour.
+               -- The feature averages ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING
+               -- (see opp_pos_form in routes/jobs.py); an audit that measures a
+               -- different quantity is measuring itself.
                (SELECT AVG(s) FROM (
                    SELECT SUM(g2.rushing_yards) AS s
                    FROM player_game_stats_app g2
                    WHERE g2.opponent = r.opponent AND g2.position = 'RB'
                      AND g2.game_date < r.as_of_game_date
-                     AND g2.game_date > r.as_of_game_date - 200
-                   GROUP BY g2.game_date) t) AS truth
+                   GROUP BY g2.game_date
+                   ORDER BY g2.game_date DESC
+                   LIMIT 8) t) AS truth
         FROM r
     """)
     df = pd.read_sql(q, engine).dropna()

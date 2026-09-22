@@ -1901,7 +1901,22 @@ def main():
         })
 
     if not rows:
-        print("No edges generated")
+        # An empty slate empties the board.
+        #
+        # This used to return and leave the table alone, so the last board
+        # stayed live until the next one replaced it. Between Monday night and
+        # Thursday there is nothing priced, and the site spent those days
+        # showing picks on games that had already been played, with their
+        # results known. The freshness audit called it from two directions at
+        # once: every odds row was for a game already played, and the board had
+        # no players in common with the projections.
+        #
+        # prop_edges_history and prop_edge_results are untouched, so the graded
+        # record and the archive survive. Only the live board clears.
+        with engine.begin() as conn:
+            cleared = conn.execute(text("SELECT COUNT(*) FROM prop_edges")).scalar_one()
+            conn.execute(text("TRUNCATE prop_edges"))
+        print(f"No edges generated; cleared {cleared} stale row(s) from the board")
         return
 
     out = pd.DataFrame(rows)
