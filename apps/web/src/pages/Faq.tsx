@@ -1,22 +1,24 @@
 /**
- * How the thing works, twice.
+ * How the thing works, at three depths.
  *
- * Two audiences with genuinely different questions. Someone deciding whether to
- * trust a number wants to know what it means and how often it has been right.
- * Someone evaluating the method wants the model families, the validation
- * discipline and the places it fails.
+ * Three audiences with genuinely different questions. Someone deciding whether
+ * to back a pick wants to know what the numbers mean and how often they have
+ * been right, in football words. Someone judging the method wants the model
+ * families, the validation discipline and the places it fails. Someone who
+ * wants the whole thing gets sent to Inside the Model, which is the long
+ * version with the measurements in it.
  *
- * Writing one document for both produces something that serves neither, so
- * there are two, and a toggle. Both say the same things and neither is the
- * marketing version: the numbers here are the measured ones including the ones
- * that are unflattering.
+ * One document for all three serves none of them, so there are three, and a
+ * switch. They say the same things at different resolutions, and none of them
+ * is the marketing version: the numbers are the measured ones, including the
+ * ones that make the model look bad.
  */
 
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import PageTitle from "../components/PageTitle";
 
-type Audience = "plain" | "technical";
+type Audience = "plain" | "technical" | "deep";
 
 function QA({ q, children }: { q: string; children: React.ReactNode }) {
   return (
@@ -35,10 +37,9 @@ export default function Faq() {
       <div className="ps-hero">
         <PageTitle lead="How PriorLine" accent="Works" />
         <p>
-          Two versions of the same answers. Neither one is the sales pitch: the
-          numbers below are what the model has actually done, including where it
-          has been wrong. For the full method, read{" "}
-          <Link to="/model">Inside the Model</Link>.
+          The same answers at three depths. Pick one. None of them is the sales
+          pitch: every number below is what the model has actually done,
+          including the parts where it has been wrong.
         </p>
       </div>
 
@@ -57,11 +58,19 @@ export default function Faq() {
           className={audience === "technical" ? "active" : ""}
           onClick={() => setAudience("technical")}
         >
-          For Data Scientists
+          For Data People
+        </button>
+        <button
+          role="tab"
+          aria-selected={audience === "deep"}
+          className={audience === "deep" ? "active" : ""}
+          onClick={() => setAudience("deep")}
+        >
+          Everything
         </button>
       </div>
 
-      {audience === "plain" ? <Plain /> : <Technical />}
+      {audience === "plain" ? <Plain /> : audience === "technical" ? <Technical /> : <Deep />}
     </>
   );
 }
@@ -96,42 +105,45 @@ function Plain() {
       <QA q="What do the columns mean?">
         <ul>
           <li>
-            <strong>Line</strong> is the sportsbook&rsquo;s number and the price
-            beneath it.
+            <strong>Line</strong> is the sportsbook&rsquo;s number, with its
+            price underneath.
           </li>
           <li>
-            <strong>Model</strong> is the middle of what we expect. Half the
-            time the player goes over it, half the time under.
+            <strong>Model</strong> is what we think he actually does. Half the
+            time he beats it, half the time he does not.
           </li>
           <li>
-            <strong>Edge</strong> is our number minus the line, always in that
-            order. Green means our number is above the line, which is why the
-            pick is the over. Red means it is below, and the pick is the under.
-            The pick always follows the sign, so the two can never disagree.
+            <strong>Edge</strong> is our number minus the line. Above the line
+            means we like the over, below means the under. The pick always
+            follows it, so the two can never say different things.
           </li>
           <li>
-            <strong>EV</strong> is the one that matters. It is what a unit
-            staked returns on average at this price, so +10% means a dollar bet
-            repeatedly returns ten cents. Zero or below means the price already
-            covers our estimate.
+            <strong>Chance</strong> is how often a pick like this one lands.
+            Not what the model hopes: what picks at this confidence and this
+            price have actually done, graded. The small mark on the bar is the
+            number you have to beat to make money at that price.
           </li>
           <li>
-            EV is not the same as beating the price on probability alone. A
-            three point edge is worth twice as much at +150 as it is at
-            &minus;280, because the winning bets pay twice as much. The tiers
-            are still cut on the probability edge, since that is the quantity
-            their thresholds were measured against.
+            <strong>Value</strong> is a grade for the price. <strong>A</strong>{" "}
+            is priced better than our top tier&rsquo;s long-run return,{" "}
+            <strong>B</strong> is solidly worth it, <strong>C</strong> is thin,
+            and <strong>D</strong> means the price already covers whatever edge
+            we think we have. Hover it for the dollar version.
           </li>
         </ul>
+        <p>
+          A big Chance and a bad grade happen together all the time, and that is
+          the whole game. A 70% pick at &minus;250 is likely and still a losing
+          bet, because you need 71% just to break even.
+        </p>
       </QA>
 
       <QA q="Why is a 60% chance not automatically a good bet?">
         <p>
           Because the price decides how often you have to win. At &minus;200 you
-          need to win 67% of the time just to break even, so a 60% pick loses
-          money. At +150 you only need 40%, so the same 60% pick is excellent.
-          That is why EV, not the win percentage, is what the board is sorted
-          on.
+          need 67% just to break even, so a 60% pick loses money. At +150 you
+          need 40%, so the same 60% pick is excellent. That is what the Value
+          grade is for: it already does that arithmetic for you.
         </p>
       </QA>
 
@@ -414,6 +426,73 @@ function Technical() {
           market settles on, the edge is not real regardless of what any
           individual week returns. That is the measurement I most want and do not
           yet have.
+        </p>
+      </QA>
+    </div>
+  );
+}
+
+
+/**
+ * The third depth: a map of the long version rather than a copy of it.
+ *
+ * Inside the Model is the full account, with the measurements, the failed
+ * experiments and the numbers that do not flatter the project. Pasting it here
+ * would mean two copies drifting apart, so this says what is in it and sends
+ * the reader there.
+ */
+function Deep() {
+  return (
+    <div>
+      <QA q="The whole thing, measurements included">
+        <p>
+          <Link to="/model">Inside the Model</Link> is the long version: every
+          design decision, what it was measured against, and the experiments
+          that failed. It is written to be read start to finish by someone who
+          wants to judge the method rather than use the board.
+        </p>
+        <p>What is in it:</p>
+        <ul>
+          <li>
+            The pipeline end to end, from the nflverse ingest through feature
+            building, model selection, calibration and the board.
+          </li>
+          <li>
+            How a model family is chosen per market, on time-series folds, and
+            why a change that cannot beat the incumbent out of sample is
+            refused even when it looks better on average.
+          </li>
+          <li>
+            How a projection becomes a probability: quantile models for the
+            spread, then a correction fitted on graded picks using the model
+            and the price together, because the model alone claimed 66% and won
+            53%.
+          </li>
+          <li>
+            The full record by tier, by market and by season, including the
+            seasons that lost money.
+          </li>
+          <li>
+            Everything tested and rejected: tracking data as features, weighting
+            this season more heavily early on, a role stability score, publishing
+            only the slices that made money, and a dozen others. Each with the
+            number that killed it.
+          </li>
+          <li>
+            The limitations, stated plainly, including the measurement that says
+            the market prices these props better than this model does.
+          </li>
+        </ul>
+        <p>
+          <Link to="/model">Read Inside the Model</Link>.
+        </p>
+      </QA>
+
+      <QA q="The code">
+        <p>
+          The repository is public. The research scripts that produced the
+          rejections above are in it, each with its verdict written at the top,
+          so any claim here can be re-run rather than taken on faith.
         </p>
       </QA>
     </div>

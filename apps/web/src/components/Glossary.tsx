@@ -1,9 +1,15 @@
 /**
  * What the terms on this site mean.
  *
- * The board uses EV, edge, tiers and break-even as if they were common
- * knowledge. They are not, and a number nobody can interpret is worse than no
- * number: it either gets ignored or it gets trusted for the wrong reason.
+ * Written for someone who watches football, not someone who prices
+ * derivatives. The board used to lead with expected value, which is the right
+ * quantity and a useless label: nobody outside betting knows what "+3.5% EV"
+ * is, and it reads as small whatever it is. It now leads with the chance a
+ * pick lands and a letter grade for the price, and these definitions follow
+ * the same order.
+ *
+ * A number nobody can interpret is worse than no number: it either gets
+ * ignored or trusted for the wrong reason.
  *
  * Rendered as a collapsible strip so it costs nothing once you know the terms,
  * and as a shared component so a definition cannot drift between the pages that
@@ -16,15 +22,28 @@ type Term = { term: string; short: string; body: React.ReactNode };
 
 const TERMS: Term[] = [
   {
-    term: "EV",
-    short: "Expected value",
+    term: "Chance",
+    short: "How often a pick like this lands",
     body: (
       <>
-        Our estimated chance of winning, minus the chance the price is charging
-        you for. A pick at +8% EV is one where we think the real probability is
-        eight points better than the price implies. <strong>Zero or below
-        means the price already covers it</strong>, and that bet is not worth
-        making regardless of how likely it looks.
+        Not what the model hopes. What picks at this confidence and this price
+        have actually done once graded. The model on its own claimed 66% and
+        won 53%, so the number you see is corrected against the record rather
+        than reported raw. The small mark on the bar is the number this price
+        needs you to beat.
+      </>
+    ),
+  },
+  {
+    term: "Value",
+    short: "A grade for the price",
+    body: (
+      <>
+        <strong>A</strong> is priced better than the long-run return of our top
+        tier. <strong>B</strong> is solidly worth it. <strong>C</strong> is
+        thin. <strong>D</strong> means the price already covers whatever edge we
+        think we have, and the bet is not worth making however likely it looks.
+        Hover the grade for what 100 dollars returns on average.
       </>
     ),
   },
@@ -35,7 +54,8 @@ const TERMS: Term[] = [
       <>
         How often you must win just to stop losing money at a given price. At
         &minus;200 it is 66.7%; at &minus;110, 52.4%; at +150, only 40%. This is
-        why a 60% chance can be a bad bet and a 45% chance can be a good one.
+        why a 60% chance can be a bad bet and a 45% chance can be a good one,
+        and it is the mark on the Chance bar.
       </>
     ),
   },

@@ -372,9 +372,10 @@ export default function EdgesDashboard() {
         number, on a page whose whole job is to show numbers.
       */}
       <p className="ps-tagline">
-        Sportsbook lines against the model&rsquo;s own number.{" "}
-        <strong>EV</strong> is the column that matters: anything at or below
-        zero is a bet the price already covers.{" "}
+        Sportsbook lines against our own number for the same player.{" "}
+        <strong>Chance</strong> is how often a pick like this lands, and{" "}
+        <strong>Value</strong> grades the price you are getting for it. A big
+        chance at a bad price is still a bad bet.{" "}
         <Link to="/faq">How it works</Link>.
       </p>
 
@@ -766,7 +767,7 @@ export default function EdgesDashboard() {
                     }`}
                     title={
                       isYesNo(e.market_code)
-                        ? "A yes-or-no market has no median to clear the line, so the edge lives entirely in the EV column."
+                        ? "A yes-or-no market has no number to clear, so everything is in the Chance and Value columns."
                         : "The model's number minus the line. Positive means the model is above the line, which is why the pick is the over."
                     }
                   >
