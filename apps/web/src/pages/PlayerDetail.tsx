@@ -16,6 +16,7 @@ import PropCards from "../components/PropCards";
 import WeekProjections from "../components/WeekProjections";
 import TrackRecord from "../components/TrackRecord";
 import GameBreakdown from "../components/GameBreakdown";
+import { PAGES, playerMeta, usePageMeta } from "../lib/page-meta";
 import {
   fetchPlayer,
   fetchPlayerGames,
@@ -104,6 +105,14 @@ export default function PlayerDetail() {
       cancelled = true;
     };
   }, [playerId]);
+
+  // Before the early returns, because hooks cannot run conditionally. Until
+  // the player loads this names the section rather than the person, which is
+  // what a crawler would see if it gave up on the fetch anyway.
+  const loadedName = player
+    ? player.name ?? `${player.first_name ?? ""} ${player.last_name ?? ""}`.trim()
+    : "";
+  usePageMeta(loadedName ? playerMeta(loadedName) : PAGES["/players"]);
 
   if (loading) return <div className="ps-empty">Loading player...</div>;
   if (err) return <div className="ps-empty">{err}</div>;

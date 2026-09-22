@@ -12,6 +12,7 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 import Logo from "./components/Logo";
 import { asPct, useHeadlineRecord } from "./lib/headline-record";
+import { usePageMeta } from "./lib/page-meta";
 
 const NAV = [
   { to: "/signals", label: "Signals" },
@@ -24,6 +25,9 @@ const NAV = [
 export default function App() {
   // The two figures the disclaimer quotes about the model's own accuracy.
   const rec = useHeadlineRecord();
+  // Title, description and canonical for whichever route is showing. A page
+  // that names itself (a player) calls this again with its own.
+  usePageMeta();
   return (
     <div className="ps-shell">
       <header className="ps-mast">

@@ -46,6 +46,29 @@
     />
     <meta name="twitter:image" content="%VITE_SITE_URL%/og-image-priorline.png" />
     <link rel="canonical" href="%VITE_SITE_URL%/" />
+
+    <!-- What the site is, in the form a search engine parses rather than
+         guesses at. The search box is the one piece with a visible payoff: it
+         is what lets a result carry its own player search underneath it. The
+         URL it points at is a real route, so nothing here claims a capability
+         the site does not have. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "PriorLine",
+        "url": "%VITE_SITE_URL%/",
+        "description": "NFL player prop projections from a machine-learning model, priced against real sportsbook lines.",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "%VITE_SITE_URL%/players?q={search_term_string}"
+          },
+          "query-input": "required name=search_term_string"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

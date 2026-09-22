@@ -10,8 +10,16 @@
  */
 import { Link } from "react-router-dom";
 import PageTitle from "../components/PageTitle";
+import { usePageMeta } from "../lib/page-meta";
 
 export default function NotFound() {
+  // Answered with a 200 for the reason above, so it has to ask not to be
+  // indexed in the page itself.
+  usePageMeta({
+    title: "Page not found | PriorLine",
+    description: "That page does not exist.",
+    noindex: true,
+  });
   return (
     <>
       <PageTitle lead="Page" accent="not found" />

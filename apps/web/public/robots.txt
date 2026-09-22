@@ -6,3 +6,5 @@ Allow: /
 
 # The API is a separate host and is not for crawling. It is rate limited and the
 # odds it returns are licensed for display, not redistribution.
+
+Sitemap: https://priorline.io/sitemap.xml

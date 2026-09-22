@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import Select from "../components/Select";
 import Pager from "../components/Pager";
@@ -31,8 +31,18 @@ export default function PlayersSearch() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [debounced, setDebounced] = useState("");
+  /*
+   * The search term lives in the URL as ?q=, so a search can be linked to and
+   * a back button returns to the one you ran rather than an empty box. It is
+   * also what the site's structured data points a search engine at, which is
+   * how a search result can carry its own player search underneath it.
+   *
+   * Seeded once. Keeping the box and the URL in lockstep on every keystroke
+   * would write a history entry per letter.
+   */
+  const [params, setParams] = useSearchParams();
+  const [search, setSearch] = useState(() => params.get("q") ?? "");
+  const [debounced, setDebounced] = useState(() => params.get("q") ?? "");
   const [positions, setPositions] = useState(OFFENSE);
   const [page, setPage] = useState(0);
 
@@ -43,6 +53,15 @@ export default function PlayersSearch() {
   }, [search]);
 
   useEffect(() => setPage(0), [debounced, positions]);
+
+  // Once the typing settles, replace the URL so it reflects the search
+  // without adding a history entry to back through.
+  useEffect(() => {
+    const next = new URLSearchParams(params);
+    if (debounced) next.set("q", debounced);
+    else next.delete("q");
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+  }, [debounced]);
 
   const reqId = useRef(0);
   useEffect(() => {

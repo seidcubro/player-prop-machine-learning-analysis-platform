@@ -854,6 +854,25 @@ button:focus-visible, a:focus-visible, [role="option"]:focus-visible {
   transition: color 0.18s var(--ease);
 }
 a.ps-ident-name:hover { color: var(--accent); }
+
+/* A finger-sized target for a player's name on a phone.
+ *
+ * The name is a 20px line of text, which is fine for a cursor and fiddly for a
+ * thumb: 50 of them on one projections screen, each less than half the 44px
+ * Apple asks for.
+ *
+ * Plain padding, and the row is allowed to grow by the 24px it adds. Two
+ * cleverer versions were tried and neither survives a hit test, because the
+ * cell around the name sets overflow hidden and clips anything that reaches
+ * outside it: a ::after on the name is clipped by the name's own ellipsis
+ * overflow, and padding cancelled by a negative margin measures 44px while the
+ * cell scissors it back to about 23px of tappable area. A card row on a phone
+ * is already 189px, so the honest fix costs nothing worth having. */
+@media (max-width: 960px) {
+  a.ps-ident-name {
+    padding: 12px 0;
+  }
+}
 .matchup {
   font-size: 0.76rem;
   color: var(--text-faint);
