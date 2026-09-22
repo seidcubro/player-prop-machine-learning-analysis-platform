@@ -139,6 +139,16 @@ def normalize_team(name: str) -> str:
 # Revisit after a season of closing prices has been collected and graded.
 SUPPRESSED_MARKETS = frozenset({"any_td"})
 
+# Which tiers the site offers as a bet, as opposed to shows as context.
+#
+# Mirrors BET_TIERS in services/api/app/routes/edges.py and reads the same
+# environment variable, so the builder and the API cannot disagree about what
+# is being recommended. The two services cannot import each other; deploy sets
+# the variable once for both.
+BET_TIERS = [
+    t.strip() for t in os.getenv("BET_TIERS", "elite").split(",") if t.strip()
+]
+
 
 def edge_tier(raw_edge: float) -> str:
     a = abs(raw_edge)
@@ -228,6 +238,21 @@ def publish_calibrated(out: pd.DataFrame, curves: dict) -> pd.DataFrame:
     if done:
         print(f"published calibrated probabilities on {done} rows "
               f"({', '.join(sorted(curves))})")
+
+    # A bet has to survive its own honest numbers.
+    #
+    # Tiers are chosen on the model's edge, before this correction, because
+    # re-selecting them on the corrected probability tested worse. But a pick
+    # the correction drops to no edge at all is not something to offer: the
+    # price covers it. Those move to the context tier, where they are shown and
+    # labelled rather than recommended, which is the same place overs sit.
+    if len(out):
+        bet = out["edge_tier"].isin(BET_TIERS)
+        dead = bet & (out["expected_value"].fillna(0) <= 0)
+        if dead.any():
+            out.loc[dead, "edge_tier"] = "strong" if "strong" not in BET_TIERS else "medium"
+            print(f"demoted {int(dead.sum())} pick(s) out of the bet tier: "
+                  "calibrated expected value is not positive")
     return out
 
 
