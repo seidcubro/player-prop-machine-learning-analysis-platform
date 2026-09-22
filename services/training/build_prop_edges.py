@@ -239,20 +239,40 @@ def publish_calibrated(out: pd.DataFrame, curves: dict) -> pd.DataFrame:
         print(f"published calibrated probabilities on {done} rows "
               f"({', '.join(sorted(curves))})")
 
-    # A bet has to survive its own honest numbers.
-    #
-    # Tiers are chosen on the model's edge, before this correction, because
-    # re-selecting them on the corrected probability tested worse. But a pick
-    # the correction drops to no edge at all is not something to offer: the
-    # price covers it. Those move to the context tier, where they are shown and
-    # labelled rather than recommended, which is the same place overs sit.
-    if len(out):
-        bet = out["edge_tier"].isin(BET_TIERS)
-        dead = bet & (out["expected_value"].fillna(0) <= 0)
-        if dead.any():
-            out.loc[dead, "edge_tier"] = "strong" if "strong" not in BET_TIERS else "medium"
-            print(f"demoted {int(dead.sum())} pick(s) out of the bet tier: "
-                  "calibrated expected value is not positive")
+    return demote_dead_bets(out)
+
+
+def demote_dead_bets(out: pd.DataFrame) -> pd.DataFrame:
+    """Take a pick out of the bet tier when its own numbers no longer back it.
+
+    Tiers are chosen on the model's edge, before the display correction,
+    because re-selecting them on the corrected probability tested worse. But a
+    pick the correction drops to no edge at all is not something to offer: the
+    price covers it. Those move to the context tier, where they are shown and
+    labelled rather than recommended, which is where overs sit.
+
+    The edge is recomputed here from the published probability and the price
+    rather than read from the expected_value column. That column is written in
+    several places and an earlier version of this trusted it and quietly
+    demoted nothing: Theo Johnson went to the board as an elite over at +165
+    with a published 33% chance, which needs 37.7%, and the audit caught it
+    instead. Two numbers cannot disagree if only one of them is used.
+
+    Its own function, and the count always prints, so a run that demotes
+    nothing says so rather than leaving silence to be interpreted.
+    """
+    if not len(out):
+        return out
+    price = pd.to_numeric(out["price_american"], errors="coerce")
+    win = pd.to_numeric(out["win_prob"], errors="coerce")
+    breakeven = (100.0 / (price + 100)).where(price > 0, -price / (-price + 100))
+    edge = win - breakeven
+    bet = out["edge_tier"].isin(BET_TIERS)
+    dead = bet & edge.notna() & (edge <= 0)
+    if dead.any():
+        out.loc[dead, "edge_tier"] = "strong" if "strong" not in BET_TIERS else "medium"
+    print(f"bet tier: {int(bet.sum())} pick(s), demoted {int(dead.sum())} whose "
+          f"published probability does not beat the price")
     return out
 
 
