@@ -1541,6 +1541,104 @@ def build_features(
     }
 
 
+@router.post("/jobs/player_status", dependencies=[Depends(require_admin)])
+def set_player_status(
+    player: str = Query(..., description="Player name, or part of one"),
+    status: str = Query("Out", description="Out, Doubtful, Questionable or Active"),
+    hours: int = Query(48, ge=1, le=336, description="How long it holds"),
+    note: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Tell the board a player is out before the injury report does.
+
+    The feed is the official Wednesday-to-Friday report, so game-day news never
+    reaches it in time: a Sunday morning scratch, a Monday downgrade, the
+    inactive list ninety minutes before kickoff. This writes the status
+    directly, the next rebuild reads it ahead of the report, and it expires on
+    its own so nobody has to remember to undo it.
+
+    "Active" is the undo: it drops a player the report still lists, for a
+    player who has been cleared since.
+
+    Matches on name, and refuses rather than guesses when the name is
+    ambiguous: marking the wrong Brown out is worse than marking nobody out.
+    """
+    valid = {"out": "Out", "doubtful": "Doubtful",
+             "questionable": "Questionable", "active": "Active"}
+    key = status.strip().lower()
+    if key not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of {sorted(valid.values())}")
+
+    rows = db.execute(
+        text(
+            """
+            SELECT external_id, name, position, team
+            FROM players
+            WHERE external_id IS NOT NULL
+              AND name ILIKE :q
+            ORDER BY (lower(name) = lower(:exact)) DESC, name
+            LIMIT 10
+            """
+        ),
+        {"q": f"%{player.strip()}%", "exact": player.strip()},
+    ).mappings().all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"no player matching {player!r}")
+    exact = [r for r in rows if r["name"].lower() == player.strip().lower()]
+    if len(rows) > 1 and not exact:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "several players match; use a fuller name",
+                    "matches": [f"{r['name']} ({r['position']}, {r['team']})"
+                                for r in rows]})
+    target = (exact or rows)[0]
+
+    db.execute(
+        text(
+            """
+            INSERT INTO player_status_overrides
+                (player_id, player_name, status, note, created_by, expires_at)
+            VALUES (:pid, :name, :status, :note, 'admin',
+                    NOW() + make_interval(hours => :hours))
+            """
+        ),
+        {"pid": target["external_id"], "name": target["name"],
+         "status": valid[key], "note": note, "hours": hours},
+    )
+    db.commit()
+    return {
+        "ok": True,
+        "player": target["name"],
+        "position": target["position"],
+        "team": target["team"],
+        "status": valid[key],
+        "holds_for_hours": hours,
+        "note": "takes effect on the next board rebuild, within the hour",
+    }
+
+
+@router.get("/jobs/player_status", dependencies=[Depends(require_admin)])
+def list_player_status(db: Session = Depends(get_db)):
+    """Overrides still in force, newest first."""
+    rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT ON (player_id) player_name, status, note,
+                   created_at, expires_at
+            FROM player_status_overrides
+            WHERE expires_at > NOW()
+            ORDER BY player_id, created_at DESC
+            """
+        )
+    ).mappings().all()
+    return {"ok": True, "overrides": [
+        {**dict(r), "created_at": str(r["created_at"]),
+         "expires_at": str(r["expires_at"])} for r in rows]}
+
+
 @router.post("/jobs/attach_labels", dependencies=[Depends(require_admin)])
 def attach_labels(
     market_code: str,

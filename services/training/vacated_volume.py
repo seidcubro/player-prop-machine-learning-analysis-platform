@@ -323,23 +323,41 @@ class VacatedVolume:
         adj = self.adjustments.get((player_id, pool))
         return bool(adj) and (rate is None or market_code in adj["rates"])
 
-    def factor(self, player_id: str, market_code: str, projection: float) -> float:
-        """Multiplier for this player's projection in this market, 1.0 if none.
+    def level(self, player_id: str, market_code: str) -> float | None:
+        """What this player's inherited workload implies in this market.
 
-        A multiplier so it can ride the same path as the stale-role factor:
-        applied to the point projection and to every predicted quantile, so the
-        range and the win probability move with the number.
+        A level, in the market's own units: his new share of team volume times
+        that volume times his per-opportunity rate. None when nothing was
+        inherited or his rate is unknown.
         """
         spec = MARKETS.get(market_code)
-        if spec is None or projection <= 0:
-            return 1.0
+        if spec is None:
+            return None
         pool, rate = spec
         adj = self.adjustments.get((player_id, pool))
         if not adj:
-            return 1.0
+            return None
         per = 1.0 if rate is None else adj["rates"].get(market_code)
         if per is None:
+            return None
+        return float(adj["share_after"] * adj["team_volume"] * per)
+
+    def factor(self, player_id: str, market_code: str, value: float) -> float:
+        """How much to raise `value` to the level the inherited volume implies.
+
+        Called separately for the point projection and for the median, and
+        that separation is the point. It used to be called once on the mean and
+        the result reused for every quantile, which raised the mean correctly
+        and multiplied the median by a ratio that was never meant for it: Drew
+        Lock came out at a mean of 203 passing yards and a median of 257, and
+        the board shows the median. A median above the mean on a yardage market
+        is impossible, which is how the bug announced itself.
+
+        Both numbers describe the same workload, so both are raised to the same
+        level rather than scaled by a shared ratio. A value already above it is
+        left alone.
+        """
+        implied = self.level(player_id, market_code)
+        if implied is None or value <= 0:
             return 1.0
-        implied = adj["share_after"] * adj["team_volume"] * per
-        new = max(projection, implied)
-        return float(min(new / projection, MAX_FACTOR))
+        return float(min(max(implied, value) / value, MAX_FACTOR))

@@ -308,6 +308,37 @@ def load_current_context(engine) -> dict:
         engine,
     ).set_index("player_id")
 
+    # A person beats the feed.
+    #
+    # The injury feed is the official Wednesday-to-Friday report. News breaks
+    # after it, and on game day the report is the least current thing in the
+    # building: Puka Nacua was ruled out of a Monday game while this was still
+    # projecting him for six receptions. An override row says so directly and
+    # wins over whatever the report last said, until it expires.
+    #
+    # "Active" is allowed and means the opposite: a player the report still
+    # lists who has since been cleared. Dropping him from `inj` restores him,
+    # rather than leaving him withheld all week.
+    over = pd.read_sql(
+        text(
+            """
+            SELECT DISTINCT ON (player_id) player_id, status
+            FROM player_status_overrides
+            WHERE expires_at > NOW()
+            ORDER BY player_id, created_at DESC
+            """
+        ),
+        engine,
+    )
+    if len(over):
+        active = over[over["status"].str.lower() == "active"]["player_id"]
+        inj = inj.drop(index=[p for p in active if p in inj.index])
+        forced = over[over["status"].str.lower() != "active"]
+        for r in forced.itertuples(index=False):
+            inj.loc[r.player_id, "report_status"] = r.status
+        print(f"  manual status overrides: {len(forced)} forced, "
+              f"{len(active)} cleared")
+
     games = pd.read_sql(
         text(
             """
@@ -1445,13 +1476,16 @@ def main():
                 stale_factor = float(sf["factor"])
                 model_projection *= stale_factor
 
-        # Volume inherited from a ruled-out teammate. Folded into the same
-        # factor as the stale-role correction, so it reaches every quantile
-        # below and the win probability moves with the number, not just the
-        # number. See vacated_volume.py.
+        # Volume inherited from a ruled-out teammate.
+        #
+        # The point projection is raised to the level that workload implies.
+        # The predicted range is raised to the same level separately, below,
+        # and not by this ratio: folding it into stale_factor multiplied every
+        # quantile by a number meant for the mean, which put Drew Lock's median
+        # at 257 passing yards against a mean of 203. The board shows the
+        # median. See vacated_volume.factor.
         inherit = vacated_vol.factor(frow.get("player_id"), market_code, model_projection)
         if inherit != 1.0:
-            stale_factor *= inherit
             model_projection *= inherit
 
         # Undo the flattening, on the markets where undoing it validated.
@@ -1488,6 +1522,15 @@ def main():
                 q: max(0.0, float(qm.predict(x)[0])) * stale_factor
                 for q, qm in quant["models"].items()
             }
+            # The inherited level, applied to the range. Scaling the ladder by
+            # whatever its median needed keeps the shape, so the spread still
+            # belongs to this player and P(over) below is read off a
+            # distribution centred where the workload says it should be.
+            mid = qp.get(0.50)
+            if mid and mid > 0:
+                qf = vacated_vol.factor(frow.get("player_id"), market_code, mid)
+                if qf != 1.0:
+                    qp = {q: v * qf for q, v in qp.items()}
             p_over = float(prob_over_from_quantiles(
                 qp, line_value, quant.get("calibration")))
             p_under = 1.0 - p_over

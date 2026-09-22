@@ -290,11 +290,14 @@ def main():
                     factor = float(sf["factor"])
                     pred *= factor
 
-            # Volume inherited from a ruled-out teammate, on the same factor as
-            # the stale-role correction so the range scales with the number.
+            # Volume inherited from a ruled-out teammate.
+            #
+            # The point projection is raised to the level that workload
+            # implies. The predicted range is handled after the quantiles are
+            # built, because it has to be raised to the same level rather than
+            # scaled by the point's ratio. See vacated_volume.factor.
             inherit = vacated_vol.factor(r.player_id, market_code, pred)
             if inherit != 1.0:
-                factor *= inherit
                 pred *= inherit
 
             # Undo the flattening before anything is derived from the point
@@ -358,6 +361,17 @@ def main():
                 qs = dict(qs)
                 qs[0.50] = ma.apply(anchor_cal, market_code, pred, qs[0.50],
                                     qs.get(0.25), qs.get(0.75))
+
+            # The inherited level again, this time for the range. Scaling the
+            # whole ladder by whatever the median needed keeps its shape, so
+            # the spread still belongs to the player rather than being
+            # flattened onto a point.
+            if qs and vacated_vol.level(r.player_id, market_code) is not None:
+                mid = qs.get(0.50)
+                if mid and mid > 0:
+                    qf = vacated_vol.factor(r.player_id, market_code, mid)
+                    if qf != 1.0:
+                        qs = {q: v * qf for q, v in qs.items()}
 
             p50_raw = qs.get(0.50)
             if qs.get(0.50) is not None:
