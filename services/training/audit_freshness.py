@@ -648,7 +648,17 @@ def check_board_internal_consistency(engine):
         SELECT player_name, market_code, line, projection_median, raw_edge,
                recommended_side, win_prob, expected_value, edge_tier,
                price_american
-        FROM prop_edges WHERE projection_median IS NOT NULL
+        FROM prop_edges
+        WHERE projection_median IS NOT NULL
+          -- Only what the site can actually serve.
+          --
+          -- The API filters to games that have not kicked off, and the board
+          -- builder deliberately leaves the old rows in place when no upcoming
+          -- game is priced, which between Monday night and Thursday is every
+          -- row. Auditing them failed the pipeline for three days over a pick
+          -- from a game whose result was already known and which no reader
+          -- could see.
+          AND commence_time >= NOW()
     """), engine)
     if df.empty:
         warn("no edges to check")
