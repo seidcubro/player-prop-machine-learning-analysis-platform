@@ -216,7 +216,12 @@ def publish_calibrated(out: pd.DataFrame, curves: dict) -> pd.DataFrame:
     """
     out["win_prob_model"] = out["win_prob"]
     if not len(out) or not curves:
-        return out
+        # No curves means no correction, not no checks. The demotion below
+        # judges a bet against its price and has nothing to do with the
+        # display calibration; returning here skipped it entirely on a server
+        # whose artifact had never been fitted, and an elite over at +165 went
+        # to the board with a 33% chance of landing.
+        return demote_dead_bets(out)
     done = 0
     for side, curve in curves.items():
         # The price is an input, not just what the answer is measured against,
