@@ -37,6 +37,7 @@ from sklearn.ensemble import (
     GradientBoostingRegressor,
     HistGradientBoostingRegressor,
     RandomForestRegressor,
+    VotingRegressor,
 )
 from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -151,6 +152,43 @@ def build_model(model_name: str):
             min_samples_leaf=int(os.getenv("MIN_SAMPLES_LEAF", "30")),
             l2_regularization=float(os.getenv("L2_REG", "1.0")),
             random_state=42,
+        )
+
+    if model_name.startswith("vote") or model_name.startswith("ens"):
+        # The average of four families, which beats any one of them on the
+        # markets where it was measured.
+        #
+        # The bakeoff asks which family is best and answers it per market. It
+        # cannot ask whether the families are wrong about different players,
+        # and they are: a linear model misses a back whose role just grew, a
+        # forest misses one whose usage is steady but whose efficiency is not.
+        # Averaging cancels part of both.
+        #
+        # Measured on rolling origins, three successive held-out slices each
+        # trained only on what came before, against the family live at the time:
+        #
+        #     rush_att   +3.8%  +7.1%  +3.9%   mean +4.9%
+        #     rush_yds   +3.3%  +5.1%  +3.9%   mean +4.1%
+        #     rec_yds    +0.4%  +1.6%  +1.1%   mean +1.0%
+        #     recs       +0.3%  -0.0%  +0.4%   mean +0.2%
+        #     passing    negative in every slice, mean -0.4% to -0.9%
+        #
+        # So it ships on the rushing markets and receiving yards, and not on
+        # the quarterback ones. A single 75/25 split said the opposite and said
+        # it confidently, which is why the rolling test exists: one split is
+        # one sample.
+        #
+        # Equal weights on purpose. Fitting the weights is another parameter to
+        # overfit on a few thousand rows, and the gain here comes from the
+        # families disagreeing rather than from any one deserving more say.
+        return VotingRegressor(
+            estimators=[
+                ("ridge", build_model("ridge")),
+                ("enet", build_model("enet")),
+                ("rf", build_model("rf")),
+                ("hgb", build_model("hgb")),
+            ],
+            n_jobs=None,
         )
 
     if model_name.startswith("gb"):

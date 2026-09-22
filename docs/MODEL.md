@@ -400,6 +400,13 @@ about which way the book leans, not from out-predicting it.
 ### What held
 
 - Picking sides off the median instead of the mean.
+- Averaging four model families instead of picking one, on the rushing markets
+  and receiving yards. Measured on rolling origins, three successive held-out
+  slices each trained only on what came before: rush attempts +4.9%, rushing
+  yards +4.1%, receiving yards +1.0%, positive in every slice. Receptions was
+  flat and the quarterback markets were negative in every slice, so they keep
+  their single family. A single 75/25 split had said the opposite, confidently,
+  which is why the rolling test exists.
 - Handing a ruled-out quarterback's workload to his backup. On 2025 the
   successor's share of pass attempts is predicted to within 0.033 against 0.343
   unchanged, and his passing yards to 59 against 83. Running backs and receivers
