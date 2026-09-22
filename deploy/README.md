@@ -233,6 +233,21 @@ systemctl list-timers 'priorline@*'
 names as its `OnFailure=`. It needs no timer and no enabling: systemd starts it
 when a run fails.
 
+### Ruling a player out by hand
+
+The injury feed is the official Wednesday to Friday report, so game day news
+never reaches it in time. This writes a status the next rebuild reads ahead of
+the feed, and it expires on its own:
+
+```bash
+curl -s -X POST -H "X-Admin-Token: $ADMIN_TOKEN" \
+  "http://localhost:8000/api/v1/jobs/player_status?player=Puka%20Nacua&status=Out&hours=24"
+```
+
+`status=Active` undoes one. `GET /api/v1/jobs/player_status` lists what is in
+force. The board picks it up on the next rebuild, within the hour, or
+immediately with `systemctl start priorline@board.service`.
+
 ### Being told when it breaks
 
 Every mode already exits non-zero on failure and systemd already records it,

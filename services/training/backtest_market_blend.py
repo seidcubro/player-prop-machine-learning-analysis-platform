@@ -1,5 +1,12 @@
 """How much to trust the model against the line: the bias-variance dial.
 
+Superseded, and kept for the measurement rather than the recommendation. The
+blend this found was shipped and then replaced: fitted pooled on backfilled
+rows, whose probabilities come from a different calibration path than live
+ones, it drove the weight on overs to zero and buried the strongest band on the
+board. What the site publishes now is fit_display_probability.py, which
+corrects the model's own probability using the price alongside it, per side.
+
 Graded picks say two things at once. The line is close to unbiased: on the
 priced player-games, the average outcome lands within a point or two of the
 average line in nearly every bucket. And the model is overconfident everywhere:

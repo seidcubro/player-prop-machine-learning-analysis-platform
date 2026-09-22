@@ -236,6 +236,41 @@ A separate stale-role factor marks down players coming back in a smaller role.
 I tested it per market with a placebo control, and only receiving yards survived,
 with a factor of 0.732.
 
+### What the board publishes
+
+The probability on the board is not the model's own. The model ranks well and
+claims too much: on 2025 it rated picks at 70% or better and they won 57%. So
+the published figure comes from a logistic fit, per side, on graded picks:
+
+    logit(P) = a + b * logit(model probability) + c * logit(price probability)
+
+Fitting the price in alongside the model is what keeps expected value honest.
+Plus money picks win less often than minus money ones by construction, so a
+correction that ignores the price rated a +135 pick at 58% when its band only
+reaches that across all prices. Predicted EV against realised return, by
+quarter, on the 2025 holdout:
+
+    confidence only    -5%/-3%   -0%/+4%   +3%/+4%   +10%/+3%
+    with the price     -2%/-1%   -0%/+4%   +2%/+1%    +7%/+4%
+
+The fitted weights say where the model is worth anything:
+
+| side | weight on the model | weight on the price | log loss |
+|---|---|---|---|
+| under | +0.42 | +0.54 | 0.7233 to 0.6911 |
+| over | −0.48 | +0.94 | 0.7108 to 0.6903 |
+
+On unders the model's confidence predicts hits. On overs the weight is
+negative: once the price is known, a more confident over is slightly less
+likely to land. Overs are still published and still ranked, and the number
+beside them is honest about what the model adds, which is nothing.
+
+Tiers, best bets and value flags are still chosen on the model's own edge,
+before this correction, because re-selecting them on the corrected probability
+tested worse (+3.9% to +2.9%). The correction changes what the board says about
+a pick, never which picks it makes. The model's own figure is kept as
+`win_prob_model` so a refit never learns from its own output.
+
 ## Edge, EV and tiers
 
 ```
@@ -356,10 +391,22 @@ about which way the book leans, not from out-predicting it.
 | Primetime games | Worse: −15.9% and −12.5%. |
 | Correcting the median to a true midpoint | Fixed a real calibration flaw and cut holdout ROI from +1.29% to +0.07%. The low median is the edge. |
 | Straddle filter, price bands, vacated role, last-game form, book disagreement | All failed season by season. |
+| Tracking data as features (Next Gen Stats, PFR advanced) | 22 features covering 95% of receiving props and 97% of passing ones. The elastic net gave every one a coefficient of exactly zero; a tree model landed in the same place. Receptions MAE 1.2083 to 1.2092. The existing target share, air yards and snap share already carry it. |
+| Weighting this season's games more heavily in Weeks 2 to 5 | Beat a plain five game average by 6 to 10%, and made the real model worse: rush attempts −10.1%, receiving yards −0.4%. The model's other features already carry it. |
+| A role stability score | Predicts a role change on unseen seasons (AUC 0.674) and does not pay. The picks it flags return +0.1% and the ones it keeps +0.5%. A role change explains a loss after the fact and breaks in our favour just as often. |
+| Publishing only the slices that made money | Chosen on 2023 and 2024, applied to 2025: +0.9% against the full board's +1.0%. The slices were noise. |
+| Blending the probability toward the price, pooled | Better average log loss, and wrong here: fitted on backfilled rows whose probabilities come from a different calibration path, it drove the weight on overs to zero and buried the strongest band on the board. Replaced by the per side calibration below. |
 
 ### What held
 
 - Picking sides off the median instead of the mean.
+- Handing a ruled-out quarterback's workload to his backup. On 2025 the
+  successor's share of pass attempts is predicted to within 0.033 against 0.343
+  unchanged, and his passing yards to 59 against 83. Running backs and receivers
+  were tested the same way and refused: carries improved the share and made
+  rushing yards worse, and a missing receiver's targets spread too thinly for
+  any method to beat leaving them alone.
+- Correcting the published probability with the price as well as the model.
 - Isotonic calibration, which made EV honest.
 - Stricter cuts for overs than unders.
 - Expected touchdowns as a feature. The feature query had been selecting it and

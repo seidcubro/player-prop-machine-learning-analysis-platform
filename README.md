@@ -192,6 +192,31 @@ narrow one.
 | ~0.74 | 0.591 | 0.659 |
 | ~0.57 | 0.434 | 0.528 |
 
+### What the site actually publishes
+
+The quantiles fixed the shape of the probability. They did not fix its level:
+graded on 2025, picks the model rated at 70% or better won 57%, and elite picks
+claimed 65.9% against 53.5% that landed. An inflated probability is not only a
+wrong number on a page, it is the input to the EV filter, so it inflates every
+edge on the board.
+
+So the published probability is corrected per side, fitted on graded picks,
+using the model's number and the price together:
+
+| side | weight on the model | weight on the price | log loss on the holdout |
+|---|---|---|---|
+| under | +0.42 | +0.54 | 0.7233 to 0.6911 |
+| over | −0.48 | +0.94 | 0.7108 to 0.6903 |
+
+On unders the model's confidence predicts hits. On overs the weight is negative:
+once you know the price, a more confident over is slightly less likely to land.
+Overs stay on the board with an honest number beside them rather than being
+hidden.
+
+Which picks get made is unchanged. Tiers, best bets and value flags are still
+chosen on the model's own edge, because re-selecting them on the corrected
+probability tested worse. See `fit_display_probability.py`.
+
 ## Monte Carlo
 
 Every market used to be predicted on its own, so a quarterback's projected
@@ -341,6 +366,34 @@ and close were the same row and CLV read zero by construction.
 ```bash
 docker compose run --rm training python eval_clv.py
 ```
+
+## When the news beats the feed
+
+The injury feed is nflverse's copy of the official Wednesday to Friday report,
+so nothing that breaks after it reaches the board in time: a Saturday
+downgrade, a Sunday morning scratch, the inactive list ninety minutes before
+kickoff. Puka Nacua was ruled out of a Monday game while the site still
+projected him for six receptions.
+
+Two things close that gap.
+
+The hourly refresh re-reads injuries and depth charts before it rebuilds, so
+the board is never priced on news older than an hour. And a person can rule a
+player out directly, which beats the feed until it expires:
+
+```bash
+curl -X POST -H "X-Admin-Token: $ADMIN_TOKEN" \
+  "http://localhost:8000/api/v1/jobs/player_status?player=Puka%20Nacua&status=Out&hours=24"
+```
+
+`status=Active` is the undo, for a player the report still lists who has since
+been cleared. Ambiguous names are refused rather than guessed: marking the
+wrong Brown out is worse than marking nobody out.
+
+When a starting quarterback is ruled out, his backup inherits the workload
+rather than keeping a backup's projection. Drew Lock went from 79 projected
+passing yards to 211 against a line of 204.5. Running backs and receivers were
+tested the same way and refused; see `fit_vacated_volume.py`.
 
 ## What I'd do next
 
