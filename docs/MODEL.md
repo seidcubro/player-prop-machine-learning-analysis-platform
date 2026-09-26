@@ -118,8 +118,8 @@ capturing it live.
 ## Features
 
 Each training row describes one player before one game, using only what was
-known before that game. The lookback is the player's previous five games, which
-gives 60 to 80 features per market.
+known before that game. The lookback is the player's previous five games **of
+the current season**, which gives 60 to 80 features per market.
 
 | Family | Examples |
 |---|---|
@@ -129,7 +129,56 @@ gives 60 to 80 features per market.
 | Opponent | what this defense has recently allowed to this position group specifically |
 | Game and venue | spread, total, implied team total, temperature, wind, roof, surface, home or away, rest, injury status |
 
-Two rules I enforce rather than trust:
+### The window stops at the start of the season
+
+It used to stop only at the start of a career. For any player with fewer than
+five games this season the window reached into last December and weighted it
+equally with the games that describe who he is now, and last December is the
+worst available description of a player: Week 18 is a bye for half the league's
+starters, a playoff rotation is not a regular-season rotation, and a rookie's
+December is not the role he was handed in September.
+
+The Week 3 2026 board is what that produced. 92 published picks, 87 of them
+unders, and on every player whose role had improved the projection landed between
+his two seasons:
+
+| player | this season | last December | projected | line |
+|---|---|---|---|---|
+| TreVeyon Henderson | 76 rush yds | 16.3 | 43.8 | 41.5 |
+| Dontayvion Wicks | 73.5 rec yds | 8.3 | 35.6 | 44.5 |
+| Rashod Bateman | 44 rec yds | 10 | 33.9 | 43.5 |
+| Bhayshul Tuten | 14 carries | 3.3 | 10.9 | 12.5 |
+| Lamar Jackson | 37 rush yds | 14 | 25.8 | 38.5 |
+
+Eight of the 92 had a window spanning a team the player had already left. Every
+player whose role improved between seasons read low, and every one of those
+became an under.
+
+So the window is this season only, and so is everything derived from it: the
+EWMA level, which at Week 3 had put about 56% of its weight on last season, and
+the trailing touchdowns-over-expected window, which is now partitioned by season
+as well as by player. Two games of this season say less than seven games of
+anything, and they say it about the right player.
+
+Three consequences, none of them free:
+
+- **A player with no game this season gets no projection.** Not a low one, none.
+- **Week 1 publishes nothing**, because in Week 1 nobody has played a game this
+  season. The board fills as the games are played.
+- **The floor is one prior game**, down from three, and early-season windows are
+  genuinely thin. `y_season_n` rides on every row so the model can see how much
+  is behind the window, and the same rule applies to training rows, so a model
+  served a two-game window in Week 3 was fitted on the thousands of two-game
+  windows that every past September produced rather than meeting its first one in
+  production. That symmetry is the point: the previous design trained on
+  five-game windows and served two-game ones, which is the same class of
+  train/serve mismatch that caused the Hockenson overprojection.
+
+The one thing still allowed to read a finished season is the shrinkage prior,
+which pulls a thin window toward what the *position* did rather than toward what
+this player used to be. That is a stabiliser, not a claim about his role.
+
+Two further rules I enforce rather than trust:
 
 1. **Freshness at serving time.** Anything knowable before kickoff (opponent,
    depth chart, injuries, weather, the line) is read for the upcoming game, not
@@ -272,39 +321,26 @@ a pick, never which picks it makes. The model's own figure is kept as
 `win_prob_model` so a refit never learns from its own output.
 
 One pick never reaches the bet tier, whatever its edge: one this season's own
-production contradicts, while the window it was built from still holds last
-season. The window is five games, so a player with fewer than five games this
-season necessarily has last season inside it, and in Week 3 that is three games
-of last December weighted equally with the two that describe who he is now.
-December is the worst available description of a player: Week 18 rests a playoff
-team's starters, a playoff rotation is not a regular-season rotation, and a
-rookie's December is not the role he was handed in September.
+production contradicts. On two to four games of evidence, a projection that falls
+on the opposite side of the line from the player's own current-season average is
+shown and labelled rather than recommended. The upper bound is what stops this
+second-guessing a full window: with four games or fewer the projection has least
+to go on and a contradiction is most likely an error, while by Week 8 a
+projection across the line is usually the opponent, the venue or the total doing
+their job.
 
-The Week 3 2026 board is what that looks like. 92 published picks, 87 of them
-unders, and on every player whose role had improved the projection landed
-between his two seasons:
+It was written for the season-boundary defect described under Features, and the
+window change removed that cause at the source, so it should now fire on almost
+nothing. That is why it stays. A projection on the far side of the line from the
+player's own season means the features and the projection disagree about the same
+player, and there is no longer an innocent explanation for it. The printed count
+is the monitor: near zero says the window change is working, and a count that
+climbs says something is reading a role the player does not have.
 
-| player | this season | last December | projected | line |
-|---|---|---|---|---|
-| TreVeyon Henderson | 76 rush yds | 16.3 | 43.8 | 41.5 |
-| Dontayvion Wicks | 73.5 rec yds | 8.3 | 35.6 | 44.5 |
-| Rashod Bateman | 44 rec yds | 10 | 33.9 | 43.5 |
-| Bhayshul Tuten | 14 carries | 3.3 | 10.9 | 12.5 |
-
-Eight of the 92 had a window spanning a team the player had left. So a
-projection that falls on the opposite side of the line from the player's own
-current-season average, on at least two games of it, is shown and labelled
-rather than recommended. The rule stops firing once a player has five games this
-season, so it is gone by Week 6 without being turned off, and it does not touch
-the projection or invent a replacement for it.
-
-This is a guard against a measured defect in an input, not a claim to know which
-picks lose, and unlike the tier cuts it has not been validated on a backtest.
-Refusing picks has failed that test before (`research_role_stability.py`). It
-ships on the narrower argument that publishing a pick whose input is knowably
-stale is worse than publishing nothing, and it prints every refusal so the cost
-is visible. The fix for the projection itself belongs in the features, and is
-being tested by `research_season_boundary.py`.
+Unlike the tier cuts this was not validated on a backtest, and refusing picks has
+failed that test before (`research_role_stability.py`). It ships on the narrower
+argument that a pick whose inputs contradict each other is not worth recommending
+whichever of them turns out to be right.
 
 ## Edge, EV and tiers
 

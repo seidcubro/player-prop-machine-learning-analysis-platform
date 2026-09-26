@@ -284,42 +284,40 @@ def demote_dead_bets(out: pd.DataFrame) -> pd.DataFrame:
 def refuse_contradicted_picks(out: pd.DataFrame) -> pd.DataFrame:
     """Do not recommend a pick that this season's own production contradicts.
 
-    This is a guard against a known feature defect, not a guess about which
-    picks lose, and it exists because of an arithmetic fact: the window is five
-    games long, so a player with fewer than five games this season has last
-    season inside it. In Week 3 that is three games of last December, weighted
-    equally with the two that describe who he is now. Last December is
-    systematically low for exactly the players who matter: a rookie who barely
-    played, a starter rested in Week 18, a playoff rotation, a man on another
-    team. Eight of the 92 picks on the Week 3 2026 board had a window spanning a
-    different team.
+    Both a guard and a check on the window change that made it mostly
+    unnecessary.
 
-    What it looks like on the board is a projection sitting between this
-    season's production and last season's tail, every time:
+    It was written for a defect. The feature window used to be five games
+    regardless of where the season ended, so a player with fewer than five games
+    this season had last December inside it, weighted equally with the games that
+    describe who he is now: Week 18 byes for half the league's starters, playoff
+    rotations, a rookie who had not been given the job yet. On the Week 3 2026
+    board that put the projection between the two seasons on every player whose
+    role had improved, and 87 of 92 published picks were unders.
 
         TreVeyon Henderson   76 rush yds this season,  16.3 last December,
                              projected 43.8 against a line of 41.5
         Dontayvion Wicks     73.5 rec yds,              8.3,  projected 35.6
         Rashod Bateman       44 rec yds,               10,    projected 33.9
 
-    A projection that lands on the opposite side of the line from the player's
-    own current-season average is not a disagreement with the market worth
-    publishing. It is the model telling us it is reading a role that no longer
-    exists. Those move to the context tier, where they are shown and labelled
-    rather than recommended.
+    The window now stops at the start of the season, so that cause is gone at the
+    source and this should fire on almost nothing. That is the point of keeping
+    it. A projection landing on the far side of the line from the player's own
+    current-season average means the features and the projection disagree about
+    the same player, and after the change there is no longer an innocent
+    explanation for it. The printed count is the monitor: near zero says the
+    window change is working, and a count that climbs says something else is
+    reading a role the player does not have, which is worth being told about on
+    the board rather than found in a postmortem.
 
-    Deliberately narrow. Two games is the fewest that can establish anything,
-    and the whole rule stops firing once a player has five games this season, so
-    it is gone by Week 6 without anyone turning it off. It does not touch the
-    projection, invent a replacement, or claim to know the right answer. The
-    fix for the projection itself is in the features, where the defect is.
+    What it does when it fires is refuse to recommend, not to show. Those move to
+    the context tier, labelled. It never edits a projection or invents a
+    replacement for one.
 
-    Unlike the tier cuts this has not been validated on a backtest, because the
-    population it applies to is four weeks of each season and refusing picks has
-    failed that test before (`research_role_stability.py`). It ships on the
-    narrower argument that publishing a pick whose input is measurably stale is
-    worse than publishing nothing, and it prints what it refused so the cost is
-    visible rather than assumed.
+    Unlike the tier cuts this was not validated on a backtest, and refusing picks
+    has failed that test before (`research_role_stability.py`). It ships on the
+    narrower argument that a pick whose inputs contradict each other is not worth
+    recommending whichever of them is right.
     """
     if not len(out) or "_season_n" not in out.columns:
         return out
@@ -327,8 +325,12 @@ def refuse_contradicted_picks(out: pd.DataFrame) -> pd.DataFrame:
     season = pd.to_numeric(out["_season_mean"], errors="coerce")
     line = pd.to_numeric(out["line"], errors="coerce")
 
-    # Enough of this season to mean something, but not enough to fill the
-    # window, which is the same thing as "last season is still in there".
+    # Two games is the fewest that establishes anything. The upper bound is what
+    # keeps this from second-guessing the model on a full window: with four games
+    # or fewer the projection has the least to go on and a contradiction is most
+    # likely an error, while by Week 8 a projection on the far side of the line
+    # is usually the opponent, the venue or the total doing their job, and those
+    # are adjustments the board is supposed to make.
     thin = n.between(2, 4, inclusive="both")
     # This season's average sits on the other side of the line from the pick.
     says_over = out["recommended_side"].eq("over")
