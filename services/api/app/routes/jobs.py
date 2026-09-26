@@ -94,6 +94,58 @@ SERVING_ROWS = os.getenv("SERVING_ROWS", "1") != "0"
 # than meeting its first one in production.
 MIN_GAMES = int(os.getenv("MIN_GAMES", os.getenv("MIN_SERVING_GAMES", "1")))
 
+# How many games of last season one game of this season is worth, per market.
+#
+# Used for y_blend: (n * this season + k * all of last season) / (n + k). Fitted
+# by research_season_boundary.py on seasons before 2025 and scored on 2025-2026,
+# model-free, against the actual next game. Passing settles on this season within
+# a game or two; receiving and rushing take about four. That ordering is not an
+# accident: a quarterback's attempts are a property of his team's offence and
+# survive a roster change, while a receiver's target share is exactly what a
+# roster change alters.
+#
+# Small enough to live here rather than in an artifact, and refitted by rerunning
+# that script. If it moves a lot, that is worth knowing rather than absorbing.
+BLEND_K = {
+    "recs": 2.0, "rec_yds": 2.0, "rec_td": 0.5,
+    "rush_yds": 2.0, "rush_att": 1.0, "rush_td": 2.0,
+    "pass_yds": 0.5, "pass_att": 0.5, "pass_completions": 0.5, "pass_td": 4.0,
+    "any_td": 0.5,
+}
+BLEND_K_DEFAULT = 2.0
+
+# Whether the rolling window stops at the start of the season.
+#
+# A flag rather than a constant for two reasons: it is the kill switch if this
+# turns out badly in production, and it is the only way to build the features
+# both ways and compare them on the same rows, which is the one comparison that
+# can say whether the change helps the model rather than helping an average.
+# See research_window_generations.py.
+WINDOW_SEASON_ONLY = os.getenv("WINDOW_SEASON_ONLY", "1") != "0"
+# What the serving floor was before the window change, used only when the flag
+# above is off, so the comparison is against what actually shipped.
+MIN_SERVING_GAMES_LEGACY = 3
+# Markets that keep the old cross-season window, as a comma-separated list.
+#
+# Empty, and the measurement is why it is empty rather than populated with the
+# passing markets. Built both ways and compared on identical rows, same family,
+# same split (research_window_generations.py), the season-only window wins on
+# every volume market and those are 74 of the 92 picks the board published:
+#
+#     rec_yds  +1.3%   recs  +0.9%   rush_yds  +0.9%   rush_att  +0.9%
+#     pass_att +0.1%   pass_yds  -0.6%   pass_completions  -1.0%
+#
+# Passing looks worse and is not measurably worse. It has 512 test rows against
+# four thousand, and on the rows this is actually for its three markets disagree
+# with each other: pass_yds +1.6%, pass_att -0.6%, pass_completions -4.5%. A
+# spread that wide on a sample that small is what the noise rule exists to
+# refuse. The lever is here so a QB market can be moved back in one variable when
+# there is enough of a season to decide it, which is the right time to look.
+WINDOW_CROSSING_MARKETS = {
+    m.strip() for m in os.getenv("WINDOW_CROSSING_MARKETS", "").split(",")
+    if m.strip()
+}
+
 
 def _append_serving_game(player_id, games, schedule_by_team, current_team):
     """Append a synthetic target for the player's next scheduled game.
@@ -935,11 +987,18 @@ def build_features(
                        == games[i].get("season")):
                 season_start -= 1
 
-            floor = MIN_GAMES
-            if i - season_start < floor:
-                continue
-
-            start = max(season_start, i - lookback)
+            season_only = WINDOW_SEASON_ONLY and market_code not in WINDOW_CROSSING_MARKETS
+            if season_only:
+                floor = MIN_GAMES
+                if i - season_start < floor:
+                    continue
+                start = max(season_start, i - lookback)
+            else:
+                # The old behaviour, kept reachable so the two can be measured
+                # against each other rather than argued about.
+                if i < (MIN_SERVING_GAMES_LEGACY if is_serving else lookback):
+                    continue
+                start = max(0, i - lookback)
             window_games = games[start:i]
             window = ys[start:i]
             # The game being predicted. Defined up front because several feature
@@ -1007,7 +1066,7 @@ def build_features(
             # put about 56% of its weight on last season: alpha 0.25 spends
             # 0.25 on the most recent game and 0.1875 on the one before it, and
             # everything left over went to December.
-            prior = ys[season_start:i]
+            prior = ys[season_start:i] if season_only else ys[:i]
             if prior:
                 alpha = 0.35 if market_code == "rush_att" else 0.25
                 level = prior[0]
@@ -1071,6 +1130,55 @@ def build_features(
                     anchor = _mean(window)
                 if anchor is not None:
                     extra_features["y_season_mean"] = float(anchor)
+
+            # All of last season as one number, and this season anchored to it.
+            #
+            # The window is this season only and stays that way: last December's
+            # games never enter a projection again. But a season-only window in
+            # Week 2 is one game, and one game measures badly. Model-free on box
+            # scores, against the actual next game, scoring 2025-2026 with the
+            # weight fitted on earlier seasons (research_season_boundary.py):
+            #
+            #                  season only    this season anchored to last
+            #     recs             -4.5%                 +6.1%
+            #     rec_yds          -6.5%                 +4.8%
+            #     rush_yds         -1.9%                 +6.0%
+            #     rush_att         +0.9%                 +7.1%
+            #     pass_completions +0.4%                 +6.0%
+            #     pass_att         -0.5%                 +4.7%
+            #     pass_yds         -7.8%                 +1.6%
+            #
+            # Both columns are against the old cross-season window. Season-only
+            # is worse than what it replaced on five of seven markets; the
+            # anchored version is better on all seven. The difference between
+            # them is the difference between last season's *tail* and last
+            # season's *average*: December is a fortnight of rested starters and
+            # playoff rotations, and a full year is a year of evidence.
+            #
+            # Rookies keep the season-only figure, because there is nothing to
+            # anchor to and borrowing somebody else's average would be worse
+            # than a small sample.
+            this_season = games[i].get("season")
+            if this_season is not None and season_only:
+                prev = [
+                    float(g["y"] or 0.0)
+                    for g in games[:season_start]
+                    if g.get("season") == this_season - 1
+                    and (g.get("season_type") or "REG") == "REG"
+                ]
+                extra_features["prev_season_n"] = float(len(prev))
+                cur_mean = extra_features.get("y_season_mean")
+                if prev:
+                    prev_mean = _mean(prev)
+                    extra_features["prev_season_mean"] = prev_mean
+                    if cur_mean is not None:
+                        k = BLEND_K.get(market_code, BLEND_K_DEFAULT)
+                        n_cur = float(len(season_prior))
+                        extra_features["y_blend"] = (
+                            (n_cur * float(cur_mean) + k * prev_mean) / (n_cur + k)
+                        )
+                elif cur_mean is not None:
+                    extra_features["y_blend"] = float(cur_mean)
 
             # How much of the window is postseason, which is the one part of the
             # old season-boundary problem that survives inside a single season:

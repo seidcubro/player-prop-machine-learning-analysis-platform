@@ -157,8 +157,38 @@ became an under.
 So the window is this season only, and so is everything derived from it: the
 EWMA level, which at Week 3 had put about 56% of its weight on last season, and
 the trailing touchdowns-over-expected window, which is now partitioned by season
-as well as by player. Two games of this season say less than seven games of
-anything, and they say it about the right player.
+as well as by player.
+
+Measured properly, which took three attempts to get right. Built both ways and
+compared on **identical rows** with the same family and the same split
+(`research_window_generations.py`), because the row population changes when the
+window does and the first comparison I ran was between two different populations:
+
+| market | crossing | season only | gain | on thin rows |
+|---|---|---|---|---|
+| rec_yds | 16.4154 | **16.2085** | **+1.3%** | +1.5% |
+| recs | 1.2523 | **1.2411** | **+0.9%** | +2.0% |
+| rush_yds | 9.8272 | **9.7413** | **+0.9%** | +0.2% |
+| rush_att | 1.6185 | **1.6037** | **+0.9%** | +0.6% |
+| pass_att | 7.6275 | 7.6179 | +0.1% | −0.6% |
+| pass_yds | 65.4587 | 65.8284 | −0.6% | +1.6% |
+| pass_completions | 5.1799 | 5.2328 | −1.0% | −4.5% |
+
+Season-only wins on every volume market, and those are 74 of the 92 picks the
+broken board published. Passing looks worse and is not measurably worse: 512 test
+rows against four thousand, and on the rows this is for its three markets
+disagree with each other. `WINDOW_CROSSING_MARKETS` moves a market back in one
+variable when there is enough of a season to decide it.
+
+Two earlier measurements that pointed the other way, kept because the reason they
+were wrong is the useful part. Compared as plain averages of box scores rather
+than through the model, the cross-season window is *closer* on five of seven
+markets, and this season anchored to all of last season is better than both by 5
+to 7%. Neither survived the model: `research_blend_feature.py` puts `y_blend` at
++0.6% on receptions and negative on two passing markets, on the same rows with
+and without it. A signal can be real on its own and redundant beside the depth
+chart, the Vegas total and the opponent, which is exactly how this question got
+answered wrongly in September.
 
 Three consequences, none of them free:
 
@@ -494,12 +524,20 @@ about which way the book leans, not from out-predicting it.
 | Straddle filter, price bands, vacated role, last-game form, book disagreement | All failed season by season. |
 | Tracking data as features (Next Gen Stats, PFR advanced) | 22 features covering 95% of receiving props and 97% of passing ones. The elastic net gave every one a coefficient of exactly zero; a tree model landed in the same place. Receptions MAE 1.2083 to 1.2092. The existing target share, air yards and snap share already carry it. |
 | Weighting this season's games more heavily in Weeks 2 to 5 | Beat a plain five game average by 6 to 10%, and made the real model worse: rush attempts −10.1%, receiving yards −0.4%. **Withdrawn, September 2026.** The test required six games of the prior season to enter the fit, so it was run without rookies, fringe players or anyone new to a team, which is the whole population the correction is for. See the season-boundary entry below. |
+| `y_blend`, this season anchored to all of last season, as a feature | The best estimator of the next game I have measured: +6.1% on receptions and +4.8% on receiving yards against the old window, as a plain average, with the weight fitted on earlier seasons. Worth +0.6% through the model, and negative on two passing markets. The depth chart, the total and the opponent already carry it. Computed and stored anyway, because the serving-time anchor uses it and is measurably better for doing so. |
 | A role stability score | Predicts a role change on unseen seasons (AUC 0.674) and does not pay. The picks it flags return +0.1% and the ones it keeps +0.5%. A role change explains a loss after the fact and breaks in our favour just as often. |
 | Publishing only the slices that made money | Chosen on 2023 and 2024, applied to 2025: +0.9% against the full board's +1.0%. The slices were noise. |
 | Blending the probability toward the price, pooled | Better average log loss, and wrong here: fitted on backfilled rows whose probabilities come from a different calibration path, it drove the weight on overs to zero and buried the strongest band on the board. Replaced by the per side calibration below. |
 
 ### What held
 
+- Stopping the rolling window at the start of the season. On identical rows,
+  same family, same split: receiving yards +1.3%, receptions +0.9%, rushing
+  yards +0.9%, rush attempts +0.9%, and +1.5 to +2.0% on the early-season rows
+  the change is for. The passing markets are within noise on a tenth of the
+  sample and keep the same treatment. Both cheaper versions of this question
+  gave the wrong answer: as plain averages the old window looks better, and as
+  an extra feature the blended anchor is worth +0.6% at best.
 - Picking sides off the median instead of the mean.
 - Averaging four model families instead of picking one, on the rushing markets
   and receiving yards. Measured on rolling origins, three successive held-out

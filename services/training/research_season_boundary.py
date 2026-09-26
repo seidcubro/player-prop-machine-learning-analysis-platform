@@ -117,16 +117,27 @@ def evaluate(g: pd.DataFrame):
             if len(cross) == len(seas):
                 # The windows are identical, so this row cannot tell them apart.
                 continue
+            # All of last season, regular games only. The third option, and the
+            # one the old window never had: December's games are what dragged
+            # the board down, and a full-season average is not December, it is a
+            # year of evidence compressed into one number.
+            prev = ys[:s0][(seasons[:s0] == season - 1)]
+            # The stand-in for a line: the player's own median across this
+            # season, with the target game left out. Leaving it in made the
+            # reference partly a function of the thing being called, which is
+            # why the first version of this reported week-2 side rates below a
+            # coin flip on a metric that cannot be worse than chance by luck.
+            same = seasons == season
+            others = np.concatenate([ys[s0:i], ys[i + 1:][same[i + 1:]]])
             rows.append({
                 "player_id": pid, "position": p["position"].iloc[i],
                 "season": season, "week": weeks[i], "n_cur": n_cur,
                 "y": ys[i],
                 "crossing": float(cross.mean()),
                 "season_only": float(seas.mean()),
-                # The player's own median across this season, as the stand-in
-                # for a line. Uses the whole season, which is legitimate here:
-                # it is the thing being called, not an input to the call.
-                "ref": float(np.median(ys[s0:][seasons[s0:] == season])),
+                "prev_full": float(prev.mean()) if len(prev) else np.nan,
+                "prev_n": float(len(prev)),
+                "ref": float(np.median(others)) if len(others) else np.nan,
             })
     d = pd.DataFrame(rows)
     if d.empty:
@@ -144,9 +155,42 @@ def side_rate(est, y, ref):
     return float((call[live] == truth[live]).mean())
 
 
+K_GRID = (0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 9.0, 14.0, 25.0)
+FIT_BEFORE = 2025
+
+
+def blended(d, k):
+    """This season shrunk toward all of last season, by how much of this there is.
+
+    Falls back to the season-only figure for a player with no prior season,
+    which is a rookie: there is nothing to shrink toward and pretending
+    otherwise would hand him somebody else's average.
+    """
+    n = d["n_cur"].to_numpy(dtype=float)
+    cur = d["season_only"].to_numpy(dtype=float)
+    prev = d["prev_full"].to_numpy(dtype=float)
+    out = (n * cur + k * prev) / (n + k)
+    return np.where(np.isnan(prev), cur, out)
+
+
+def fit_k(d):
+    """Pick k on the earlier seasons only, score it on the later ones."""
+    fit = d[d["season"] < FIT_BEFORE]
+    if len(fit) < MIN_ROWS:
+        return None, None
+    best, best_mae = None, float("inf")
+    for k in K_GRID:
+        mae = float(np.abs(blended(fit, k) - fit["y"]).mean())
+        if mae < best_mae:
+            best, best_mae = k, mae
+    return best, d[d["season"] >= FIT_BEFORE]
+
+
 def main():
     print("Weeks 2-6, every season, rookies and new arrivals included.\n"
-          "Only rows where the two windows actually differ.\n")
+          "Only rows where the windows actually differ.\n"
+          f"k for the blend is fitted on seasons before {FIT_BEFORE} and scored "
+          f"on {FIT_BEFORE} and later.\n")
     overall = defaultdict(lambda: [0, 0.0, 0.0])
     for m in markets():
         code = m["code"]
@@ -159,34 +203,43 @@ def main():
             print(f"{code}: {len(d)} comparable rows, too few\n")
             continue
 
-        print(f"{code}   ({len(d)} rows, {d['season'].min()}-{d['season'].max()})")
-        print(f"{'':10}{'n':>7}{'MAE cross':>11}{'MAE season':>11}{'gain':>8}"
-              f"{'side cross':>12}{'side season':>13}")
+        k, d = fit_k(d)
+        if k is None or d is None or len(d) < MIN_ROWS:
+            print(f"{code}: not enough history either side of {FIT_BEFORE}\n")
+            continue
+        d = d.copy()
+        d["blend"] = blended(d, k)
+
+        print(f"{code}   ({len(d)} scored rows, k={k:g}, "
+              f"{int(d['season'].min())}-{int(d['season'].max())})")
+        print(f"{'':10}{'n':>7}{'cross':>9}{'season':>9}{'blend':>9}"
+              f"{'blend vs cross':>16}{'side X':>9}{'side S':>8}{'side B':>8}")
         for wk in (*WEEKS, "all"):
             s = d if wk == "all" else d[d["week"] == wk]
             if len(s) < MIN_ROWS:
                 continue
-            c_mae = float(np.abs(s["crossing"] - s["y"]).mean())
-            s_mae = float(np.abs(s["season_only"] - s["y"]).mean())
-            gain = (c_mae - s_mae) / c_mae * 100 if c_mae else 0.0
-            c_sd = side_rate(s["crossing"], s["y"], s["ref"])
-            s_sd = side_rate(s["season_only"], s["y"], s["ref"])
+            c = float(np.abs(s["crossing"] - s["y"]).mean())
+            o = float(np.abs(s["season_only"] - s["y"]).mean())
+            b = float(np.abs(s["blend"] - s["y"]).mean())
+            gain = (c - b) / c * 100 if c else 0.0
             label = "all" if wk == "all" else f"week {wk}"
-            print(f"{label:<10}{len(s):>7}{c_mae:>11.3f}{s_mae:>11.3f}"
-                  f"{gain:>+7.1f}%{c_sd:>11.1%}{s_sd:>12.1%}")
+            print(f"{label:<10}{len(s):>7}{c:>9.3f}{o:>9.3f}{b:>9.3f}"
+                  f"{gain:>+15.1f}%"
+                  f"{side_rate(s['crossing'], s['y'], s['ref']):>9.1%}"
+                  f"{side_rate(s['season_only'], s['y'], s['ref']):>8.1%}"
+                  f"{side_rate(s['blend'], s['y'], s['ref']):>8.1%}")
             if wk == "all":
-                overall[code] = [len(s), gain, (s_sd - c_sd) * 100]
-        p_mae = float(np.abs(d["pos_mean"] - d["y"]).mean())
-        print(f"{'position':<10}{len(d):>7}{p_mae:>11.3f}"
-              f"{'':>11}{'':>8}   (the floor both must beat)\n")
+                overall[code] = [len(s), gain, (c - o) / c * 100 if c else 0.0, k]
+        print()
 
-    print("=" * 66)
-    print(f"{'market':<20}{'rows':>7}{'MAE gain':>11}{'side pts':>10}")
-    for code, (n, gain, side) in overall.items():
-        print(f"{code:<20}{n:>7}{gain:>+10.1f}%{side:>+9.1f}")
-    print("\nA positive MAE gain means the season-only window is closer. "
-          "Side points\nare percentage points of correct side calls, which is "
-          "the metric the board\nis actually judged on.")
+    print("=" * 72)
+    print(f"{'market':<20}{'rows':>7}{'k':>6}{'season only':>13}{'blend':>9}")
+    for code, v in overall.items():
+        n, blend_gain, season_gain, k = v
+        print(f"{code:<20}{n:>7}{k:>6g}{season_gain:>+12.1f}%{blend_gain:>+8.1f}%")
+    print("\nBoth columns are versus the old cross-season window, positive means\n"
+          "closer to the actual next game. 'season only' is what ships right now.\n"
+          "'blend' is this season anchored to all of last season, never its tail.")
 
 
 if __name__ == "__main__":

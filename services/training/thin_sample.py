@@ -62,7 +62,16 @@ def anchor(pred: float, extra: dict, market_code: str = "") -> float:
     if not isinstance(extra, dict):
         return pred
     n = extra.get("y_season_n")
-    mean = extra.get("y_season_mean")
+    # y_blend where the feature builder produced one: this season anchored to all
+    # of last season's regular games, at the weight fitted per market. It beats
+    # the raw season average as an estimator of the next game on every market
+    # measured (research_season_boundary.py), by 5 to 7% on the volume markets,
+    # and anchoring to the better of the two is free. y_season_mean is the
+    # fallback for a row built before y_blend existed, and for a rookie, who has
+    # no last season and whose y_blend is his season average anyway.
+    mean = extra.get("y_blend")
+    if mean is None:
+        mean = extra.get("y_season_mean")
     if n is None or mean is None:
         return pred
     try:
