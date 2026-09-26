@@ -23,7 +23,18 @@ them):
 w and k are fitted per market on 2023 and 2024 and scored on 2025. Nothing is
 written; this decides whether a correction is worth building.
 
-Verdict, September 2026: not built. Against a plain five-game average, S wins
+Verdict, September 2026: not built. WITHDRAWN later the same month. The fit
+below requires MIN_PREV_GAMES = 6 games of the prior season, which excludes
+rookies, fringe players and anyone new to a team: the entire population a
+season-boundary correction exists for. A rookie who played sixty snaps in
+December and opened September as the starter is not noise to keep out of the
+fit, he is the phenomenon. The verdict that follows was measured on the rows
+the correction cannot help. research_season_boundary.py asks the question
+again without that filter, and on the rows where the window actually crosses
+the boundary.
+
+The original verdict, kept because the second of its two tests is still the
+right shape: Against a plain five-game average, S wins
 clearly (receptions +7.3%, receiving yards +6.0%, rush attempts +9.2%, pass
 attempts +9.6%). Against the model, it does not: applying the S-over-A ratio to
 the model's own walk-forward projections for the same 2025 games moved

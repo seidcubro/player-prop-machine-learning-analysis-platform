@@ -565,6 +565,12 @@ def build_features(
             pgs.game_date,
             pgs.opponent,
             pgs.season,
+            -- Read by the season-boundary features below. A window does not
+            -- know where a season ends, and until these were selected it could
+            -- not have been told: a January playoff game and a Week 18 rest
+            -- game were indistinguishable from a September start.
+            pgs.week,
+            pgs.season_type,
 
             COALESCE(pgs.{stat_field}, 0)::float8 AS y,
             psp.prior_pos_mean AS prior_pos_mean,
@@ -998,6 +1004,71 @@ def build_features(
                     anchor = _mean(window)
                 if anchor is not None:
                     extra_features["y_season_mean"] = float(anchor)
+
+            # Where the window sits relative to the season boundary.
+            #
+            # The window is five games and it does not know where a season ends,
+            # so a player with fewer than five games this season has last season
+            # inside it. In Week 3 that is three games of last December weighted
+            # equally with the two that describe who he is now, and December is
+            # the worst available description of a player: Week 18 rests a
+            # playoff team's starters, a playoff rotation is not a regular
+            # season rotation, and a rookie's December is not the role he was
+            # handed in September.
+            #
+            # On the Week 3 2026 board this put the projection between the two
+            # seasons on every player whose role had improved. TreVeyon
+            # Henderson averaged 76 rushing yards in the two games that opened
+            # 2026 and 16.3 in the December before it, and was projected 43.8
+            # against a line of 41.5. Dontayvion Wicks, 73.5 receiving yards
+            # against 8.3, projected 35.6. Rashod Bateman, 44 against 10,
+            # projected 33.9. Eight of the 92 published picks had a window
+            # spanning a team the player no longer plays for.
+            #
+            # y_season_mean and y_season_n already carry this season on its own,
+            # and the model has ignored them, which is not mysterious: recs,
+            # rush_yds and rush_att are served by linear models, and a linear
+            # model cannot express "trust this season's average when there is
+            # little of it and it disagrees with the window". A coefficient is
+            # the same coefficient at every value of n. Trees can learn that
+            # interaction and largely do not, because from Week 6 onward the two
+            # numbers are nearly identical and the split earns nothing on the
+            # bulk of the rows.
+            #
+            # So the structure is named instead of inferred. Each of these is a
+            # fact about the window that was previously invisible: how much of
+            # it belongs to a finished season, how much of it is postseason, how
+            # much of it was played for this team, and what last season actually
+            # looked like across all of itself rather than through its tail.
+            # research_season_boundary.py decides which of them earn their place.
+            this_season = games[i].get("season")
+            prior_games = games[:i]
+            if window_games:
+                w = float(len(window_games))
+                extra_features["window_prev_frac"] = sum(
+                    1.0 for g in window_games if g.get("season") != this_season) / w
+                extra_features["window_post_frac"] = sum(
+                    1.0 for g in window_games
+                    if (g.get("season_type") or "REG") != "REG") / w
+                cur_team = games[i].get("team")
+                if cur_team:
+                    extra_features["window_same_team_frac"] = sum(
+                        1.0 for g in window_games if g.get("team") == cur_team) / w
+
+            # Last season over the whole of last season, regular games only.
+            # Not a replacement for the window: an alternative anchor, offered
+            # with its own sample size so the fit can decide what it is worth
+            # against the December tail the window would otherwise use.
+            if this_season is not None:
+                prev = [
+                    float(g["y"] or 0.0)
+                    for g in prior_games
+                    if g.get("season") == this_season - 1
+                    and (g.get("season_type") or "REG") == "REG"
+                ]
+                extra_features["prev_season_n"] = float(len(prev))
+                if prev:
+                    extra_features["prev_season_mean"] = _mean(prev)
 
             for code, _col in upstream_cols:
                 vals = [float(g.get(code, 0.0) or 0.0) for g in window_games]

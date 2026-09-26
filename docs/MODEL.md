@@ -271,6 +271,41 @@ tested worse (+3.9% to +2.9%). The correction changes what the board says about
 a pick, never which picks it makes. The model's own figure is kept as
 `win_prob_model` so a refit never learns from its own output.
 
+One pick never reaches the bet tier, whatever its edge: one this season's own
+production contradicts, while the window it was built from still holds last
+season. The window is five games, so a player with fewer than five games this
+season necessarily has last season inside it, and in Week 3 that is three games
+of last December weighted equally with the two that describe who he is now.
+December is the worst available description of a player: Week 18 rests a playoff
+team's starters, a playoff rotation is not a regular-season rotation, and a
+rookie's December is not the role he was handed in September.
+
+The Week 3 2026 board is what that looks like. 92 published picks, 87 of them
+unders, and on every player whose role had improved the projection landed
+between his two seasons:
+
+| player | this season | last December | projected | line |
+|---|---|---|---|---|
+| TreVeyon Henderson | 76 rush yds | 16.3 | 43.8 | 41.5 |
+| Dontayvion Wicks | 73.5 rec yds | 8.3 | 35.6 | 44.5 |
+| Rashod Bateman | 44 rec yds | 10 | 33.9 | 43.5 |
+| Bhayshul Tuten | 14 carries | 3.3 | 10.9 | 12.5 |
+
+Eight of the 92 had a window spanning a team the player had left. So a
+projection that falls on the opposite side of the line from the player's own
+current-season average, on at least two games of it, is shown and labelled
+rather than recommended. The rule stops firing once a player has five games this
+season, so it is gone by Week 6 without being turned off, and it does not touch
+the projection or invent a replacement for it.
+
+This is a guard against a measured defect in an input, not a claim to know which
+picks lose, and unlike the tier cuts it has not been validated on a backtest.
+Refusing picks has failed that test before (`research_role_stability.py`). It
+ships on the narrower argument that publishing a pick whose input is knowably
+stale is worse than publishing nothing, and it prints every refusal so the cost
+is visible. The fix for the projection itself belongs in the features, and is
+being tested by `research_season_boundary.py`.
+
 ## Edge, EV and tiers
 
 ```
@@ -392,7 +427,7 @@ about which way the book leans, not from out-predicting it.
 | Correcting the median to a true midpoint | Fixed a real calibration flaw and cut holdout ROI from +1.29% to +0.07%. The low median is the edge. |
 | Straddle filter, price bands, vacated role, last-game form, book disagreement | All failed season by season. |
 | Tracking data as features (Next Gen Stats, PFR advanced) | 22 features covering 95% of receiving props and 97% of passing ones. The elastic net gave every one a coefficient of exactly zero; a tree model landed in the same place. Receptions MAE 1.2083 to 1.2092. The existing target share, air yards and snap share already carry it. |
-| Weighting this season's games more heavily in Weeks 2 to 5 | Beat a plain five game average by 6 to 10%, and made the real model worse: rush attempts −10.1%, receiving yards −0.4%. The model's other features already carry it. |
+| Weighting this season's games more heavily in Weeks 2 to 5 | Beat a plain five game average by 6 to 10%, and made the real model worse: rush attempts −10.1%, receiving yards −0.4%. **Withdrawn, September 2026.** The test required six games of the prior season to enter the fit, so it was run without rookies, fringe players or anyone new to a team, which is the whole population the correction is for. See the season-boundary entry below. |
 | A role stability score | Predicts a role change on unseen seasons (AUC 0.674) and does not pay. The picks it flags return +0.1% and the ones it keeps +0.5%. A role change explains a loss after the fact and breaks in our favour just as often. |
 | Publishing only the slices that made money | Chosen on 2023 and 2024, applied to 2025: +0.9% against the full board's +1.0%. The slices were noise. |
 | Blending the probability toward the price, pooled | Better average log loss, and wrong here: fitted on backfilled rows whose probabilities come from a different calibration path, it drove the weight on overs to zero and buried the strongest band on the board. Replaced by the per side calibration below. |

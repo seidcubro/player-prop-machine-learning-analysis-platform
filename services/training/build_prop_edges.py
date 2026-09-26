@@ -281,6 +281,74 @@ def demote_dead_bets(out: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def refuse_contradicted_picks(out: pd.DataFrame) -> pd.DataFrame:
+    """Do not recommend a pick that this season's own production contradicts.
+
+    This is a guard against a known feature defect, not a guess about which
+    picks lose, and it exists because of an arithmetic fact: the window is five
+    games long, so a player with fewer than five games this season has last
+    season inside it. In Week 3 that is three games of last December, weighted
+    equally with the two that describe who he is now. Last December is
+    systematically low for exactly the players who matter: a rookie who barely
+    played, a starter rested in Week 18, a playoff rotation, a man on another
+    team. Eight of the 92 picks on the Week 3 2026 board had a window spanning a
+    different team.
+
+    What it looks like on the board is a projection sitting between this
+    season's production and last season's tail, every time:
+
+        TreVeyon Henderson   76 rush yds this season,  16.3 last December,
+                             projected 43.8 against a line of 41.5
+        Dontayvion Wicks     73.5 rec yds,              8.3,  projected 35.6
+        Rashod Bateman       44 rec yds,               10,    projected 33.9
+
+    A projection that lands on the opposite side of the line from the player's
+    own current-season average is not a disagreement with the market worth
+    publishing. It is the model telling us it is reading a role that no longer
+    exists. Those move to the context tier, where they are shown and labelled
+    rather than recommended.
+
+    Deliberately narrow. Two games is the fewest that can establish anything,
+    and the whole rule stops firing once a player has five games this season, so
+    it is gone by Week 6 without anyone turning it off. It does not touch the
+    projection, invent a replacement, or claim to know the right answer. The
+    fix for the projection itself is in the features, where the defect is.
+
+    Unlike the tier cuts this has not been validated on a backtest, because the
+    population it applies to is four weeks of each season and refusing picks has
+    failed that test before (`research_role_stability.py`). It ships on the
+    narrower argument that publishing a pick whose input is measurably stale is
+    worse than publishing nothing, and it prints what it refused so the cost is
+    visible rather than assumed.
+    """
+    if not len(out) or "_season_n" not in out.columns:
+        return out
+    n = pd.to_numeric(out["_season_n"], errors="coerce")
+    season = pd.to_numeric(out["_season_mean"], errors="coerce")
+    line = pd.to_numeric(out["line"], errors="coerce")
+
+    # Enough of this season to mean something, but not enough to fill the
+    # window, which is the same thing as "last season is still in there".
+    thin = n.between(2, 4, inclusive="both")
+    # This season's average sits on the other side of the line from the pick.
+    says_over = out["recommended_side"].eq("over")
+    contradicted = (says_over & (season < line)) | (~says_over & (season > line))
+
+    bet = out["edge_tier"].isin(BET_TIERS)
+    refuse = bet & thin & contradicted & season.notna() & line.notna()
+    if refuse.any():
+        out.loc[refuse, "edge_tier"] = "strong" if "strong" not in BET_TIERS else "medium"
+        for _, r in out.loc[refuse].iterrows():
+            print(f"  refused {r['player_name']} {r['market_code']} "
+                  f"{r['recommended_side']} {r['line']}: "
+                  f"{r['_season_mean']:.1f} this season over "
+                  f"{r['_season_n']:.0f} game(s)")
+    print(f"stale-window guard: refused {int(refuse.sum())} of "
+          f"{int((bet & thin).sum())} bet-tier pick(s) built on a window that "
+          f"still holds last season")
+    return out
+
+
 def load_current_context(engine) -> dict:
     """Look up the state of the world for the games being predicted.
 
@@ -1898,6 +1966,9 @@ def main():
             "lookback": int(frow["lookback"]),
             "source_last_update": o["source_last_update"],
             "notes": None,
+            # Carried for refuse_contradicted_picks, dropped before the write.
+            "_season_n": _num(extra.get("y_season_n")),
+            "_season_mean": _num(extra.get("y_season_mean")),
         })
 
     if not rows:
@@ -2035,6 +2106,9 @@ def main():
         print(f"value-flagged {int(out['value_flag'].sum())} of {len(out)} edges")
 
     out = publish_calibrated(out, display_prob.load(artifact_dir))
+    out = refuse_contradicted_picks(out)
+    # Carriers for the guard above, never columns of the table.
+    out = out.drop(columns=[c for c in out.columns if c.startswith("_")])
 
     # Write only the columns the table has. win_prob_model arrives with a
     # migration, and the hourly timer can run this code in the window between a
