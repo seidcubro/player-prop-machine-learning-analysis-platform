@@ -29,6 +29,7 @@ import interval_calibration as ic
 import median_anchor as ma
 import pandas as pd
 import spread_calibration as sc
+import thin_sample
 import vacated_volume as vv
 from sqlalchemy import create_engine, text
 
@@ -290,6 +291,14 @@ def main():
                     factor = float(sf["factor"])
                     pred *= factor
 
+            # Held near what he has actually done this season, when there is
+            # little of this season to go on. Before the vacated-volume step,
+            # which raises a projection to a workload level and should raise the
+            # anchored number rather than have its own result averaged away.
+            pred_unanchored = pred
+            pred = thin_sample.anchor(pred, extra, market_code)
+            anchor_delta = pred - pred_unanchored
+
             # Volume inherited from a ruled-out teammate.
             #
             # The point projection is raised to the level that workload
@@ -336,6 +345,17 @@ def main():
                 # draws is narrower than the truth.
                 cal = bp.calibrated_quantiles(raw, quant.get("calibration"))
                 qs = {q: v * factor for q, v in cal.items()}
+
+            # The thin-sample anchor again, this time for the range.
+            #
+            # A shift, not a scale. Anchoring moves where the distribution sits
+            # and has no opinion about how wide it is, and scaling a whole ladder
+            # by a ratio meant for the point is what put Drew Lock's median at
+            # 257 passing yards against a mean of 203. Count markets are left
+            # alone because their ladder is a Poisson built from the point, so it
+            # inherited the anchor already; shifting it again would move it twice.
+            if anchor_delta and qs and not is_count:
+                qs = {q: max(0.0, v + anchor_delta) for q, v in qs.items()}
 
             # Re-read the range at the levels that make it honest, measured
             # on the player-games books actually price. Before the median
@@ -402,6 +422,8 @@ def main():
 
     if not rows:
         raise SystemExit("no projections produced")
+
+    print(thin_sample.applied())
 
     out = pd.DataFrame(rows).drop_duplicates(
         subset=["player_id", "market_code", "game_date"]

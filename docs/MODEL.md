@@ -178,6 +178,36 @@ The one thing still allowed to read a finished season is the shrinkage prior,
 which pulls a thin window toward what the *position* did rather than toward what
 this player used to be. That is a stabiliser, not a claim about his role.
 
+### Held near this season at serving time
+
+The window change is the fix and this is the guarantee. A projection is
+defensible when you can say where it came from without apologising for it, and
+"he is averaging 76 over two games, so 60" is defensible in a way that "he is
+averaging 76 and we project 43.8" is not, whatever produced it. So the published
+projection is shrunk toward the player's own current-season average while there
+is little of this season to go on:
+
+    published = w * model + (1 − w) * this season's average,   w = n / (n + 2)
+
+Half and half at two games, and nothing at all from five games onward, because by
+then the window is made of this season anyway and the model is entitled to its own
+opinion. It needs neither a feature rebuild nor a retrain, which is the point: it
+corrects the board that is live now. On the Week 3 2026 board it moved 16 of the
+worst reads by an average of 5.1 and turned four of them from unders into overs.
+
+The range is shifted by the same amount rather than scaled by the ratio, because
+anchoring moves where a distribution sits and says nothing about how wide it is,
+and it is applied before P(over) is read so the side and the median come from the
+same distribution. The count markets rebuild both from the point and inherit it
+that way.
+
+Not backtested, and it changes the median that picks sides, which has cost money
+here before ("Correcting the median to a true midpoint"). The exposure is bounded
+by construction: inert from five games, so Weeks 2 to 5 only. `thin_sample.applied()`
+prints how much it moved on every build, so once the retrain lands the correction
+should shrink toward nothing, and if it does not, something upstream is still
+wrong.
+
 Two further rules I enforce rather than trust:
 
 1. **Freshness at serving time.** Anything knowable before kickoff (opponent,

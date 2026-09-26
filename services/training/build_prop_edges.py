@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 import vacated_volume as vv
 import spread_calibration as spread
+import thin_sample
 from odds_markets import ALL_ODDS_TO_MARKET
 from scipy.stats import norm
 from sqlalchemy import create_engine, text
@@ -1596,6 +1597,15 @@ def main():
                 stale_factor = float(sf["factor"])
                 model_projection *= stale_factor
 
+        # Held near what he has actually done this season, when there is little
+        # of this season to go on. Same call, same place in the order, as
+        # build_projections: the board and the projections page have to agree
+        # about the same player, and they only do if the correction is applied
+        # to the same number at the same point.
+        _unanchored = model_projection
+        model_projection = thin_sample.anchor(model_projection, extra, market_code)
+        anchor_delta = model_projection - _unanchored
+
         # Volume inherited from a ruled-out teammate.
         #
         # The point projection is raised to the level that workload implies.
@@ -1642,6 +1652,17 @@ def main():
                 q: max(0.0, float(qm.predict(x)[0])) * stale_factor
                 for q, qm in quant["models"].items()
             }
+            # The thin-sample anchor, applied to the range before anything is
+            # read off it. A shift rather than a scale, because anchoring moves
+            # where the distribution sits and says nothing about its width, and
+            # it has to happen here: P(over) is read from this ladder a few lines
+            # down, so a ladder left unanchored beside an anchored point would
+            # pick the side off one distribution and print the median of another.
+            # The count markets rebuild both from the point below and so inherit
+            # it there instead.
+            if anchor_delta and market_code not in COUNT_MARKETS:
+                qp = {q: max(0.0, v + anchor_delta) for q, v in qp.items()}
+
             # The inherited level, applied to the range. Scaling the ladder by
             # whatever its median needed keeps the shape, so the spread still
             # belongs to this player and P(over) below is read off a
@@ -2107,6 +2128,7 @@ def main():
             out.loc[mask, "value_flag"] = True
         print(f"value-flagged {int(out['value_flag'].sum())} of {len(out)} edges")
 
+    print(thin_sample.applied())
     out = publish_calibrated(out, display_prob.load(artifact_dir))
     out = refuse_contradicted_picks(out)
     # Carriers for the guard above, never columns of the table.
