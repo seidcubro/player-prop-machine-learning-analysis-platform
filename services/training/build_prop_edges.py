@@ -27,6 +27,7 @@ import os
 from pathlib import Path
 
 import interval_calibration as interval
+import market_blend
 import joblib
 import median_anchor as anchor
 import fit_display_probability as display_prob
@@ -1971,8 +1972,18 @@ def main():
             "price_american": int(chosen_price) if pd.notna(chosen_price) else None,
             "model_name": meta["model_name"],
             "model_r2": float(meta.get("r2", 0.0)),
-            "projection": projection,
-            "projection_median": median_value,
+            # Combined with the line, and deliberately the last thing that
+            # happens to these two numbers.
+            #
+            # The side, the probability and the tier were all decided above from
+            # the uncombined values, so this cannot change which pick is made or
+            # what it claims: a convex combination lies between the projection
+            # and the line and is therefore on the same side of the line. It
+            # changes only what is printed, which is the point. See
+            # market_blend.py for the weights and why they are shrunk.
+            "projection": market_blend.blend(projection, o["line"], market_code),
+            "projection_median": market_blend.blend(median_value, o["line"],
+                                                    market_code),
             "raw_edge": raw_edge,
             "win_prob": win_prob,
             "win_prob_raw": win_prob_raw,
@@ -2129,6 +2140,7 @@ def main():
         print(f"value-flagged {int(out['value_flag'].sum())} of {len(out)} edges")
 
     print(thin_sample.applied())
+    print(market_blend.applied())
     out = publish_calibrated(out, display_prob.load(artifact_dir))
     out = refuse_contradicted_picks(out)
     # Carriers for the guard above, never columns of the table.
