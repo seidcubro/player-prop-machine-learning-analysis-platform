@@ -93,9 +93,29 @@ rebuild_on_current_news() {
 }
 
 case "$MODE" in
-  --closing|--early|--board|--daily|--weekly) ;;
-  *) echo "usage: $0 [--closing|--early|--board|--daily|--weekly]"; exit 2 ;;
+  --closing|--early|--board|--daily|--weekly|--migrate) ;;
+  *) echo "usage: $0 [--closing|--early|--board|--daily|--weekly|--migrate]"; exit 2 ;;
 esac
+
+# --migrate is --weekly with the feature store cleared first.
+#
+# A mode rather than a separate script so it runs through the same systemd unit
+# as everything else: WorkingDirectory, the EnvironmentFile holding ADMIN_TOKEN
+# and the Odds key, User=priorline, the log in /var/log/priorline, and above all
+# the flock that keeps it from running at the same time as the hourly closing
+# capture. Both call build_prop_edges.py, which truncates prop_edges and refills
+# it, and two of those at once leaves the board empty.
+#
+#   sudo systemctl start priorline@migrate
+#
+# Run once after a change to what a feature row means, then never again: once the
+# definitions are stable the ordinary upsert keeps the table correct on its own.
+PRUNE_FEATURES=0
+if [ "$MODE" = "--migrate" ]; then
+  PRUNE_FEATURES=1
+  MODE="--weekly"
+  log "mode --migrate: --weekly, with the feature store pruned first"
+fi
 
 log "mode $MODE"
 
@@ -476,6 +496,33 @@ if [ "$MODE" != "--board" ]; then
 
   log "refresh materialized views"
   $COMPOSE exec -T postgres psql -U app -d app -q -f - < db/views/refresh_matviews.sql
+
+  # One-time prune, when the definition of a feature row has changed.
+  #
+  # `build_features` upserts and never deletes, which is right on an ordinary run
+  # and wrong the first time after the window definition moves. The season-only
+  # window changed which rows exist as well as what they hold: Week 1, a player's
+  # first game of a season and anyone with no game this season stopped
+  # qualifying, while Weeks 2 to 5 started. The rows that stopped qualifying
+  # would survive this rebuild carrying values computed under the old
+  # definition, and training would read them beside the new ones. On the
+  # development copy that was 2,400 rows per market out of 21,000: enough to make
+  # every before-and-after number meaningless and not enough to look wrong.
+  #
+  # Derived data, so this is safe without a backup. Every row is rebuilt from box
+  # scores in the loop below and its label re-attached from
+  # player_game_stats_app. Only the seven point markets: the touchdown markets
+  # are trained by a different script off a different feature path.
+  if [ "$PRUNE_FEATURES" = "1" ]; then
+    log "prune feature rows written under the previous window definition"
+    $COMPOSE exec -T postgres psql -U app -d app -c \
+      "DELETE FROM player_market_features
+        WHERE lookback = 5
+          AND market_id IN (SELECT id FROM prop_markets
+                             WHERE code IN ('rec_yds','rush_yds','pass_yds',
+                                            'recs','rush_att','pass_att',
+                                            'pass_completions'));"
+  fi
 
   log "rebuild features"
   for m in $MARKETS; do

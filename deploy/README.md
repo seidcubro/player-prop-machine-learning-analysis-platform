@@ -304,6 +304,44 @@ a crawler fetches with no page context and therefore cannot resolve a relative
 path against. `apps/web/vercel.json` already handles the SPA rewrite and the
 asset caching.
 
+## After a change to what a feature row means
+
+```bash
+sudo systemctl start priorline@migrate
+journalctl -fu priorline@migrate
+```
+
+`--migrate` is `--weekly` with the feature store cleared first. `build_features`
+upserts and never deletes, which is right on an ordinary run and wrong the first
+time the definition of a row changes: the rows that stop qualifying survive the
+rebuild carrying values computed under the old definition, and training reads
+them beside the new ones. On the development copy that was 2,400 rows per market
+out of 21,000, which is enough to make every before-and-after number meaningless
+and not enough to look wrong.
+
+Run it as a systemd unit, not by hand. The unit supplies the working directory,
+the `EnvironmentFile` holding `ADMIN_TOKEN`, `User=priorline`, the log in
+`/var/log/priorline/migrate.log`, and the `flock` that keeps it from running
+beside the hourly closing capture. Both call `build_prop_edges.py`, which
+truncates `prop_edges` and refills it, and two of those at once leaves the board
+empty.
+
+It spends no Odds credits: only `daily.env` sets `ODDS=1`, and there is no
+`migrate.env`.
+
+It takes about an hour, because it retrains every market and the quantile
+ensembles are most of that. Then check the board:
+
+```bash
+curl -s https://api.priorline.io/api/v1/edges/summary | head -c 400
+grep -E "thin-sample anchor|stale-window guard" /var/log/priorline/migrate.log
+```
+
+The anchor line is the one worth reading. It says how far the serving-time
+correction had to move projections, and after a retrain on rebuilt features it
+should be close to nothing. If it is still moving them several yards, something
+upstream is still wrong.
+
 ## Check it worked
 
 ```bash
