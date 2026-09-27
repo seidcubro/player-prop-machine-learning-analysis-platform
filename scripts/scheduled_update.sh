@@ -106,7 +106,8 @@ rebuild_on_current_news() {
 
   $COMPOSE build -q training >/dev/null
   log "rebuild projections"
-  $COMPOSE run --rm training python build_projections.py
+  $COMPOSE run --rm -e MARKETS_ONLY="${MARKETS_ONLY:-}" \
+    training python build_projections.py
   log "rebuild the board"
   $COMPOSE run --rm training python build_prop_edges.py
 }
@@ -783,7 +784,12 @@ if [ "$FAST" = "0" ]; then
 fi
 
 log "project every eligible player"
-$COMPOSE run --rm training python build_projections.py
+# Scoped when MARKETS_ONLY is set, which is most of the cost of a
+# refresh: reprojecting all eleven markets for 594 players took five and a
+# half of the eight minutes, to recompute numbers that had not changed. It
+# replaces only the markets it rebuilt, so the rest keep what is published.
+$COMPOSE run --rm -e MARKETS_ONLY="${MARKETS_ONLY:-}" \
+  training python build_projections.py
 
 log "build the board"
 $COMPOSE run --rm training python build_prop_edges.py

@@ -31,7 +31,7 @@ import pandas as pd
 import spread_calibration as sc
 import thin_sample
 import vacated_volume as vv
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 
 ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 # One slate, not two.
@@ -42,6 +42,17 @@ ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 # longest single NFL week (Thursday through the following Monday) and nothing
 # beyond it.
 DAYS_AHEAD = int(os.getenv("DAYS_AHEAD", "8"))
+# Project only these markets, when set.
+#
+# A --refresh that rebuilt three markets' features still reprojected all eleven
+# for every one of 571 players, which is five and a half minutes of the eight a
+# refresh takes. The other eight markets' numbers were recomputed from features
+# that had not changed, to produce the values already in the table.
+#
+# The same variable the shell script uses, so one setting narrows the feature
+# rebuild, the retrain and this.
+MARKETS_ONLY = [m for m in os.getenv("MARKETS_ONLY", "").replace(",", " ").split()
+                if m]
 
 DDL = """
 CREATE TABLE IF NOT EXISTS player_projections (
@@ -201,6 +212,16 @@ def main():
     # Same adjustment the edge builder applies, built the same way, so a
     # backup quarterback reads the same number on both pages.
     vacated_vol = vv.VacatedVolume(engine, ctx, vv.load_params(ARTIFACT_DIR))
+
+    if MARKETS_ONLY:
+        before = len(df)
+        df = df[df["market_code"].isin(MARKETS_ONLY)]
+        print(f"MARKETS_ONLY={' '.join(MARKETS_ONLY)}: projecting "
+              f"{len(df)} of {before} player-market rows; the rest keep the "
+              f"numbers already published")
+        if df.empty:
+            raise SystemExit(
+                f"no rows for {MARKETS_ONLY}; check the market codes")
 
     print(f"{df['player_id'].nunique()} players, {len(df)} player-market rows, "
           f"{df['game_id'].nunique()} games")
@@ -439,7 +460,21 @@ def main():
     )
 
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE player_projections"))
+        if MARKETS_ONLY:
+            # Replace only what was rebuilt.
+            #
+            # A truncate here would be the whole point of scoping thrown away in
+            # one statement: the markets this run skipped would be deleted and
+            # never reinserted, and the site would lose eight of eleven markets
+            # to a command whose purpose was to be quicker.
+            conn.execute(
+                text("DELETE FROM player_projections "
+                     "WHERE market_code IN :codes").bindparams(
+                         bindparam("codes", expanding=True)),
+                {"codes": MARKETS_ONLY},
+            )
+        else:
+            conn.execute(text("TRUNCATE player_projections"))
         out.to_sql("player_projections", conn, if_exists="append", index=False,
                    method="multi", chunksize=500)
 
