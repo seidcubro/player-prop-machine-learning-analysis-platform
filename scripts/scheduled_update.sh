@@ -524,11 +524,22 @@ if [ "$MODE" != "--board" ]; then
     # rebuild loop is the belt to this braces.
     log "rebuild the API image, which is where the feature builder lives"
     $COMPOSE up -d --build api
-    log "wait for the API"
+    # /health sits at the application root, not under the versioned prefix, so
+    # it is reached by stripping /api/v1 rather than appending to it. Checking
+    # "$API/health" polls a 404 for two minutes and then declares a healthy API
+    # dead, which is exactly what it did on the first real run of this.
+    HEALTH="${API%/api/v1}/health"
+    log "wait for the API at $HEALTH"
     i=0
-    until curl -sf "$API/health" >/dev/null 2>&1; do
+    until curl -sf "$HEALTH" >/dev/null 2>&1; do
       i=$((i + 1))
-      [ "$i" -gt 60 ] && { echo "FAILED: API did not come up"; exit 1; }
+      [ "$i" -gt 60 ] && {
+        echo "FAILED: no 2xx from $HEALTH after 120s"
+        echo "  last response:"
+        curl -s -o /dev/null -w "    HTTP %{http_code} in %{time_total}s\n" \
+          "$HEALTH" || echo "    (no response at all)"
+        exit 1
+      }
       sleep 2
     done
 
