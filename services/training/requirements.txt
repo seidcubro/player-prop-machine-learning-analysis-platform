@@ -14,3 +14,17 @@ scipy
 # Historical odds backfill talks to The Odds API directly.
 requests
 shap==0.46.0
+# Both PostgreSQL drivers, on purpose.
+#
+# Nineteen scripts here read DATABASE_URL and fall back to building their own
+# URL, and the two do not agree on a dialect: most write postgresql+psycopg2://
+# while train_quantiles.py and a few others write a bare postgresql://. The
+# server's environment supplies a postgresql+psycopg:// URL, which is the
+# psycopg 3 dialect, so every script that honours DATABASE_URL asked SQLAlchemy
+# for a driver the image did not contain and the weekly retrain died on
+# ModuleNotFoundError partway through, after the features had been rebuilt.
+#
+# Installing both is one line against editing nineteen files to agree on a
+# scheme, and it makes the scripts work under whatever URL the environment
+# happens to hold rather than only the one they were written against.
+psycopg[binary]==3.2.3
