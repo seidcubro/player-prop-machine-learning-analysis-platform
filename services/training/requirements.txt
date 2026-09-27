@@ -13,3 +13,4 @@ lightgbm==4.5.0
 scipy
 # Historical odds backfill talks to The Odds API directly.
 requests
+shap==0.46.0
