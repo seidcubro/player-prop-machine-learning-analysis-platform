@@ -27,6 +27,7 @@ import os
 from pathlib import Path
 
 import interval_calibration as interval
+import gap_tier
 import market_blend
 import joblib
 import median_anchor as anchor
@@ -276,10 +277,31 @@ def demote_dead_bets(out: pd.DataFrame) -> pd.DataFrame:
     edge = win - breakeven
     bet = out["edge_tier"].isin(BET_TIERS)
     dead = bet & edge.notna() & (edge <= 0)
-    if dead.any():
-        out.loc[dead, "edge_tier"] = "strong" if "strong" not in BET_TIERS else "medium"
-    print(f"bet tier: {int(bet.sum())} pick(s), demoted {int(dead.sum())} whose "
-          f"published probability does not beat the price")
+
+    # Labelled, not demoted, once tiers rank on the disagreement.
+    #
+    # Demoting on price is price-gating, and the measured reason for ranking on
+    # the gap is that the price is the worse ranking: expected value is not
+    # monotonic in hit rate and its best bucket is its longest odds. A pick the
+    # model is emphatic about at -190 is still a pick the model is emphatic
+    # about, and whether that price is worth paying is the bettor's question, not
+    # the ranking's.
+    #
+    # So the fact is published rather than enforced. `negative_ev` marks a pick
+    # the price does not cover, the site can say so plainly, and nothing is
+    # hidden in either direction. With GAP_TIERS off the old demotion returns,
+    # because under an expected-value ranking a pick with no expected value is a
+    # contradiction rather than a trade-off.
+    out["negative_ev"] = (edge.notna() & (edge <= 0)).to_numpy()
+    if gap_tier.ENABLED:
+        print(f"bet tier: {int(bet.sum())} pick(s), of which {int(dead.sum())} "
+              f"are labelled negative EV at the price on offer and kept")
+    else:
+        if dead.any():
+            out.loc[dead, "edge_tier"] = (
+                "strong" if "strong" not in BET_TIERS else "medium")
+        print(f"bet tier: {int(bet.sum())} pick(s), demoted {int(dead.sum())} "
+              f"whose published probability does not beat the price")
     return out
 
 
@@ -1941,15 +1963,30 @@ def main():
         cuts = ((0.12, 0.09, 0.06, 0.03) if over else (0.06, 0.04, 0.02, 0.0))
 
         if expected_value >= cuts[0]:
-            tier = "elite"
+            ev_tier = "elite"
         elif expected_value >= cuts[1]:
-            tier = "strong"
+            ev_tier = "strong"
         elif expected_value >= cuts[2]:
-            tier = "medium"
+            ev_tier = "medium"
         elif expected_value > cuts[3]:
-            tier = "small"
+            ev_tier = "small"
         else:
-            tier = "none"
+            ev_tier = "none"
+
+        # Ranked by the disagreement instead, unless that is switched off.
+        #
+        # Everything above is kept and still computed, because expected value is
+        # still published and the over-side asymmetry it encodes is real. What
+        # changed is that it no longer decides what gets recommended. The reason
+        # is measured, not preferred: ranked by expected value the hit rate is
+        # 51.4, 51.9, 53.7, 53.6, 52.7 across quintiles, which is not a ranking,
+        # while ranked by the size of the disagreement it is 48.7, 51.1, 53.8,
+        # 53.6, 57.3, which is. See gap_tier.py and research_gap_selection.py.
+        z = gap_tier.gap_z(median_value, line_value,
+                           cal_q.get(0.25) if isinstance(cal_q, dict) else None,
+                           cal_q.get(0.75) if isinstance(cal_q, dict) else None,
+                           market_code)
+        tier = gap_tier.tier_for(z) if gap_tier.ENABLED else ev_tier
 
 
         # A bet the price already covers is not an edge, so it is not shown.
@@ -1996,6 +2033,10 @@ def main():
             "ev_per_unit": ev_per_unit_staked(expected_value, chosen_price),
             "recommended_side": recommended_side,
             "edge_tier": tier,
+            # What the tier was cut on, stored so the site can say why a pick is
+            # ranked where it is and so next season can check whether a full
+            # standard deviation still hits 60%.
+            "gap_z": z,
             "market_id": int(frow["market_id"]),
             "lookback": int(frow["lookback"]),
             "source_last_update": o["source_last_update"],
