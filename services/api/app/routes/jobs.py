@@ -216,6 +216,30 @@ def _append_serving_game(player_id, games, schedule_by_team, current_team):
     return list(games) + [synthetic]
 
 
+# Below this share of his team's offensive snaps, a quarterback's game says he
+# left it rather than anything about his role. See the block in
+# build_market_features that uses this for the evidence and for why it is not
+# applied to the skill positions.
+MIN_SNAP_QB = float(os.getenv("MIN_SNAP_QB", "0.35"))
+
+
+def _counts_for_window(game, position) -> bool:
+    """Whether a past game should inform the rolling window at all.
+
+    Unknown snap share counts, because missing data is not evidence of absence
+    and the snap feed lags the box score in the first hours after a game.
+    """
+    if (position or "").upper() != "QB":
+        return True
+    share = game.get("snap_pct")
+    if share is None:
+        return True
+    try:
+        return float(share) >= MIN_SNAP_QB
+    except (TypeError, ValueError):
+        return True
+
+
 def _weighted_mean_recent(vals):
     n = len(vals)
     weights = list(range(1, n + 1))
@@ -983,6 +1007,7 @@ def build_features(
 
         for i in range(len(games)):
             is_serving = bool(games[i].get("_serving"))
+            position = games[i].get("position")
             # A training row needs a full window. A serving row does not.
             #
             # Requiring `lookback` prior games before writing anything means a
@@ -1023,18 +1048,42 @@ def build_features(
 
             season_only = WINDOW_SEASON_ONLY and market_code not in WINDOW_CROSSING_MARKETS
             if season_only:
-                floor = MIN_GAMES
-                if i - season_start < floor:
+                # Games he barely played are not evidence about his role.
+                #
+                # Sam Darnold's only 2026 appearance was two attempts on 10% of
+                # Seattle's snaps before he came off. With the window stopping at
+                # the start of the season that cameo was his entire history, and
+                # the board projected the listed starter for 12.2 attempts and
+                # 100 passing yards while Drew Lock, the backup, projected 23.2
+                # and 182. Faithful to the data and wrong about football.
+                #
+                # Applied to quarterbacks only, and the snap distribution is why:
+                # a starting quarterback's median share of his team's offensive
+                # snaps is 1.000, so a 35% floor removes ten games out of 78 and
+                # every one is an injury or a mop-up. The skill positions cannot
+                # take a floor like this. A running back's median is 0.36 and a
+                # receiver's 0.55, so 20% would delete a third of all back games
+                # and a quarter of all receiver games, nearly all of them real
+                # rotational roles rather than early exits.
+                #
+                # The equivalent problem exists for a receiver who leaves in the
+                # first quarter. It is rarer and cannot be told apart from a
+                # committee role by snap share alone, so it is left for a
+                # measure that can.
+                usable = [j for j in range(season_start, i)
+                          if _counts_for_window(games[j], position)]
+                if len(usable) < MIN_GAMES:
                     continue
-                start = max(season_start, i - lookback)
+                win_idx = usable[-lookback:]
             else:
                 # The old behaviour, kept reachable so the two can be measured
                 # against each other rather than argued about.
                 if i < (MIN_SERVING_GAMES_LEGACY if is_serving else lookback):
                     continue
-                start = max(0, i - lookback)
-            window_games = games[start:i]
-            window = ys[start:i]
+                usable = list(range(0, i))
+                win_idx = list(range(max(0, i - lookback), i))
+            window_games = [games[j] for j in win_idx]
+            window = [ys[j] for j in win_idx]
             # The game being predicted. Defined up front because several feature
             # families read the opponent's own context from it, not just the
             # Vegas block further down.
@@ -1118,7 +1167,9 @@ def build_features(
             # a tail that decays. That is the opposite of the equally-weighted
             # five-game window that broke the board. CAREER_LEVEL exists so the
             # claim is measurable rather than plausible.
-            prior = (ys[season_start:i]
+            # The same filtered history the window uses, so a cameo cannot set
+            # the level either. `usable` is season-scoped when the window is.
+            prior = ([ys[j] for j in usable]
                      if season_only and not CAREER_LEVEL else ys[:i])
             if prior:
                 alpha = 0.35 if market_code == "rush_att" else 0.25
@@ -1164,9 +1215,9 @@ def build_features(
             # just the last `lookback`. A slower anchor to revert toward, with
             # its own sample size so the model can learn how far to trust it.
             season_prior = [
-                float(g["y"] or 0.0)
-                for g in games[:i]
-                if g.get("season") == games[i].get("season")
+                float(games[j]["y"] or 0.0)
+                for j in usable
+                if games[j].get("season") == games[i].get("season")
             ]
             # The sample size is always written, including when it is zero.
             #
