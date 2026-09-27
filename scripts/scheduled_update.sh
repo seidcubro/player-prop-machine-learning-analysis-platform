@@ -681,6 +681,21 @@ fi
 log "freshness audit"
 $COMPOSE run --rm training python audit_freshness.py
 
+# Whether the numbers are believable, which is not the same question as whether
+# they are current, and had been failing while the freshness audit passed. See
+# audit_plausibility.py: a starting quarterback projected for 20.8 attempts
+# broke nothing a metric could see.
+#
+# Reports without failing for now. The ranges are new and want a few weeks of
+# watching before a violation is allowed to stop a board from publishing, and a
+# gate nobody trusts yet gets switched off in a hurry at the worst moment. Set
+# FAIL_ON_PLAUSIBILITY=1 in /etc/priorline/env once the violations it prints are
+# ones worth stopping for.
+log "plausibility audit"
+FAIL_ON_PLAUSIBILITY="${FAIL_ON_PLAUSIBILITY:-0}" \
+  $COMPOSE run --rm -e FAIL_ON_PLAUSIBILITY="${FAIL_ON_PLAUSIBILITY:-0}" \
+  training python audit_plausibility.py
+
 # The odds failure is reported here rather than where it happened, so the run
 # still does its free work first and the scheduler still hears about it.
 if [ "$ODDS_FAILED" = "1" ]; then
