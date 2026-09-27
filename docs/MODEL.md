@@ -409,19 +409,78 @@ edge = model median − book line       (the sign picks the side)
 EV   = calibrated P(side) − break-even for the price
 ```
 
-Tiers are cut on EV, and the cuts are lopsided on purpose. An over has to clear
-about twice the bar of an under, because no profitable over configuration has
-held up in both of my testing periods.
+### Tiers are cut on the size of the disagreement, not on the price
+
+They used to be cut on EV, and that rule called a coin flip elite whenever the
+coin flip paid well. It did: Baker Mayfield projected 1.5 passing touchdowns into
+a 1.5 line at +150 arrived as an elite pick. Correct arithmetic, useless pick.
+
+Ranked on graded picks, the disagreement sorts hit rate and EV does not:
+
+| quintile | by gap (SDs) | by EV |
+|---|---|---|
+| 1 | 48.7% | 51.4% |
+| 2 | 51.1% | 51.9% |
+| 3 | 53.8% | 53.7% |
+| 4 | 53.6% | 53.6% |
+| 5 | **57.3%** | **52.7%** |
+
+EV's top bucket wins *less* than its middle, because the biggest expected values
+sit at the longest prices rather than on the likeliest outcomes. And 27% of the
+picks that reached a bet tier under that rule sat within a quarter of a standard
+deviation of the line, hitting 49.7%.
+
+So the tier is cut on **|z|**, the gap between the median projection and the line
+divided by the width of the predicted distribution, `(q75 − q25) / 1.349`.
+Standard deviations rather than yards, because two yards of disagreement on a
+15-yard line is a different claim from two yards on an 80-yard line.
+
+The over bar is higher, and by a measured amount. Walk-forward over 2024-2025 on
+every priced prop rather than only the ones published:
+
+| \|z\| ≥ | unders | overs |
+|---|---|---|
+| 0.25 | 58.7%, +10.5% | 51.3%, −2.3% |
+| 0.50 | **61.1%, +15.0%** | 52.9%, −0.4% |
+| 0.75 | 59.7%, +12.8% | 55.3%, +2.4% |
+| 1.00 | 57.1%, +8.7% | 57.6%, +5.7% |
+| 1.50 | 58.4%, +9.9% | **68.4%, +23.3%** |
+
+Overs are not hopeless; they were cheap at the wrong bar. Held to the under
+threshold they became 70% of the board and returned nothing, dragging a +15%
+under side down to +4.3% overall.
 
 | Tier | Under needs | Over needs | On the site |
 |---|---:|---:|---|
-| Elite | EV ≥ 6% | EV ≥ 12% | offered as a bet |
-| Strong | EV ≥ 4% | EV ≥ 9% | shown, not offered |
-| Medium | EV ≥ 2% | EV ≥ 6% | shown, not offered |
-| Small | EV > 0% | EV > 3% | graded, not shown |
+| Elite | \|z\| ≥ 1.0 | \|z\| ≥ 1.5 | offered as a bet |
+| Strong | \|z\| ≥ 0.75 | \|z\| ≥ 1.0 | shown, not offered |
+| Medium | \|z\| ≥ 0.5 | \|z\| ≥ 0.75 | shown, not offered |
+| Small | \|z\| ≥ 0.25 | \|z\| ≥ 0.375 | graded, not shown |
+
+Walk-forward on 7,835 priced props, the ladder ranks and the two unpublished
+tiers lose money:
+
+| tier | picks | hit | break-even | ROI |
+|---|---|---|---|---|
+| none | 3,627 | 49.3% | 52.2% | −5.2% |
+| small | 2,931 | 51.0% | 52.7% | −2.9% |
+| medium | 612 | 57.4% | 53.7% | +7.4% |
+| strong | 367 | 56.9% | 54.0% | +5.9% |
+| **elite** | 298 | **60.7%** | 53.9% | **+13.3%** |
+
+EV is still computed and still published, and a pick the price does not cover is
+labelled `negative_ev` rather than demoted: whether −190 is worth paying is the
+bettor's question, not the ranking's.
+
+Two guards. A collapsed predicted interquartile range makes the denominator
+vanish and the gap explode, so a width floor and a ceiling of 6 SDs both apply.
+And the cut points are read off the table above, which means they are fitted to
+it: they are kept at round numbers, the 2024 holdout is 94 picks, the over elite
+bar rests on 95, and receiving yards (52.1%) and November (52.2%) still lose.
 
 `PUBLISHED_TIERS` and `BET_TIERS` are separate settings, so widening what the
-board shows can never quietly widen what it recommends.
+board shows can never quietly widen what it recommends. `GAP_TIERS=0` restores
+the EV ladder.
 
 Anytime touchdown is projected but never priced. The market's own prices rank
 scorers better than my model does (AUC 0.769 against 0.758), and betting the
