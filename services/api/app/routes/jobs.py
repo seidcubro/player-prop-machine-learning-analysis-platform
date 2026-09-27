@@ -141,6 +141,19 @@ MIN_SERVING_GAMES_LEGACY = 3
 # spread that wide on a sample that small is what the noise rule exists to
 # refuse. The lever is here so a QB market can be moved back in one variable when
 # there is enough of a season to decide it, which is the right time to look.
+# Whether the EWMA level runs over the player's career or only this season.
+#
+# Off, and it was built to be on. The reasoning for it was good and the
+# measurement disagreed: an EWMA at alpha 0.25 has a half-life of 2.4 games, so a
+# career-length one is dominated by recent form rather than by last December, and
+# it looked like the missing answer to a model whose whole knowledge of Lamar
+# Jackson in Week 3 was two games. On identical rows it is worth nothing at all
+# (+0.1%, -0.1%, +0.0%, +0.2%, +0.4%, +0.5% across the seven markets) and it made
+# the cases it was built for slightly worse: Jackson 24.0 -> 23.2 against a line
+# of 38.5, Jonathan Taylor 76.5 -> 73.0, TreVeyon Henderson 59.2 -> 55.8. Kept
+# reachable because that is a surprising result and worth re-testing on a fuller
+# season rather than re-deriving from scratch.
+CAREER_LEVEL = os.getenv("CAREER_LEVEL", "0") != "0"
 WINDOW_CROSSING_MARKETS = {
     m.strip() for m in os.getenv("WINDOW_CROSSING_MARKETS", "").split(",")
     if m.strip()
@@ -1066,7 +1079,26 @@ def build_features(
             # put about 56% of its weight on last season: alpha 0.25 spends
             # 0.25 on the most recent game and 0.1875 on the one before it, and
             # everything left over went to December.
-            prior = ys[season_start:i] if season_only else ys[:i]
+            # Two different questions, and I collapsed them into one.
+            #
+            # The window answers "what is he doing now" and must stop at the
+            # start of the season. The EWMA level answers "who is this player",
+            # and scoping that to the season too threw away every game of his
+            # career: in Week 3 the model's entire knowledge of Lamar Jackson was
+            # two games. It read him at 24 rushing yards against a line of 38.5,
+            # not because it was dragged toward a positional average and not
+            # because of a pooled position, both of which I tested and neither of
+            # which moved it, but because nothing on the row said he has been a
+            # forty-yard rusher for years.
+            #
+            # An EWMA at alpha 0.25 has a half-life of about 2.4 games, so a
+            # career-length one is not last December wearing a disguise: this
+            # season's two games already carry 44% of its weight and December is
+            # a tail that decays. That is the opposite of the equally-weighted
+            # five-game window that broke the board. CAREER_LEVEL exists so the
+            # claim is measurable rather than plausible.
+            prior = (ys[season_start:i]
+                     if season_only and not CAREER_LEVEL else ys[:i])
             if prior:
                 alpha = 0.35 if market_code == "rush_att" else 0.25
                 level = prior[0]
@@ -1075,17 +1107,26 @@ def build_features(
                 extra_features["ewma_level"] = level
 
                 # Empirical-Bayes shrinkage toward the position's prior-season
-                # mean, weighted by how much of the player we have seen. This
-                # matters more now than it did, and it is the one thing here
-                # still allowed to look at a finished season: a one-game window
-                # in Week 2 gets pulled hard toward what the position does,
-                # which is a stabiliser rather than a claim about this player's
-                # role, and by Week 8 it barely moves. `career_n` counts games
-                # this season now, and keeps its name because 158 model
-                # artifacts ask for it by that name.
+                # mean, weighted by how much of the player we have ever seen.
+                #
+                # The weight counts career games and the level is this season.
+                # Those are two different questions and scoping both to the
+                # season conflated them, which cost the outliers badly: with two
+                # games the weight is 0.5, so every player in Week 3 was pulled
+                # halfway to what his position does on average. Lamar Jackson
+                # rushing for 37 a game came out at 24.4 against a line of 38.5,
+                # dragged toward a pocket quarterback's rushing line, and
+                # Jonathan Taylor at 95 came out at 74.4, dragged toward a
+                # committee back's. The position mean is the answer to "we
+                # barely know this player", and we have known Lamar Jackson for
+                # a hundred games; what we do not know is what his role is this
+                # September, and that is what the level is for.
+                #
+                # So career_n counts career games again, which is what its name
+                # says and what the 158 artifacts naming it were fitted on.
                 pos_prior = target_game.get("prior_pos_mean")
                 if pos_prior is not None:
-                    n_seen = float(len(prior))
+                    n_seen = float(len(ys[:i]))
                     w = n_seen / (n_seen + 2.0)
                     extra_features["ewma_shrunk"] = (
                         w * level + (1.0 - w) * float(pos_prior)
@@ -1179,6 +1220,35 @@ def build_features(
                         )
                 elif cur_mean is not None:
                     extra_features["y_blend"] = float(cur_mean)
+
+            # Which position the player actually plays.
+            #
+            # It was not a feature. Eighty-one columns on rushing yards and not
+            # one of them said whether the man carrying the ball was a running
+            # back or a quarterback: the only "pos" features described what the
+            # *opponent* allows to a position group. So the model pooled
+            # quarterbacks and running backs on the rushing markets and learned
+            # one mapping from carries to yards, and since running backs are most
+            # of the rows it learned theirs. Lamar Jackson takes about five and a
+            # half carries a game at 6.7 yards each; a back with five and a half
+            # carries gains about 24, and 24.2 is what the model said against a
+            # line of 38.5 and a season average of 37. Jalen Hurts, the same.
+            #
+            # Goal-line quarterback keepers, scrambles and designed runs are not
+            # a back's carries and do not convert like them. The same pooling
+            # applies on the receiving markets, where a tight end's target is not
+            # a slot receiver's and a back catching out of the backfield is
+            # neither.
+            #
+            # Delivered here rather than encoded in train.py so that training and
+            # serving cannot disagree about it: everything reads extra_features.
+            # On a market with one eligible position these never vary and
+            # train.py drops them, which is the correct outcome and costs a line
+            # of log.
+            pos_now = (target_game.get("position") or "").upper()
+            for code_pos in ("QB", "RB", "WR", "TE", "FB"):
+                extra_features[f"is_{code_pos.lower()}"] = (
+                    1.0 if pos_now == code_pos else 0.0)
 
             # How much of the window is postseason, which is the one part of the
             # old season-boundary problem that survives inside a single season:
