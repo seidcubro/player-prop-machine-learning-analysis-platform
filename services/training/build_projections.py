@@ -339,23 +339,32 @@ def main():
             elif quant is not None:
                 raw = {q: max(0.0, float(qm.predict(x)[0]))
                        for q, qm in quant["models"].items()}
+                # The thin-sample anchor, applied to the raw ladder before the
+                # calibration and the stale factor.
+                #
+                # A shift, not a scale. Anchoring moves where the distribution
+                # sits and has no opinion about how wide it is, and scaling a
+                # whole ladder by a ratio meant for the point is what put Drew
+                # Lock's median at 257 passing yards against a mean of 203.
+                #
+                # Before the calibration, and that ordering is the whole point.
+                # The edge builder shifts the raw ladder and then calibrates,
+                # because it reads P(over) off the same ladder and the two have to
+                # come from one distribution. This did the opposite, calibrating
+                # first and shifting after, and since calibrated_quantiles is not
+                # an identity map the two pages then disagreed about the median of
+                # the same player: Tyson Bagent at 245.2863 on the board against
+                # 245.8966 on the page, seven rows of ninety-three, which the
+                # board-versus-projections audit caught. One correction applied on
+                # two sides of the same map.
+                if anchor_delta and not is_count:
+                    raw = {q: max(0.0, v + anchor_delta) for q, v in raw.items()}
                 # Show the calibrated range, not the raw one. The fitted
                 # quantiles are biased high at the low end in every market, so
                 # an uncorrected p10 is not a 10th percentile and the band it
                 # draws is narrower than the truth.
                 cal = bp.calibrated_quantiles(raw, quant.get("calibration"))
                 qs = {q: v * factor for q, v in cal.items()}
-
-            # The thin-sample anchor again, this time for the range.
-            #
-            # A shift, not a scale. Anchoring moves where the distribution sits
-            # and has no opinion about how wide it is, and scaling a whole ladder
-            # by a ratio meant for the point is what put Drew Lock's median at
-            # 257 passing yards against a mean of 203. Count markets are left
-            # alone because their ladder is a Poisson built from the point, so it
-            # inherited the anchor already; shifting it again would move it twice.
-            if anchor_delta and qs and not is_count:
-                qs = {q: max(0.0, v + anchor_delta) for q, v in qs.items()}
 
             # Re-read the range at the levels that make it honest, measured
             # on the player-games books actually price. Before the median
