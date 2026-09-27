@@ -250,6 +250,19 @@ SQL
 
   if [ "${imminent:-0}" -eq 0 ]; then
     log "closing: nothing new within ${WINDOW_MIN}m, nothing to buy"
+    # Still re-read the news before leaving.
+    #
+    # This used to exit here, which meant the injury report was only re-read on
+    # the hours that happened to buy prices. On a Sunday morning that is most of
+    # them: a quarterback cleared on the 11am report would not reach the board
+    # until an hour with a game inside the buy window, and a board built on
+    # Saturday's report says a starter is out when he is playing at one.
+    #
+    # Reading injuries and depth charts costs nothing. Only the odds sync spends
+    # credits, and it is above this line, so doing this unconditionally buys
+    # freshness for the price of a few minutes of CPU.
+    rebuild_on_current_news
+    log "done"
     exit 0
   fi
 

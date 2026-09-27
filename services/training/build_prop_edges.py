@@ -201,6 +201,55 @@ def vacated_role(ctx: dict, *, team, position, market_code,
     return None
 
 
+def backup_qb_behind_healthy_starter(ctx: dict, *, team, position, player_id,
+                                     market_code) -> str | None:
+    """A second quarterback does not play behind a healthy first one.
+
+    Quarterback is the one position with no committee. A running back splits
+    carries, a receiver splits targets, and the model is right to project both
+    from a share. The quarterback who starts takes every snap unless he is hurt,
+    and the one behind him takes none: no attempts, no yards, no completions.
+
+    The board did not know that. On 27 September 2026, Sam Darnold was the listed
+    Seattle starter and off the injury report, and Drew Lock was projected for
+    23.2 attempts and 182 passing yards. Those are not merely wrong, they are
+    props whose under cannot lose, and publishing them is worse than publishing
+    nothing.
+
+    `vacated` already holds the opposite case: a team whose starting quarterback
+    is ruled out, so his backup inherits the job. This is the same fact read the
+    other way. If the team is not in that set, the starter is playing, and anyone
+    listed behind him is withheld.
+
+    Withheld rather than projected at zero, because a zero would still be a
+    number on a board and would still be priced against a line. There is no prop
+    to offer on a man who will not take a snap.
+    """
+    # Every market, not just the passing ones. A quarterback holding a clipboard
+    # does not rush for yards either.
+    if position != "QB" or not team:
+        return None
+    vacated = ctx.get("vacated") or set()
+    if (team, "QB") in vacated:
+        # The starter is out, so this man may well be the starter. That case is
+        # vacated_role's, and it re-projects rather than withholds.
+        return None
+    depth = ctx.get("depth")
+    rank = None
+    if depth is not None and player_id is not None and "depth_team" in depth:
+        rank = depth["depth_team"].get(player_id)
+    try:
+        rank = float(rank)
+    except (TypeError, ValueError):
+        # No chart entry is not evidence that he starts. A quarterback nobody
+        # lists is a third stringer far more often than he is a surprise starter,
+        # and the injury report is what would say otherwise.
+        return "quarterback not listed on the depth chart"
+    if rank >= 2:
+        return "backup QB; the starter is healthy and will take every snap"
+    return None
+
+
 def publish_calibrated(out: pd.DataFrame, curves: dict) -> pd.DataFrame:
     """Publish the model's confidence, corrected to what that confidence hits.
 
@@ -1604,6 +1653,17 @@ def main():
         )
         if role:
             skip(role, o["player_name"], market_code)
+            continue
+
+        bench = backup_qb_behind_healthy_starter(
+            ctx,
+            team=(frow.get("current_team") or frow.get("team")),
+            position=frow.get("position"),
+            player_id=frow.get("player_id"),
+            market_code=market_code,
+        )
+        if bench:
+            skip(bench, o["player_name"], market_code)
             continue
 
         x = pd.DataFrame([row_features])
