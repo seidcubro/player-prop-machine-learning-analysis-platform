@@ -48,6 +48,25 @@ SEASON_START="${SEASON_START:-2022}"
 SEASON_END="${SEASON_END:-$(date +%Y)}"
 
 MARKETS="rec_yds rush_yds pass_yds recs rush_att pass_att pass_completions pass_td rush_td rec_td any_td"
+# Redo a subset instead of all eleven.
+#
+#   MARKETS_ONLY="pass_att pass_yds pass_completions"
+#
+# A full --migrate is eleven markets and each one trains a point model, an
+# evaluation and five quantile models. On the production box that is well over
+# ninety minutes, and most of it is wasted when a change touched one position.
+# The quarterback window change touched the passing markets and nothing else, so
+# rebuilding and retraining those three is the whole job.
+#
+# Everything else in the run still happens: the ingest refreshes the injury
+# report, the calibrators refit, and the board is rebuilt at the end. Only the
+# per-market feature rebuild and retrain are narrowed.
+if [ -n "${MARKETS_ONLY:-}" ]; then
+  MARKETS="$MARKETS_ONLY"
+fi
+# Quoted for SQL, so the prune below narrows with it rather than hardcoding a
+# list that drifts out of step.
+MARKETS_SQL=$(printf "'%s'," $MARKETS | sed "s/,$//")
 # Which stack to drive, and on which network.
 #
 # These were hardcoded to the development stack, and the timers run this script
@@ -561,9 +580,7 @@ if [ "$MODE" != "--board" ]; then
       "DELETE FROM player_market_features
         WHERE lookback = 5
           AND market_id IN (SELECT id FROM prop_markets
-                             WHERE code IN ('rec_yds','rush_yds','pass_yds',
-                                            'recs','rush_att','pass_att',
-                                            'pass_completions'));"
+                             WHERE code IN ($MARKETS_SQL));"
   fi
 
   log "rebuild features"
