@@ -2054,7 +2054,7 @@ def main():
                            cal_q.get(0.25) if isinstance(cal_q, dict) else None,
                            cal_q.get(0.75) if isinstance(cal_q, dict) else None,
                            market_code)
-        tier = gap_tier.tier_for(z) if gap_tier.ENABLED else ev_tier
+        tier = (gap_tier.tier_for(z, market_code) if gap_tier.ENABLED else ev_tier)
 
 
         # A bet the price already covers is not an edge, so it is not shown.

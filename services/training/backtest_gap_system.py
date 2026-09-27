@@ -171,7 +171,7 @@ def build():
         j["sd"] = sd.where(sd >= floor)
         j["z"] = ((j["pred"] - j["line"]) / j["sd"]).clip(-gap_tier.Z_CEILING,
                                                          gap_tier.Z_CEILING)
-        j["tier"] = [gap_tier.tier_for(z if np.isfinite(z) else None)
+        j["tier"] = [gap_tier.tier_for(z if np.isfinite(z) else None, code)
                      for z in j["z"]]
         j["side"] = np.where(j["z"] > 0, "over", "under")
         j["won"] = np.where(j["z"] > 0,

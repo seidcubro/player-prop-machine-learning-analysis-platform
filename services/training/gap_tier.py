@@ -93,6 +93,33 @@ OVER_ELITE = float(os.getenv("GAP_OVER_ELITE", "1.5"))
 OVER_STRONG = float(os.getenv("GAP_OVER_STRONG", "1.0"))
 OVER_MEDIUM = float(os.getenv("GAP_OVER_MEDIUM", "0.75"))
 
+# A floor per market, where the disagreement has to be larger before it means
+# anything.
+#
+# Receiving yards was the one market on the board that lost money, at 52.1%
+# against a 52.7% break-even, and it is the largest by pick count.
+# research_rec_yds.py found the reason is not the model: every family calls the
+# side at about 49.5%, a coin flip, and swapping rf_default for the ridge that
+# beats it on MAE by 2.1% moves side accuracy by nothing. What separates this
+# market is where the disagreement has to be before it pays:
+#
+#     |z|          rec_yds              recs
+#     0.25-0.5     48.2%  -4.4% edge    53.2%  +0.8%
+#     0.5-0.75     48.3%  -4.3%         57.1%  +4.1%
+#     0.75-1.0     57.0%  +4.3%         55.5%  +0.6%
+#     1.0+         55.3%  +2.5%         63.0%  +7.1%
+#
+# Receptions pay from a quarter of a standard deviation. Receiving yards lose
+# steadily until three quarters of one and then pay. That is the market, not the
+# fit: yards are catches times yards per catch, and the second term carries a
+# tail nothing in a five-game window predicts. One broken tackle is forty yards.
+# So the honest response is a higher bar here rather than a better model, and
+# the loss autopsy agrees: "more work and bigger plays" is 34.0% of losses on
+# this market against 1.0% of wins, the widest split anywhere.
+MARKET_FLOOR_Z = {
+    "rec_yds": float(os.getenv("GAP_FLOOR_REC_YDS", "0.75")),
+}
+
 # A predicted interquartile range below this is treated as no distribution at
 # all. In the market's own units, so a tenth of a reception and three yards.
 MIN_SD = {
@@ -138,11 +165,12 @@ def gap_z(median_projection, line, q25, q75, market_code: str) -> float | None:
     return max(-Z_CEILING, min(Z_CEILING, z))
 
 
-def tier_for(z: float | None) -> str:
+def tier_for(z: float | None, market_code: str = "") -> str:
     """The published tier, from the size of the disagreement and the side.
 
     The sign of z is the side: positive is an over. Overs are held to the higher
-    ladder for the reason set out above.
+    ladder, and a market in MARKET_FLOOR_Z is held to a higher one again, both
+    for reasons set out above.
     """
     if z is None:
         # No usable distribution is not a small edge, it is no measurement. The
@@ -152,6 +180,14 @@ def tier_for(z: float | None) -> str:
     elite = OVER_ELITE if over else ELITE
     strong = OVER_STRONG if over else STRONG
     medium = OVER_MEDIUM if over else MEDIUM
+    floor = MARKET_FLOOR_Z.get(market_code)
+    if floor is not None:
+        # Raises whichever bars sit below the market's own floor, so a market
+        # that only pays from 0.75 cannot reach a published tier below it while
+        # the ordering above stays as it was.
+        medium = max(medium, floor)
+        strong = max(strong, floor)
+        elite = max(elite, floor)
     a = abs(z)
     if a >= elite:
         return "elite"

@@ -457,6 +457,41 @@ under side down to +4.3% overall.
 | Medium | \|z\| ≥ 0.5 | \|z\| ≥ 0.75 | shown, not offered |
 | Small | \|z\| ≥ 0.25 | \|z\| ≥ 0.375 | graded, not shown |
 
+**Receiving yards is held to |z| ≥ 0.75 on both sides.** It was the one market
+that lost money, at 52.1% against a 52.7% break-even, and it is the largest by
+pick count. The cause is not the model: every family calls the side at about
+49.5%, a coin flip, and the ridge that beats the live random forest by 2.1% on
+MAE moves side accuracy by nothing. What separates it is where the disagreement
+starts paying:
+
+| \|z\| | rec_yds | recs |
+|---|---|---|
+| 0.25-0.5 | 48.2%, **−4.4%** | 53.2%, +0.8% |
+| 0.5-0.75 | 48.3%, **−4.3%** | 57.1%, +4.1% |
+| 0.75-1.0 | 57.0%, +4.3% | 55.5%, +0.6% |
+| 1.0+ | 55.3%, +2.5% | 63.0%, +7.1% |
+
+Receptions pay from a quarter of a standard deviation; receiving yards lose
+steadily until three quarters of one. That is the market rather than the fit:
+yards are catches times yards per catch, and the second term has a tail a
+five-game window cannot see. One broken tackle is forty yards. With the floor
+applied, receiving yards goes from 52.1% and −1.0% to 56.2% and +6.7%, and every
+market on the board is profitable:
+
+| market | picks | hit | ROI |
+|---|---|---|---|
+| recs | 527 | 61.5% | +12.5% |
+| rush_att | 242 | 57.9% | +9.3% |
+| rec_yds | 322 | 56.2% | +6.7% |
+| rush_yds | 153 | 54.9% | +4.7% |
+
+One caveat on the scale itself: only 37-41% of outcomes land inside the predicted
+middle-50% band, across every market, where 50% is correct. The quantile ladder
+is too narrow everywhere, so every `z` is inflated by roughly the same factor.
+The thresholds absorb it because they were measured in the same units, but a `z`
+of 1.0 is nearer 0.8 true standard deviations and the number should not be read
+as if it were exact.
+
 Walk-forward on 7,835 priced props, the ladder ranks and the two unpublished
 tiers lose money:
 
