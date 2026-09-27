@@ -56,14 +56,42 @@ from __future__ import annotations
 
 import os
 
-# In standard deviations of the player's own predicted distribution.
+# In standard deviations of the player's own predicted distribution, and higher
+# on the over side.
 #
-# Set at the bucket boundaries the research script measured, not tuned. Anything
-# under MEDIUM is published as context: shown on the board, labelled, and not
-# recommended.
+# The asymmetry is not a preference. Walk-forward over 2024-2025 on every priced
+# prop rather than only the ones we published (`backtest_gap_system.py`), the two
+# sides need different bars before they are worth anything:
+#
+#     |z| at least      unders                    overs
+#       0.25            58.7%  +10.5% roi         51.3%   -2.3% roi
+#       0.50            61.1%  +15.0%             52.9%   -0.4%
+#       0.75            59.7%  +12.8%             55.3%   +2.4%
+#       1.00            57.1%   +8.7%             57.6%   +5.7%
+#       1.50            58.4%   +9.9%             68.4%  +23.3%
+#
+# Unders pay from a quarter of a standard deviation. Overs lose money until
+# three quarters of one and only then start paying. Held to the same bar, overs
+# became 70% of the published board and returned nothing, which dragged a +15%
+# under side down to +4.3% overall.
+#
+# The direction is not discovered here. Books shade props toward the over because
+# that is the side the public buys, so the over price is worst exactly where our
+# own error is largest; the expected-value rule this replaced already held overs
+# to double the under threshold for the same reason, from separate evidence. What
+# this backtest supplies is the magnitude.
+#
+# The magnitudes are read off that table, which means they are fitted to it. They
+# are kept at round numbers rather than the arg-max of any column, the 2024
+# holdout is only 94 picks, and the over elite bar sits on 95 picks across two
+# seasons. Treat the ladder as the finding and the exact cuts as provisional
+# until a clean season confirms them.
 ELITE = float(os.getenv("GAP_ELITE", "1.0"))
 STRONG = float(os.getenv("GAP_STRONG", "0.75"))
 MEDIUM = float(os.getenv("GAP_MEDIUM", "0.5"))
+OVER_ELITE = float(os.getenv("GAP_OVER_ELITE", "1.5"))
+OVER_STRONG = float(os.getenv("GAP_OVER_STRONG", "1.0"))
+OVER_MEDIUM = float(os.getenv("GAP_OVER_MEDIUM", "0.75"))
 
 # A predicted interquartile range below this is treated as no distribution at
 # all. In the market's own units, so a tenth of a reception and three yards.
@@ -111,23 +139,32 @@ def gap_z(median_projection, line, q25, q75, market_code: str) -> float | None:
 
 
 def tier_for(z: float | None) -> str:
-    """The published tier, from the size of the disagreement alone."""
+    """The published tier, from the size of the disagreement and the side.
+
+    The sign of z is the side: positive is an over. Overs are held to the higher
+    ladder for the reason set out above.
+    """
     if z is None:
         # No usable distribution is not a small edge, it is no measurement. The
         # pick is shown as context rather than silently ranked as weak.
         return "small"
+    over = z > 0
+    elite = OVER_ELITE if over else ELITE
+    strong = OVER_STRONG if over else STRONG
+    medium = OVER_MEDIUM if over else MEDIUM
     a = abs(z)
-    if a >= ELITE:
+    if a >= elite:
         return "elite"
-    if a >= STRONG:
+    if a >= strong:
         return "strong"
-    if a >= MEDIUM:
+    if a >= medium:
         return "medium"
-    if a >= MEDIUM / 2.0:
+    if a >= medium / 2.0:
         return "small"
     return "none"
 
 
 def describe() -> str:
-    return (f"gap tiers: elite >= {ELITE:g} sd, strong >= {STRONG:g}, "
-            f"medium >= {MEDIUM:g}, below {MEDIUM / 2:g} not published")
+    return (f"gap tiers: unders elite >= {ELITE:g} sd, strong >= {STRONG:g}, "
+            f"medium >= {MEDIUM:g}; overs elite >= {OVER_ELITE:g}, "
+            f"strong >= {OVER_STRONG:g}, medium >= {OVER_MEDIUM:g}")

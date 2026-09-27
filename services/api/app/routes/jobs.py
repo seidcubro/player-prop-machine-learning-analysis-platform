@@ -816,9 +816,30 @@ def build_features(
         -- starter/backup rank is known before kickoff and captures role changes
         -- (promotion to WR1, RB committee shakeup) faster than rolling production.
         LEFT JOIN (
+            -- Rank within the player's offensive slot, not across every slot he
+            -- appears in.
+            --
+            -- depth_position carries KR and PR alongside QB, RB, WR and TE, so a
+            -- minimum taken over all of a player's rows returns his kick-return
+            -- rank whenever that is the lowest number. A wide receiver third on
+            -- the chart and first among returners came back as a 1 and was
+            -- indistinguishable from a genuine WR1.
+            --
+            -- That was 11.5% of player-weeks wrong, 4,959 of 43,003, by an
+            -- average of 2.07 ranks and concentrated in exactly the depth
+            -- receivers and backup backs whose role matters most: Britain Covey
+            -- read as a WR1 and is a WR7, Ricky Pearsall as a 3 and is a 9. A
+            -- feature wrong one time in nine, in the direction that matters, is
+            -- noise, which is why SHAP found depth_rank contributing nothing to
+            -- receiving yards and rush attempts while ranking second for passing
+            -- yards, where quarterbacks are never listed as returners.
+            --
+            -- depth_rank_delta and depth_rank_window_mean are both derived from
+            -- this and were wrong with it.
             SELECT player_id, season, week, MIN(depth_team) AS depth_rank
             FROM depth_charts
             WHERE depth_team IS NOT NULL
+              AND depth_position IN ('QB', 'RB', 'FB', 'WR', 'TE')
             GROUP BY player_id, season, week
         ) dc
             ON dc.player_id = pgs.player_id

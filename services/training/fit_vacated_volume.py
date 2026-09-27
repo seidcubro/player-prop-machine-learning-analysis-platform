@@ -83,7 +83,10 @@ def load(engine):
             SELECT player_id, season, week::int AS week, team, position,
                    MIN(depth_team) AS rank
             FROM depth_charts
+            -- depth_position, not position: the former is the slot on the chart
+            -- and includes KR and PR, which is how a returner became a rank 1.
             WHERE depth_team IS NOT NULL AND position IN ('QB', 'RB')
+              AND depth_position IN ('QB', 'RB', 'FB')
             GROUP BY player_id, season, week::int, team, position
             """
         ),

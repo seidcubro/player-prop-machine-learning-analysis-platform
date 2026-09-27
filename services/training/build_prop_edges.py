@@ -400,9 +400,14 @@ def load_current_context(engine) -> dict:
             SELECT DISTINCT ON (player_id)
                    player_id, depth_team, season, week
             FROM (
+                -- Offensive slots only: depth_position also carries KR and PR,
+                -- so a minimum over every slot returns a return-team rank. That
+                -- was 11.5% of player-weeks wrong. Same filter as jobs.py, and
+                -- it has to be the same or serving disagrees with training.
                 SELECT player_id, season, week, MIN(depth_team) AS depth_team
                 FROM depth_charts
                 WHERE depth_team IS NOT NULL
+                  AND depth_position IN ('QB', 'RB', 'FB', 'WR', 'TE')
                 GROUP BY player_id, season, week
             ) d
             ORDER BY player_id, season DESC, week DESC
@@ -638,9 +643,12 @@ def load_current_context(engine) -> dict:
             latest_depth AS (
                 SELECT DISTINCT ON (player_id) player_id, depth_team
                 FROM (
+                    -- Offensive slots only; see jobs.py. KR and PR rows made a
+                    -- return specialist look like a starter.
                     SELECT player_id, season, week, MIN(depth_team) AS depth_team
                     FROM depth_charts
                     WHERE depth_team IS NOT NULL
+                      AND depth_position IN ('QB', 'RB', 'FB', 'WR', 'TE')
                     GROUP BY player_id, season, week
                 ) d
                 ORDER BY player_id, season DESC, week DESC

@@ -186,10 +186,13 @@ class VacatedVolume:
                 """
                 SELECT DISTINCT ON (player_id) player_id, team, position, rank
                 FROM (
+                    -- Offensive slots only; see jobs.py. Must match what
+                    -- fit_vacated_volume fitted on.
                     SELECT player_id, team, position, season, week,
                            MIN(depth_team) AS rank
                     FROM depth_charts
                     WHERE depth_team IS NOT NULL
+                      AND depth_position IN ('QB', 'RB', 'FB', 'WR', 'TE')
                     GROUP BY player_id, team, position, season, week
                 ) d
                 ORDER BY player_id, season DESC, week DESC
