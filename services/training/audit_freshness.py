@@ -96,15 +96,38 @@ def probe_overridden_features(engine) -> set:
     team = g.home_team if is_home else g.away_team
 
     with engine.connect() as c:
+        # Probe with a player the depth map actually contains.
+        #
+        # This asked for any depth_team = 1 on the team, across every slot on the
+        # chart, which includes the defence and the offensive line. The context's
+        # depth map holds offensive skill slots only, so a probe that drew a left
+        # end found no entry, depth_rank kept its sentinel, and the audit reported
+        # depth_rank, depth_rank_delta and stale_role_change as unrefreshed on all
+        # eleven markets. Eleven failures, one wrong lookup, nothing wrong with
+        # the pipeline.
+        #
+        # Same filter as jobs.py and build_prop_edges, for the same reason: three
+        # places computing one thing have to agree or the disagreement shows up
+        # somewhere unrelated.
         pid = c.execute(
             text(
-                "SELECT player_id FROM depth_charts WHERE team = :t AND depth_team = 1 "
+                "SELECT player_id FROM depth_charts "
+                "WHERE team = :t AND depth_team = 1 "
+                "  AND depth_position IN ('QB', 'RB', 'FB', 'WR', 'TE') "
                 "ORDER BY season DESC, week DESC LIMIT 1"
             ),
             {"t": team},
         ).scalar()
     if pid is None:
-        warn(f"no depth-chart player found for {team} to probe with")
+        warn(f"no offensive depth-chart player found for {team} to probe with")
+        return set()
+    if pid not in ctx["depth"].index:
+        # Worth failing loudly rather than reporting every feature unrefreshed:
+        # the probe cannot test the override with a player the override cannot
+        # find, and the resulting eleven failures say nothing about the markets
+        # they name.
+        warn(f"probe player {pid} is not in the context depth map; "
+             f"feature-refresh results below would be meaningless")
         return set()
 
     SENTINEL = -987654.0
