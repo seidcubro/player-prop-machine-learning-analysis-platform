@@ -26,6 +26,7 @@ from pathlib import Path
 
 import build_prop_edges as bp
 import interval_calibration as ic
+import interval_scale
 import median_anchor as ma
 import pandas as pd
 import spread_calibration as sc
@@ -443,8 +444,18 @@ def main():
                 "projection": pred,
                 "projection_raw": pred_raw,
                 "p50_raw": p50_raw,
-                "p10": qs.get(0.10), "p25": qs.get(0.25), "p50": qs.get(0.50),
-                "p75": qs.get(0.75), "p90": qs.get(0.90),
+                # Widened to the width outcomes actually have, as the last thing
+                # that happens to the ladder and only for what is stored. Every
+                # correction above reads the uncorrected values. See
+                # interval_scale.py: this cannot move a pick, because the tier is
+                # cut on gap_z which the edge builder computes from its own
+                # quantiles.
+                **{f"p{int(q * 100)}": v for q, v in
+                   interval_scale.widen(
+                       {0.10: qs.get(0.10), 0.25: qs.get(0.25),
+                        0.50: qs.get(0.50), 0.75: qs.get(0.75),
+                        0.90: qs.get(0.90)},
+                       market_code).items()},
                 "model_name": meta["model_name"],
                 "depth_rank": feats.get("depth_rank"),
                 "is_starter": (feats.get("depth_rank") or 99) <= 1,
@@ -454,6 +465,7 @@ def main():
         raise SystemExit("no projections produced")
 
     print(thin_sample.applied())
+    print(interval_scale.applied())
 
     out = pd.DataFrame(rows).drop_duplicates(
         subset=["player_id", "market_code", "game_date"]
