@@ -514,6 +514,24 @@ if [ "$MODE" != "--board" ]; then
   # player_game_stats_app. Only the seven point markets: the touchdown markets
   # are trained by a different script off a different feature path.
   if [ "$PRUNE_FEATURES" = "1" ]; then
+    # Rebuild the API first, because the feature builder is in it.
+    #
+    # Everything else here drives the training image and this script only
+    # rebuilds that one, so a migration run against a stale API container would
+    # delete every feature row and rebuild it with the very code the migration
+    # exists to replace: a silent, total no-op that looks like a success and
+    # leaves the models retrained on the old definition. The check after the
+    # rebuild loop is the belt to this braces.
+    log "rebuild the API image, which is where the feature builder lives"
+    $COMPOSE up -d --build api
+    log "wait for the API"
+    i=0
+    until curl -sf "$API/health" >/dev/null 2>&1; do
+      i=$((i + 1))
+      [ "$i" -gt 60 ] && { echo "FAILED: API did not come up"; exit 1; }
+      sleep 2
+    done
+
     log "prune feature rows written under the previous window definition"
     $COMPOSE exec -T postgres psql -U app -d app -c \
       "DELETE FROM player_market_features
@@ -531,6 +549,31 @@ if [ "$MODE" != "--board" ]; then
     curl -sf -X POST -H "$AUTH" "$API/jobs/attach_labels?market_code=$m&lookback=5" >/dev/null
     printf '    %s\n' "$m"
   done
+
+  # Did the rebuild actually use the new code?
+  #
+  # y_blend is written by the season-only window and by nothing else, so its
+  # absence means the rows were just rebuilt by an API still running the old
+  # build. That is worth failing on rather than reporting: the retrain below
+  # would fit every market on the definition this run was supposed to remove,
+  # and the only visible symptom would be a board that did not change.
+  if [ "$PRUNE_FEATURES" = "1" ]; then
+    blended=$($COMPOSE exec -T postgres psql -U app -d app -tA -c \
+      "SELECT count(*) FROM player_market_features
+        WHERE lookback = 5 AND extra_features ? 'y_blend';")
+    blended=$(printf '%s' "$blended" | tr -d '[:space:]')
+    if [ "${blended:-0}" -lt 1000 ]; then
+      echo "FAILED: only ${blended:-0} feature rows carry y_blend, so the"
+      echo "rebuild ran against an API without the season-only window. Deploy"
+      echo "the current code first:"
+      echo "  cd /opt/priorline"
+      echo "  git pull"
+      echo "  set -a; . /etc/priorline/env; set +a"
+      echo "  docker compose -f deploy/docker-compose.prod.yml up -d --build"
+      exit 1
+    fi
+    log "$blended feature rows carry y_blend, so the new window is in force"
+  fi
 
   # After the rebuild, never before it.
   #
