@@ -892,11 +892,30 @@ def build_features(
     rows = db.execute(text(sql)).mappings().all()
 
     by_player = {}
+    # Every team's quarterback play, whoever made it.
+    #
+    # A starting quarterback's volume is a property of his team, not of his own
+    # game log. Attempts come from pace, game script and scheme; the man taking
+    # the snaps is interchangeable for that purpose in a way a running back
+    # splitting carries is not. So when a starter has no usable history of his
+    # own, his team's quarterback play is the evidence, and it is this season's
+    # evidence rather than last year's.
+    #
+    # Sam Darnold is why. He is Seattle's listed starter, was cleared to play,
+    # and his only 2026 appearance was two attempts on 10% of the snaps before he
+    # came off. Judged on his own log he has nothing; judged on Seattle's
+    # quarterback play he has 22 and 26 attempts from Weeks 1 and 2, which is
+    # what he will be asked to do.
+    team_qb_games = {}
     for r in rows:
         pos = r["position"]
+        if (pos or "").upper() == "QB" and _counts_for_window(r, "QB"):
+            team_qb_games.setdefault((r.get("team"), r.get("season")), []).append(r)
         if eligible_positions and pos not in eligible_positions:
             continue
         by_player.setdefault(r["player_id"], []).append(r)
+    for key in team_qb_games:
+        team_qb_games[key].sort(key=lambda g: g.get("game_date") or date.min)
 
     upsert_sql = text(
         """
@@ -1070,20 +1089,49 @@ def build_features(
                 # first quarter. It is rarer and cannot be told apart from a
                 # committee role by snap share alone, so it is left for a
                 # measure that can.
-                usable = [j for j in range(season_start, i)
-                          if _counts_for_window(games[j], position)]
-                if len(usable) < MIN_GAMES:
+                usable_games = [games[j] for j in range(season_start, i)
+                                if _counts_for_window(games[j], position)]
+
+                # A listed starter short of his own history borrows his team's.
+                #
+                # Only the starter, and only to fill what he is missing. A
+                # backup is not owed the starter's workload, and a quarterback
+                # with a full window of his own needs nothing. His own games
+                # always take precedence: the team's are used to top up, never to
+                # replace.
+                if ((position or "").upper() == "QB"
+                        and len(usable_games) < lookback):
+                    try:
+                        is_listed_starter = float(
+                            games[i].get("depth_rank")) <= 1
+                    except (TypeError, ValueError):
+                        is_listed_starter = False
+                    target_date = games[i].get("game_date")
+                    if is_listed_starter and target_date:
+                        pool = [
+                            g for g in team_qb_games.get(
+                                (games[i].get("team"),
+                                 games[i].get("season")), ())
+                            if g.get("game_date") and g["game_date"] < target_date
+                            and g.get("player_id") != player_id
+                        ]
+                        need = lookback - len(usable_games)
+                        if pool and need > 0:
+                            usable_games = sorted(
+                                usable_games + pool[-need:],
+                                key=lambda g: g.get("game_date") or date.min)
+
+                if len(usable_games) < MIN_GAMES:
                     continue
-                win_idx = usable[-lookback:]
+                window_games = usable_games[-lookback:]
             else:
                 # The old behaviour, kept reachable so the two can be measured
                 # against each other rather than argued about.
                 if i < (MIN_SERVING_GAMES_LEGACY if is_serving else lookback):
                     continue
-                usable = list(range(0, i))
-                win_idx = list(range(max(0, i - lookback), i))
-            window_games = [games[j] for j in win_idx]
-            window = [ys[j] for j in win_idx]
+                usable_games = games[:i]
+                window_games = games[max(0, i - lookback):i]
+            window = [float(g["y"] or 0.0) for g in window_games]
             # The game being predicted. Defined up front because several feature
             # families read the opponent's own context from it, not just the
             # Vegas block further down.
@@ -1169,7 +1217,7 @@ def build_features(
             # claim is measurable rather than plausible.
             # The same filtered history the window uses, so a cameo cannot set
             # the level either. `usable` is season-scoped when the window is.
-            prior = ([ys[j] for j in usable]
+            prior = ([float(g["y"] or 0.0) for g in usable_games]
                      if season_only and not CAREER_LEVEL else ys[:i])
             if prior:
                 alpha = 0.35 if market_code == "rush_att" else 0.25
@@ -1215,9 +1263,9 @@ def build_features(
             # just the last `lookback`. A slower anchor to revert toward, with
             # its own sample size so the model can learn how far to trust it.
             season_prior = [
-                float(games[j]["y"] or 0.0)
-                for j in usable
-                if games[j].get("season") == games[i].get("season")
+                float(g["y"] or 0.0)
+                for g in usable_games
+                if g.get("season") == games[i].get("season")
             ]
             # The sample size is always written, including when it is zero.
             #
