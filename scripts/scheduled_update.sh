@@ -112,9 +112,41 @@ rebuild_on_current_news() {
 }
 
 case "$MODE" in
-  --closing|--early|--board|--daily|--weekly|--migrate) ;;
-  *) echo "usage: $0 [--closing|--early|--board|--daily|--weekly|--migrate]"; exit 2 ;;
+  --closing|--early|--board|--daily|--weekly|--migrate|--refresh) ;;
+  *) echo "usage: $0 [--closing|--early|--board|--daily|--weekly|--migrate|--refresh]"
+     exit 2 ;;
 esac
+
+# --refresh: republish the board on current news and current code, and nothing
+# else.
+#
+# This exists because of a Sunday that should not have happened. A feature change
+# landed on a game day and the only way to get it onto the board was --migrate,
+# which re-downloads every season of every nflverse dataset, retrains eleven
+# markets at five quantile models each, and refits six calibrators. Ninety
+# minutes, of which the useful part was two: rebuild the features for three
+# markets, reproject, republish. The slate was gone by the time it finished.
+#
+# So: injuries and depth charts only, no full ingest. Feature rebuild only for
+# the markets named in MARKETS_ONLY, and only if it is set. No grading, no
+# calibrator refits, no retrain. The existing point and quantile models are used
+# as they are, which is correct whenever the change was to a feature rather than
+# to a model.
+#
+#   MARKETS_ONLY="pass_att pass_yds" sudo systemctl start priorline@refresh
+#
+# Reach for --migrate only when the training set itself changed shape. For
+# everything else this is the one to run.
+case "$MODE" in
+  --board|--refresh) FAST=1 ;;
+  *) FAST=0 ;;
+esac
+NEED_FEATURES=0
+if [ "$FAST" = "0" ]; then
+  NEED_FEATURES=1
+elif [ "$MODE" = "--refresh" ] && [ -n "${MARKETS_ONLY:-}" ]; then
+  NEED_FEATURES=1
+fi
 
 # --migrate is --weekly with the feature store cleared first.
 #
@@ -134,6 +166,17 @@ if [ "$MODE" = "--migrate" ]; then
   PRUNE_FEATURES=1
   MODE="--weekly"
   log "mode --migrate: --weekly, with the feature store pruned first"
+elif [ "$MODE" = "--refresh" ] && [ -n "${MARKETS_ONLY:-}" ]; then
+  # A refresh that rebuilds features prunes them first, for the same reason a
+  # migration does: build_features upserts, so a change that stops emitting a row
+  # leaves the old one behind holding values computed under the previous rule.
+  # The quarterback snap floor does exactly that, and a stale row for a man with
+  # one cameo is the bug it was written to remove.
+  #
+  # Safe because it is scoped to MARKETS_ONLY and because feature rows are
+  # derived: the rebuild below reconstructs every one of them from box scores and
+  # re-attaches the labels.
+  PRUNE_FEATURES=1
 fi
 
 log "mode $MODE"
@@ -499,7 +542,7 @@ $COMPOSE build -q training >/dev/null
 # The frequent run pulls only that, though. A full ingest re-downloads every
 # season of every dataset, which is minutes of transfer and buys nothing when no
 # game has been played since the last run.
-if [ "$MODE" = "--board" ]; then
+if [ "$FAST" = "1" ]; then
   ONLY_ARG="-e ONLY=injuries,depth_charts"
   log "nflverse ingest: injuries and depth charts only"
 else
@@ -516,7 +559,7 @@ docker run --rm --network "$INGEST_NETWORK" \
   -e SEASON_START="$SEASON_START" -e SEASON_END="$SEASON_END" \
   $ONLY_ARG priorline-ingest
 
-if [ "$MODE" != "--board" ]; then
+if [ "$NEED_FEATURES" = "1" ]; then
   # Refresh the materialized views the feature build reads, before it reads
   # them. Nothing in this repository refreshed them and they had stopped at
   # the Super Bowl; see db/views/refresh_matviews.sql for what that costs.
@@ -647,18 +690,51 @@ if [ "$MODE" = "--weekly" ]; then
       echo "    $m: no active model, skipped"
       continue
     fi
-    $COMPOSE run --rm -e MARKET_CODE="$m" -e MODEL_NAME="$active" -e LOOKBACK=5 \
-      training python train.py >/dev/null
-    $COMPOSE run --rm -e MARKET_CODE="$m" -e MODEL_NAME="$active" -e LOOKBACK=5 \
-      training python eval.py >/dev/null
-    $COMPOSE run --rm -e MARKET_CODE="$m" -e LOOKBACK=5 -e SPLIT_MODE=season \
-      training python train_quantiles.py >/dev/null
-    printf '    %s (%s)\n' "$m" "$active"
+    # Say which market is starting, before it starts.
+    #
+    # Every step here wrote to /dev/null and the only output was one line after a
+    # market finished, so a ninety minute retrain looked identical to a hung one:
+    # container-creation lines and nothing else. Working that out from the outside
+    # cost most of a game day. A line per step per market is a few dozen lines a
+    # week and it is the difference between waiting and guessing.
+    # Output goes to a file and the interesting lines are grepped out of it
+    # afterwards, rather than piping the command into grep. A pipeline takes the
+    # exit status of its last stage, so `python train.py | grep | sed` reports
+    # sed's success and a failed retrain would sail past `set -e` unnoticed. The
+    # whole point of this block is to see what is happening; hiding failures to
+    # do it would be a poor trade.
+    tmp="/tmp/priorline_step.$$"
+    run_step() {
+      label=$1; shift
+      printf '    %s  %s: %s\n' "$(date '+%H:%M:%S')" "$m" "$label"
+      if ! "$@" >"$tmp" 2>&1; then
+        echo "FAILED: $label for $m"
+        tail -25 "$tmp" | sed 's/^/        /'
+        rm -f "$tmp"
+        exit 1
+      fi
+      grep -E 'MAE|R2|pinball|refit on all|accepted' "$tmp" \
+        | sed 's/^/        /' || true
+    }
+    started=$(date '+%H:%M:%S')
+    run_step "training point model" \
+      $COMPOSE run --rm -e MARKET_CODE="$m" -e MODEL_NAME="$active" \
+      -e LOOKBACK=5 training python train.py
+    run_step "evaluating" \
+      $COMPOSE run --rm -e MARKET_CODE="$m" -e MODEL_NAME="$active" \
+      -e LOOKBACK=5 training python eval.py
+    # The slow one: five quantile models per market, and the reason a full
+    # retrain runs into the hours.
+    run_step "fitting quantiles (the slow step)" \
+      $COMPOSE run --rm -e MARKET_CODE="$m" -e LOOKBACK=5 -e SPLIT_MODE=season \
+      training python train_quantiles.py
+    rm -f "$tmp"
+    printf '    %s (%s) %s -> %s\n' "$m" "$active" "$started" "$(date '+%H:%M:%S')"
   done
 fi
 
 # ------------------------------------------------------------------ serve
-if [ "$MODE" != "--board" ]; then
+if [ "$FAST" = "0" ]; then
   log "grade whatever has been played"
   $COMPOSE run --rm training python grade_edges.py
 
