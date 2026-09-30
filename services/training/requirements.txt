@@ -28,3 +28,9 @@ shap==0.46.0
 # scheme, and it makes the scripts work under whatever URL the environment
 # happens to hold rather than only the one they were written against.
 psycopg[binary]==3.2.3
+
+# Exploratory data analysis (eda.py). Not imported by the training path, but
+# the EDA is part of the pipeline now rather than a one-off notebook, so it
+# ships in the same image as everything else it reads.
+matplotlib==3.9.2
+seaborn==0.13.2

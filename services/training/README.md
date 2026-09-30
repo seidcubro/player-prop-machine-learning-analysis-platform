@@ -55,6 +55,22 @@ site states as fact and which `audit_freshness.py` check [16] compares against
 the database. Rerun it after anything that rebuilds `prop_edge_results`, or the
 audit will tell you the site and the record disagree.
 
+## Exploratory data analysis
+
+`eda.py`, seven sections, figures and a write-up in `docs/eda/`. It is the one
+file here that starts from no hypothesis: what rows exist, what columns exist,
+what is missing, what is duplicated, what the targets look like, and whether a
+better regression is even a better bet. Sections 1 to 6 read the database and
+take under a minute; section 7 trains through `backtest_gap_system.py` and takes
+about four.
+
+    docker compose run --rm training python eda.py        # all of it
+    docker compose run --rm training python eda.py 1 2 3  # just those
+
+Run it again whenever the feature builder changes. Everything it found on its
+first run had been live for months, and two of them were already proved
+elsewhere in this repo and never carried across.
+
 ## Analysis
 
 Everything named `eval_*` beyond the pipeline four and `eval_strategy.py`, plus

@@ -425,6 +425,10 @@ edge). Details in [docs/MODEL.md](docs/MODEL.md).
 - `scripts/` the scheduled refresh and its modes. `scripts/README.md`.
 - `deploy/` production compose, Caddy, systemd timers, migration script.
 - `docs/` architecture, ML pipeline, deployment reasoning.
+- `docs/eda/` the exploratory data analysis and its figures.
+  [FINDINGS.md](docs/eda/FINDINGS.md) is the write-up: what is actually in
+  the feature table, which of it is duplicated, which of it is missing and
+  why that matters, and why a better regression is not a better bet.
 
 ## Author
 

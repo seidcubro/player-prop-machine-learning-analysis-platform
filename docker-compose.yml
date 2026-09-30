@@ -64,6 +64,9 @@ services:
       POSTGRES_USER: app
     volumes:
       - ./services/training/artifacts:/artifacts
+      # eda.py writes its figures here. They are committed, because a
+      # finding nobody can look at is a finding nobody acts on.
+      - ./docs/eda:/docs/eda
       # Read-only so audit_freshness.py can compare the API service's market map
       # against this service's. The two cannot import each other, and when they
       # drifted the sync quietly stopped buying a market nothing noticed was
