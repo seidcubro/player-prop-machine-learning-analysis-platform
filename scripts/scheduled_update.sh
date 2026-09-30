@@ -47,6 +47,35 @@ AUTH="X-Admin-Token: ${ADMIN_TOKEN}"
 SEASON_START="${SEASON_START:-2022}"
 SEASON_END="${SEASON_END:-$(date +%Y)}"
 
+# How many games the rolling window holds.
+#
+# Eight, not five. Measured on 24,748 player-games, correlation of the window
+# mean with the next game within season, snap floor applied:
+#
+#     window            2       5       8      12
+#     rec_yds      0.4496  0.5040  0.5164  0.5213
+#     recs         0.4759  0.5246  0.5306  0.5321
+#     rush_yds     0.5928  0.6199  0.6268  0.6293
+#     rush_att     0.7507  0.7636  0.7665  0.7646
+#     pass_yds     0.2070  0.2505  0.2713  0.2746
+#     pass_att     0.2346  0.2571  0.2639  0.2658
+#
+# Longer is better in every market and the curve is flat past eight, so eight
+# takes most of the gain without emptying the early weeks. Against five it is
+# +0.016 [+0.011, +0.021] on receiving yards and +0.024 [+0.009, +0.040] on
+# passing yards, both clearing zero on a thousand-resample bootstrap.
+#
+# The season-only rule caps this in practice: in week 3 nobody has eight games
+# and the window is whatever the season has given. It starts to bite from week
+# six, which is the point of setting it now.
+#
+# Changing this needs a full feature rebuild and retrain, which --weekly and
+# --migrate both do. Nothing breaks in between: train.py writes the window it
+# used into active_models and both serving paths read it back from there, so
+# until the rebuild happens every market keeps being served at whatever it was
+# last built with.
+LOOKBACK="${LOOKBACK:-8}"
+
 MARKETS="rec_yds rush_yds pass_yds recs rush_att pass_att pass_completions pass_td rush_td rec_td any_td"
 # Redo a subset instead of all eleven.
 #
@@ -622,16 +651,16 @@ if [ "$NEED_FEATURES" = "1" ]; then
     log "prune feature rows written under the previous window definition"
     $COMPOSE exec -T postgres psql -U app -d app -c \
       "DELETE FROM player_market_features
-        WHERE lookback = 5
+        WHERE lookback = $LOOKBACK
           AND market_id IN (SELECT id FROM prop_markets
                              WHERE code IN ($MARKETS_SQL));"
   fi
 
   log "rebuild features"
   for m in $MARKETS; do
-    curl -sf -X POST -H "$AUTH" "$API/jobs/build_features?market_code=$m&lookback=5" >/dev/null || {
+    curl -sf -X POST -H "$AUTH" "$API/jobs/build_features?market_code=$m&lookback=$LOOKBACK" >/dev/null || {
       echo "FAILED: build_features $m"; exit 1; }
-    curl -sf -X POST -H "$AUTH" "$API/jobs/attach_labels?market_code=$m&lookback=5" >/dev/null
+    curl -sf -X POST -H "$AUTH" "$API/jobs/attach_labels?market_code=$m&lookback=$LOOKBACK" >/dev/null
     printf '    %s\n' "$m"
   done
 
@@ -645,7 +674,7 @@ if [ "$NEED_FEATURES" = "1" ]; then
   if [ "$PRUNE_FEATURES" = "1" ]; then
     blended=$($COMPOSE exec -T postgres psql -U app -d app -tA -c \
       "SELECT count(*) FROM player_market_features
-        WHERE lookback = 5 AND extra_features ? 'y_blend';")
+        WHERE lookback = $LOOKBACK AND extra_features ? 'y_blend';")
     blended=$(printf '%s' "$blended" | tr -d '[:space:]')
     if [ "${blended:-0}" -lt 1000 ]; then
       echo "FAILED: only ${blended:-0} feature rows carry y_blend, so the"
@@ -720,14 +749,14 @@ if [ "$MODE" = "--weekly" ]; then
     started=$(date '+%H:%M:%S')
     run_step "training point model" \
       $COMPOSE run --rm -e MARKET_CODE="$m" -e MODEL_NAME="$active" \
-      -e LOOKBACK=5 training python train.py
+      -e LOOKBACK=$LOOKBACK training python train.py
     run_step "evaluating" \
       $COMPOSE run --rm -e MARKET_CODE="$m" -e MODEL_NAME="$active" \
-      -e LOOKBACK=5 training python eval.py
+      -e LOOKBACK=$LOOKBACK training python eval.py
     # The slow one: five quantile models per market, and the reason a full
     # retrain runs into the hours.
     run_step "fitting quantiles (the slow step)" \
-      $COMPOSE run --rm -e MARKET_CODE="$m" -e LOOKBACK=5 -e SPLIT_MODE=season \
+      $COMPOSE run --rm -e MARKET_CODE="$m" -e LOOKBACK=$LOOKBACK -e SPLIT_MODE=season \
       training python train_quantiles.py
     rm -f "$tmp"
     printf '    %s (%s) %s -> %s\n' "$m" "$active" "$started" "$(date '+%H:%M:%S')"

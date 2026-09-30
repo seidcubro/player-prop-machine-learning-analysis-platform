@@ -122,10 +122,19 @@ def slate(engine) -> pd.DataFrame:
     return pd.read_sql(
         text("""
             WITH current_depth AS (
+                -- Offensive slots only. Without the position filter MIN()
+                -- takes the kick and punt return rows too, so a returner reads
+                -- as a starter: Britain Covey came back as WR1 while being
+                -- WR7, and 11.5% of player-weeks were wrong the same way. The
+                -- edge builder and the feature builder were both fixed in
+                -- September; this query was missed, which is why the board and
+                -- the player pages disagreed about who starts.
                 SELECT DISTINCT ON (d.player_id)
                        d.player_id, MIN(d.depth_team) AS depth_rank
                 FROM depth_charts d
                 WHERE d.season = (SELECT MAX(season) FROM depth_charts)
+                  AND d.depth_team IS NOT NULL
+                  AND d.depth_position IN ('QB', 'RB', 'FB', 'WR', 'TE')
                 GROUP BY d.player_id, d.season, d.week
                 ORDER BY d.player_id, d.season DESC, d.week DESC
             ),
@@ -136,6 +145,12 @@ def slate(engine) -> pd.DataFrame:
                   AND game_date < CURRENT_DATE + make_interval(days => :days)
             ),
             latest_feat AS (
+                -- The window length comes from the model that will read these
+                -- rows, not from a constant. train.py writes its LOOKBACK into
+                -- active_models, so a market retrained on a longer window
+                -- starts being served from the longer window automatically,
+                -- and a market whose features have not been rebuilt yet keeps
+                -- working on the old one instead of serving nothing.
                 SELECT DISTINCT ON (f.player_id, m.code)
                        f.player_id, m.code AS market_code, f.as_of_game_date,
                        f.mean, f.stddev, f.weighted_mean, f.trend,
@@ -143,7 +158,8 @@ def slate(engine) -> pd.DataFrame:
                        f.extra_features
                 FROM player_market_features f
                 JOIN prop_markets m ON m.id = f.market_id
-                WHERE f.lookback = 5
+                LEFT JOIN active_models am ON am.market_id = m.id
+                WHERE f.lookback = COALESCE(am.lookback, 5)
                 ORDER BY f.player_id, m.code, f.as_of_game_date DESC
             )
             SELECT p.external_id AS player_id, p.name AS player_name,
@@ -231,6 +247,7 @@ def main():
     rows = []
     skipped = 0
     ruled_out = 0
+    backup_qb = 0
     inj_status = ctx["injuries"]
 
     for market_code, grp in df.groupby("market_code"):
@@ -278,6 +295,29 @@ def main():
                 in ("Out", "Doubtful")
             ):
                 ruled_out += 1
+                continue
+
+            # A backup quarterback behind a healthy starter is not projected
+            # either. Same rule the edge builder uses, called through the same
+            # function so the two pages cannot drift apart.
+            #
+            # Week 3 published Mason Rudolph at 20.6 attempts, 12.8 completions
+            # and 82.6 passing yards beside Aaron Rodgers at 36.4, 22.1 and
+            # 215.9, as though Pittsburgh were splitting the snaps. They were
+            # not. Rodgers was on no injury report and Rudolph did not take a
+            # meaningful snap. A quarterback room is not a committee: the
+            # starter takes every rep unless he cannot, and a number on the
+            # backup is not a conservative estimate, it is a claim about the
+            # game that is simply false.
+            #
+            # When the starter IS out or doubtful the team's QB role is in
+            # ctx["vacated"], the function returns None, and the backup is
+            # projected as the starter he has become.
+            if bp.backup_qb_behind_healthy_starter(
+                ctx, team=r.team, position=r.position,
+                player_id=r.player_id, market_code=market_code,
+            ):
+                backup_qb += 1
                 continue
 
             feats = {
@@ -531,6 +571,8 @@ def main():
         print(f"  skipped (no active model): {skipped} rows")
     if ruled_out:
         print(f"  not projected (ruled out or doubtful): {ruled_out} rows")
+    if backup_qb:
+        print(f"  not projected (backup QB, starter healthy): {backup_qb} rows")
     print("\nby market:")
     print(out.groupby("market_code").agg(
         players=("player_id", "nunique"),

@@ -249,6 +249,31 @@ LABEL_COL = "label_actual"
 # Set to 0 to keep every feature regardless of coverage.
 MIN_FEATURE_COVERAGE = float(os.getenv("MIN_FEATURE_COVERAGE", "0.05"))
 
+# Drop a column that is an exact copy of one already in the matrix.
+#
+# The EDA found aux_mean correlating 1.0000 with recs_mean on receiving yards,
+# with rush_att_mean on rushing yards, and with `mean` itself on rushing
+# attempts: 80 pairs above 0.95 and 19 above 0.99 in rush_att alone. A random
+# forest drawing sqrt(n) columns per split draws a quantity present under two
+# names twice as often as it deserves, and an elastic net splits one
+# coefficient across the copies arbitrarily, which is how a feature reads weak
+# in an importance table while carrying the model. See docs/eda/FINDINGS.md.
+DROP_DUPLICATE_FEATURES = os.getenv("DROP_DUPLICATE_FEATURES", "1") != "0"
+
+# Add an explicit "this feature was absent" column beside each partially
+# absent feature.
+#
+# Absent features are filled with 0.0 and the missingness is not random: on
+# rushing attempts a player with no red-zone carry average averages 0.57
+# carries against 6.87 for one who has it, and 31 of 34 partially absent
+# features differ on the outcome at p<0.001. A tree can half-recover that by
+# splitting on the zero. A linear model cannot, and three markets ship linear.
+#
+# Off by default until the serving paths build the same columns; a model
+# trained with indicators and served without them is the exact train/serve
+# skew this project already found once.
+MISSING_INDICATORS = os.getenv("MISSING_INDICATORS", "0") != "0"
+
 BASE_FEATURE_COLS = [
     "mean",
     "stddev",
@@ -393,6 +418,43 @@ def _build_feature_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]
                   f"{MIN_FEATURE_COVERAGE:.0%} of {n} rows: "
                   + ", ".join(f"{k} ({covered[k]})" for k in sparse))
             X = X.drop(columns=sparse)
+
+    # Exact copies, dropped after the sparsity pass so the survivors are the
+    # columns that actually reach a model. The first spelling wins, which keeps
+    # the base columns and drops the alias, and the hash is over the values so
+    # this finds copies nobody thought to look for rather than a hardcoded list.
+    if DROP_DUPLICATE_FEATURES and X.shape[1] > 1:
+        seen: dict[bytes, str] = {}
+        dupes: list[tuple[str, str]] = []
+        for c in X.columns:
+            key = pd.to_numeric(X[c], errors="coerce").fillna(0.0).to_numpy(
+                dtype=float).tobytes()
+            if key in seen:
+                dupes.append((c, seen[key]))
+            else:
+                seen[key] = c
+        if dupes:
+            print(f"  dropping {len(dupes)} exact duplicate feature(s): "
+                  + ", ".join(f"{c} (= {orig})" for c, orig in dupes))
+            X = X.drop(columns=[c for c, _ in dupes])
+
+    # Missingness as its own feature. Built from the raw dicts, before the zero
+    # fill, because presence and value are different facts.
+    if MISSING_INDICATORS and not extra_df.empty:
+        n = len(extras_series)
+        present = {k: extras_series.map(lambda d, k=k: k in d) for k in extra_keys}
+        added = []
+        for k, flags in present.items():
+            if k not in X.columns:
+                continue
+            rate = 1.0 - flags.mean()
+            if not (0.02 <= rate <= 0.98):
+                continue
+            X[f"{k}__absent"] = (~flags).astype(float).to_numpy()
+            added.append(k)
+        if added:
+            print(f"  added {len(added)} missingness indicator(s) for "
+                  f"partially absent features")
 
     feature_cols = list(X.columns)
 

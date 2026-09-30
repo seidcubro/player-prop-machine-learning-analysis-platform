@@ -305,6 +305,10 @@ on data it was never fitted to. The first two are not discoveries at all.
 They are things this repo already proved and never carried across, which is
 the part of this exercise I find least comfortable.
 
+All five were measured against the incumbent on the walk-forward board. Two
+shipped, two did not, and one needed a rebuild. Results are in
+[the follow-up below](#what-happened-when-i-measured-them).
+
 1. **Restrict the rushing markets to the priced positions.** The research is
    already written and the defect is still live. This is a one-line change to
    `eligible_positions` and a retrain.
@@ -317,13 +321,89 @@ the part of this exercise I find least comfortable.
 4. **Drop the exact duplicates.** `aux_mean` and `aux_trend` are copies in every
    market. Removing them costs nothing and stops the forest double-drawing one
    quantity.
-5. **Per-market lookback.** Five is wrong for quarterbacks in one direction and
-   for everyone else in the other. The curve in figure 10 says what each market
-   wants.
+5. **Longer windows.** Five games is short everywhere. Correlation with the next
+   game rises monotonically out to twelve in every market.
 
 Number 3 is the one I expect most from, and also the one most likely to measure
 as nothing, because a tree can already split on a zero. If it does measure as
 nothing I will write that down here rather than quietly keep it.
+
+## What happened when I measured them
+
+It measured as nothing.
+
+    arm            picks     hit           ROI     units    R2
+    baseline        1244   58.6%         +9.4%   +117.14  0.5256
+    drop duplicates 1232   58.6%         +9.4%   +115.65  0.5253
+    indicators      1227   58.8%         +9.7%   +118.54  0.5249
+    both            1227   58.8%         +9.5%   +116.91  0.5252
+
+Walk-forward over 2024 to 2026, same rows, one change per arm. Every interval
+contains every other. More usefully, paired on the picks both arms publish, the
+indicator arm goes 59.1% to 59.1% and +120.31 units to +120.31 units: identical,
+to the cent. The whole apparent difference is which picks get published, not a
+single better prediction.
+
+So indicators do not ship. The flag is in `train.py` and defaults off. The
+reason is worth keeping: a tree can already split on the zero, which is most of
+what an indicator would tell it, and the three linear markets did not move
+enough to pay for building the same columns in two serving paths. That is
+exactly the kind of train/serve skew this project has already been bitten by.
+
+Dropping the exact duplicates also changes nothing measurable, and ships anyway,
+because it is free. The projection moves by 0.105 on average, the side flips on
+0.7% of rows, and on the picks both arms publish the results are identical. What
+it buys is not accuracy, it is that an importance table stops splitting one
+quantity's credit across two names. It is on by default.
+
+**Poisson for the touchdown markets was wrong.** The argument from `pass_td` did
+not carry:
+
+    market    family     MAE   Poisson dev   rate vs actual   AUC
+    rush_td   rf_v10   0.1556      0.3331            +3.3%   0.8807
+    rush_td   pois_v4  0.1530      0.3336            -0.5%   0.8814
+    rec_td    rf_v10   0.2354      0.5205            -1.8%   0.7525
+    rec_td    pois_v4  0.2324      0.5226            -4.0%   0.7508
+    any_td    rf_v10   0.3204      0.6448            +1.1%   0.7426
+    any_td    pois_v4  0.3158      0.6415            +1.9%   0.7420
+
+Poisson wins mean absolute error in all three and loses deviance in two, and the
+number these markets are actually priced on, the ranking of who scores, is
+identical to the fourth decimal. `pass_td` moved because the forest there was
+11.2% under the true rate; these three are already within 3.3%, so there was no
+miscalibration left to fix. The zero-inflation is real and the loss function was
+not what it was costing us.
+
+**Longer windows was the one real finding**, and the EDA's own reading of it was
+wrong. I said five was too long for quarterbacks because their autocorrelation
+decays fastest. It is the opposite: a steep decay says each single game is
+noisier, and averaging more of them helps more. Correlation of the window mean
+with the next game, within season:
+
+    window            2       5       8      12
+    rec_yds      0.4496  0.5040  0.5164  0.5213
+    recs         0.4759  0.5246  0.5306  0.5321
+    rush_yds     0.5928  0.6199  0.6268  0.6293
+    rush_att     0.7507  0.7636  0.7665  0.7646
+    pass_yds     0.2070  0.2505  0.2713  0.2746
+    pass_att     0.2346  0.2571  0.2639  0.2658
+
+Longer is better in all six, and against five it clears zero on four of them,
+including +0.016 [+0.011, +0.021] on receiving yards and +0.024 [+0.009, +0.040]
+on passing yards. So `LOOKBACK` is eight, not five, and it is per-market
+configurable rather than a constant: `train.py` records the window it used in
+`active_models` and both serving paths read it back, so a market whose features
+have not been rebuilt keeps being served at whatever it was built with instead
+of serving nothing.
+
+This one only arrives with a full feature rebuild and retrain, and the
+season-only rule caps it until week six, when players start having more than
+five games to average.
+
+And one finding that came out of grading the board rather than out of the EDA,
+which turned out to matter more than any of the five: the board was ranking
+picks on the quantile ladder's median while the thresholds had been measured on
+the point projection. See [WEEK3.md](WEEK3.md).
 
 ## How to run it
 

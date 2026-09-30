@@ -217,10 +217,37 @@ def _append_serving_game(player_id, games, schedule_by_team, current_team):
 
 
 # Below this share of his team's offensive snaps, a quarterback's game says he
-# left it rather than anything about his role. See the block in
-# build_market_features that uses this for the evidence and for why it is not
-# applied to the skill positions.
+# left it rather than anything about his role. Quarterbacks get the strictest
+# floor because the position has no committee: a quarterback on a third of the
+# snaps is a quarterback who got hurt or got benched, and neither is a fact
+# about next week.
 MIN_SNAP_QB = float(os.getenv("MIN_SNAP_QB", "0.35"))
+
+# And below this share, anybody's game says he was not out there, whatever the
+# position. Saquon Barkley in 2026: 15 carries on 71% of the snaps, then 4
+# carries on 16%, then 15 carries on 72%. The middle game is not a light
+# workload, it is an absence, and averaging it in reads him at 11.3 carries
+# when his workload in games he plays is 15. The board published the under.
+#
+# 20%, not 35%. Measured on 24,748 player-games with a snap share, predicting
+# the next game from the previous five within season, scored only on games the
+# player actually played:
+#
+#     market      corr, all games   corr, floor 0.20   corr, floor 0.35
+#     rec_yds          0.4859            0.4872             0.4809
+#     recs             0.5044            0.5055             0.4981
+#     rush_yds         0.6052            0.6085             0.6071
+#     rush_att         0.7513            0.7594             0.7626
+#     pass_yds         0.2216            0.2289             0.2231
+#     pass_att         0.2341            0.2480             0.2492
+#
+# A floor of 0.20 improves all six, and mean absolute error with them. A floor
+# of 0.35 improves the two volume-driven markets and makes the receiving ones
+# worse, because a receiver on a third of the snaps is a real role and a
+# receiver on a sixth of them is somebody who left. Individually only rush_att
+# clears zero on its own interval (+0.0082 [+0.0051, +0.0110]); six of six in
+# the same direction is the reason to ship it, not any one of them.
+MIN_SNAP_ANY = float(os.getenv("MIN_SNAP_ANY", "0.20"))
 
 
 def _counts_for_window(game, position) -> bool:
@@ -229,13 +256,12 @@ def _counts_for_window(game, position) -> bool:
     Unknown snap share counts, because missing data is not evidence of absence
     and the snap feed lags the box score in the first hours after a game.
     """
-    if (position or "").upper() != "QB":
-        return True
     share = game.get("snap_pct")
     if share is None:
         return True
+    floor = MIN_SNAP_QB if (position or "").upper() == "QB" else MIN_SNAP_ANY
     try:
-        return float(share) >= MIN_SNAP_QB
+        return float(share) >= floor
     except (TypeError, ValueError):
         return True
 
@@ -721,7 +747,14 @@ def build_features(
             COALESCE(trd.opp_rush_yards_allowed, 0)::float8 AS opp_rush_yards_allowed,
             COALESCE(trd.opp_carries_allowed, 0)::float8 AS opp_carries_allowed,
 
-            COALESCE(sc.offense_pct, 0)::float8 AS snap_pct,
+            -- No COALESCE here, on purpose. _counts_for_window drops a game
+            -- whose snap share is below the floor and keeps one whose share is
+            -- unknown, and those are different facts: 0.8% of player-games have
+            -- no snap record because the feed lags the box score by a few
+            -- hours. Coalescing the unknown to zero turned every one of them
+            -- into "he did not play" and silently deleted it from the window.
+            -- Everything else that reads snap_pct already does `or 0.0`.
+            sc.offense_pct::float8 AS snap_pct,
             COALESCE(fo.rec_yards_gained_exp, 0)::float8 AS exp_rec_yards,
             COALESCE(fo.receptions_exp, 0)::float8 AS exp_receptions,
             COALESCE(fo.rec_touchdown_exp, 0)::float8 AS exp_rec_td,

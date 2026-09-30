@@ -430,10 +430,21 @@ sit at the longest prices rather than on the likeliest outcomes. And 27% of the
 picks that reached a bet tier under that rule sat within a quarter of a standard
 deviation of the line, hitting 49.7%.
 
-So the tier is cut on **|z|**, the gap between the median projection and the line
+So the tier is cut on **|z|**, the gap between the point projection and the line
 divided by the width of the predicted distribution, `(q75 − q25) / 1.349`.
 Standard deviations rather than yards, because two yards of disagreement on a
 15-yard line is a different claim from two yards on an 80-yard line.
+
+The point projection, not the ladder's median, and that distinction cost me a
+week. The table above and every threshold under it were measured in
+`backtest_gap_system.py`, which computes the gap from the point projection. The
+board was computing it from the quantile median, which on a right-skewed target
+belongs lower and on mine was also mildly miscalibrated low on top of that. On
+receiving yards the projection sat 1.1 yards above the line and the median sat
+5.3 below it, so the shipped rule was negative on 71% of priced props while
+outcomes landed under on 49%, and Week 3 of 2026 published 70 unders out of 73
+picks. The median still publishes and still carries the probability. It no
+longer decides the side. See [docs/eda/WEEK3.md](eda/WEEK3.md).
 
 The over bar is higher, and by a measured amount. Walk-forward over 2024-2025 on
 every priced prop rather than only the ones published:
