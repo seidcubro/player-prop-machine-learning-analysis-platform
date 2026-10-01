@@ -123,9 +123,10 @@ const TERMS: Term[] = [
     short: "The verified selection",
     body: (
       <>
-        The one configuration that made money on a season it was never chosen
-        on: top tier, under side, one pick per player per game. Roughly +7% per
-        unit over that test. The rest of the board is research.
+        The strongest disagreements with the book, one pick per player per
+        game, at the best price available. Either side: an over has to clear a
+        higher bar than an under to get here, and the ones that do have been
+        the best picks on the board. The rest is research.
       </>
     ),
   },

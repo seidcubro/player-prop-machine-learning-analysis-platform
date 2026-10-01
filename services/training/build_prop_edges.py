@@ -2239,10 +2239,26 @@ def main():
     # has actually been shown to work.
     out["best_bet"] = False
     if len(out):
-        eligible = out[
-            (out["recommended_side"] == "under")
-            & (out["edge_tier"].isin(["elite", "strong"]))
-        ]
+        # Either side, not unders only.
+        #
+        # This filter was written when the measured edge was "star unders at
+        # the best price", and it was right then. The gap system replaced that
+        # rule and holds overs to a higher bar on purpose (OVER_ELITE 1.5
+        # against ELITE 1.0 in gap_tier), which is the mechanism that makes an
+        # over safe to publish. Nobody came back to the best-bet flag, so every
+        # over that cleared the harder bar was hidden from the one list people
+        # actually read.
+        #
+        # Walk-forward 2024-2026, elite and strong picks:
+        #
+        #     side                picks     hit              ROI    units
+        #     unders (flagged)      333   60.1% [54.0, 66.1]  +13.4%  +44.50
+        #     overs (excluded)      331   58.0% [50.6, 65.0]   +6.4%  +21.29
+        #
+        # and at the elite bar alone the order reverses outright: overs 67.7%
+        # [58.6, 76.7] at +22.1% against unders 57.4% [50.5, 63.6] at +9.2%.
+        # The best bets on the board were excluding the best bets.
+        eligible = out[out["edge_tier"].isin(["elite", "strong"])]
         if len(eligible):
             # Ranked on profit per unit, not on the probability edge.
             #

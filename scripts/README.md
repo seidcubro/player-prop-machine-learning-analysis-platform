@@ -1,5 +1,24 @@
 # Scripts Layout
 
+## scripts/preflight.sh
+
+Run this before a build, especially before an hour-long one.
+
+```sh
+COMPOSE="docker compose -f deploy/docker-compose.prod.yml" sh scripts/preflight.sh
+```
+
+Every check in it is one that has actually cost an afternoon: a health probe
+pointed at the wrong path, a DATABASE_URL naming a driver the image did not
+carry, migrations that were never applied, depth charts two seasons stale
+because nflverse changed the file format, a quantile ladder fitted on a
+different feature set from the point model it is paired with, features built
+under a window no active model reads, and the board ranking picks on a
+different statistic from the one its thresholds were measured on.
+
+It exits non-zero on a FAIL so a scheduler can refuse to start. WARN never
+blocks.
+
 ## scripts/scheduled_update.sh
 
 The scheduled refresh. Four modes, each a superset of the one above it, and the

@@ -468,6 +468,15 @@ under side down to +4.3% overall.
 | Medium | \|z\| ≥ 0.5 | \|z\| ≥ 0.75 | shown, not offered |
 | Small | \|z\| ≥ 0.25 | \|z\| ≥ 0.375 | graded, not shown |
 
+The best-bet flag used to add one more condition on top of the tier: the pick
+had to be an under. That was correct when the measured edge was star unders at
+the best price, and it outlived the rule it belonged to. The gap system already
+holds overs to the harder bar in the table above, which is the thing that makes
+an over safe to publish, so the extra filter was hiding exactly the picks that
+had cleared the extra bar. Walk-forward over 2024-2026 at the elite bar, overs
+went 67.7% [58.6, 76.7] at +22.1% against unders at 57.4% [50.5, 63.6] and
++9.2%. Either side can be a best bet now.
+
 **Receiving yards is held to |z| ≥ 0.75 on both sides.** It was the one market
 that lost money, at 52.1% against a 52.7% break-even, and it is the largest by
 pick count. The cause is not the model: every family calls the side at about

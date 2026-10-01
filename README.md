@@ -98,9 +98,9 @@ rush attempts +5.4%, rushing yards +2.2%, receiving yards +1.3%, and passing
 yards **-10.0%**, which is why that market is excluded. People bet their star to
 catch passes, not to fall short.
 
-That finding is what the board is built on now. Picks are tiered on calibrated
-expected value, overs have to clear roughly twice the bar of unders, and only the
-top tier is offered as a bet. That tier has returned +4.1% over 3,952 graded
+That finding is what the board is built on now. Picks are tiered on how far the
+projection sits from the line in standard deviations, overs have to clear roughly
+half again the bar of unders, and only the top tier is offered as a bet. That tier has returned +4.1% over 3,952 graded
 picks and finished positive in all four seasons it has run. It's still a small
 edge rather than a proven one, which is why closing line value is tracked
 alongside it.

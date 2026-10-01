@@ -648,11 +648,15 @@ if [ "$NEED_FEATURES" = "1" ]; then
       sleep 2
     done
 
-    log "prune feature rows written under the previous window definition"
+    # Every row for these markets, whatever window it was built under, not just
+    # rows at the window about to be rebuilt. Changing LOOKBACK otherwise leaves
+    # the old generation behind forever: there were already 21,980 rows at a
+    # dead lookback in this table, read by nothing and quietly wrong in every
+    # statistic computed over it. See docs/eda/FINDINGS.md.
+    log "prune feature rows written under any previous window definition"
     $COMPOSE exec -T postgres psql -U app -d app -c \
       "DELETE FROM player_market_features
-        WHERE lookback = $LOOKBACK
-          AND market_id IN (SELECT id FROM prop_markets
+        WHERE market_id IN (SELECT id FROM prop_markets
                              WHERE code IN ($MARKETS_SQL));"
   fi
 

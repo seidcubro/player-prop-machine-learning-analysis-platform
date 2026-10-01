@@ -149,10 +149,19 @@ function Plain() {
 
       <QA q="What is a Best Bet?">
         <p>
-          It is the selection that has been tested on a season the model had
-          never seen and still made money: the strongest picks, on the under
-          side, one per player per game. Over that test it returned about 4.4%
-          per unit bet, with a 95% interval of [+0.2%, +8.2%].
+          It is the selection that has been tested on seasons the model had
+          never seen and still made money: the strongest picks, one per player
+          per game, at the best price available. Over that test it returned
+          about 4.4% per unit bet, with a 95% interval of [+0.2%, +8.2%].
+        </p>
+        <p>
+          It used to be unders only, because that was the pattern that held when
+          it was first measured. The selection rule changed underneath it: an
+          over now has to disagree with the book by half again as much as an
+          under before it is published at all. Holding the overs that clear that
+          bar out of the Best Bets was hiding the best picks on the board, so
+          they are in. Walk-forward over 2024 to 2026 the top tier returned
+          +22.1% on overs against +9.2% on unders.
         </p>
         <p>
           That number used to read 6.6%, on a sample that quietly excluded night
