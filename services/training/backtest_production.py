@@ -166,6 +166,8 @@ def build() -> pd.DataFrame:
             -gap_tier.Z_CEILING, gap_tier.Z_CEILING)
         j["z_median"] = ((j["q50"] - j["line"]) / j["sd_quant"]).clip(
             -gap_tier.Z_CEILING, gap_tier.Z_CEILING)
+        j["z_median_window"] = ((j["q50"] - j["line"]) / j["sd_window"]).clip(
+            -gap_tier.Z_CEILING, gap_tier.Z_CEILING)
         print(f"  {code}: {len(j)} priced props with a walk-forward ladder")
         out.append(j)
 
@@ -203,6 +205,15 @@ def main():
     if os.getenv("REUSE") == "1" and CACHE.exists():
         b = pd.read_pickle(CACHE)
         print(f"reusing {len(b):,} cached rows from {CACHE}")
+        # A cache written before a z column existed still holds everything the
+        # column is made of, so derive rather than refit.
+        for col, num, den in (("z", "pred", "sd_quant"),
+                              ("z_window", "pred", "sd_window"),
+                              ("z_median", "q50", "sd_quant"),
+                              ("z_median_window", "q50", "sd_window")):
+            if col not in b.columns:
+                b[col] = ((b[num] - b["line"]) / b[den]).clip(
+                    -gap_tier.Z_CEILING, gap_tier.Z_CEILING)
     else:
         b = build()
         CACHE.parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +226,8 @@ def main():
           f"{'overs called':>14}{'mean |z|':>10}")
     for col, label in (("z", "projection / quantile spread  (live)"),
                        ("z_window", "projection / window spread  (measured)"),
-                       ("z_median", "median / quantile spread  (was live)")):
+                       ("z_median", "median / quantile spread  (was live)"),
+                       ("z_median_window", "median / window spread")):
         g = graded(b, col)
         print(f"  {label:<34}{len(g):>7}{g.won.mean():>15.1%}"
               f"{(g.side == 'over').mean():>14.0%}{g.az.mean():>10.2f}")
@@ -232,7 +244,8 @@ def main():
           f"{'ROI':>9}{'units':>9}")
     for col, label in (("z", "projection / quantile spread"),
                        ("z_window", "projection / window spread"),
-                       ("z_median", "median / quantile spread")):
+                       ("z_median", "median / quantile spread"),
+                       ("z_median_window", "median / window spread")):
         g = graded(b, col)
         g["tier"] = [gap_tier.tier_for(v, c)
                      for v, c in zip(g[col], g["market_code"])]
@@ -244,7 +257,9 @@ def main():
 
     print("\n" + "=" * 96)
     print("3. THRESHOLDS RE-DERIVED IN THE UNITS THE BOARD COMPUTES\n")
-    g = graded(b, "z")
+    zc = os.getenv("Z_COL", "z_window")
+    print(f"  (in the units of {zc})\n")
+    g = graded(b, zc)
     for side in ("under", "over"):
         s = g[g["side"] == side]
         print(f"  {side}s, {len(s)} priced props\n")
@@ -274,7 +289,7 @@ def main():
 
     print("\n" + "=" * 96)
     print("5. PER MARKET, AT THE SHIPPED THRESHOLDS\n")
-    g["tier"] = [gap_tier.tier_for(v, c) for v, c in zip(g["z"], g["market_code"])]
+    g["tier"] = [gap_tier.tier_for(v, c) for v, c in zip(g[zc], g["market_code"])]
     pub = g[g["tier"].isin(["elite", "strong", "medium"])]
     print(f"  {'market':<12}{'picks':>7}{'hit':>9}  {'95% CI':<18}{'ROI':>9}"
           f"{'units':>9}{'overs':>8}")

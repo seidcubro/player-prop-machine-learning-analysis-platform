@@ -84,6 +84,17 @@ def load(engine, lo: str, hi: str) -> pd.DataFrame:
     if odds.empty:
         raise SystemExit("no odds snapshots in that range")
 
+    sd = pd.read_sql(text("""
+        SELECT DISTINCT ON (f.player_id, m.code)
+               f.player_id, m.code AS market_code, f.stddev
+        FROM player_market_features f
+        JOIN prop_markets m ON m.id = f.market_id
+        LEFT JOIN active_models am ON am.market_id = m.id
+        WHERE f.lookback = COALESCE(am.lookback, 5)
+          AND f.as_of_game_date <= :hi
+        ORDER BY f.player_id, m.code, f.as_of_game_date DESC
+    """), engine, params={"hi": hi})
+
     act = pd.read_sql(text("""
         SELECT s.player_id, s.game_date, s.week,
                s.receiving_yards, s.receptions, s.rushing_yards, s.carries,
@@ -115,6 +126,7 @@ def load(engine, lo: str, hi: str) -> pd.DataFrame:
 
     d = proj.merge(mkt, left_on=["player_name", "market_code", "game_date"],
                    right_on=["player_name", "market_code", "d"], how="inner")
+    d = d.merge(sd, on=["player_id", "market_code"], how="left")
     idx = act.set_index(["player_id", "game_date"])
 
     def look(row, col):
@@ -140,8 +152,9 @@ def load(engine, lo: str, hi: str) -> pd.DataFrame:
 
 
 def tiers(d: pd.DataFrame, centre) -> pd.DataFrame:
-    z = [gap_tier.gap_z(m, l, a, b, c)
-         for m, l, a, b, c in zip(centre, d.line, d.p25, d.p75, d.market_code)]
+    z = [gap_tier.gap_z(m, l, a, b, c, window_sd=w)
+         for m, l, a, b, c, w in zip(centre, d.line, d.p25, d.p75,
+                                     d.market_code, d.stddev)]
     t = pd.DataFrame({"z": z}, index=d.index)
     t["tier"] = [gap_tier.tier_for(v, c) for v, c in zip(t.z, d.market_code)]
     t["side"] = np.where(t.z > 0, "over", "under")
@@ -154,7 +167,7 @@ def tiers(d: pd.DataFrame, centre) -> pd.DataFrame:
     t["profit"] = np.where(push, 0.0, np.where(t.won, dec - 1, -1.0))
     t["breakeven"] = 1.0 / dec
     for c in ("cluster", "market_code", "position", "player_name", "actual",
-              "line", "p50", "projection", "snap_pct"):
+              "line", "p50", "projection", "snap_pct", "stddev"):
         t[c] = dd[c].values
     return t
 

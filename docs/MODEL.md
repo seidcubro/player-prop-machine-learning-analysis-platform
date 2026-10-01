@@ -430,21 +430,45 @@ sit at the longest prices rather than on the likeliest outcomes. And 27% of the
 picks that reached a bet tier under that rule sat within a quarter of a standard
 deviation of the line, hitting 49.7%.
 
-So the tier is cut on **|z|**, the gap between the point projection and the line
-divided by the width of the predicted distribution, `(q75 − q25) / 1.349`.
+So the tier is cut on **|z|**, the gap between the median projection and the
+line divided by **the standard deviation of the player's own recent games**.
 Standard deviations rather than yards, because two yards of disagreement on a
 15-yard line is a different claim from two yards on an 80-yard line.
 
-The point projection, not the ladder's median, and that distinction cost me a
-week. The table above and every threshold under it were measured in
-`backtest_gap_system.py`, which computes the gap from the point projection. The
-board was computing it from the quantile median, which on a right-skewed target
-belongs lower and on mine was also mildly miscalibrated low on top of that. On
-receiving yards the projection sat 1.1 yards above the line and the median sat
-5.3 below it, so the shipped rule was negative on 71% of priced props while
-outcomes landed under on 49%, and Week 3 of 2026 published 70 unders out of 73
-picks. The median still publishes and still carries the probability. It no
-longer decides the side. See [docs/eda/WEEK3.md](eda/WEEK3.md).
+That denominator used to be `(q75 − q25) / 1.349` from the fitted quantile
+ladder, and getting it wrong cost most of the board. Every threshold in the
+table below was measured in `backtest_gap_system.py`, which divides by the
+window spread. The ladder's spread is not the same number: its median is honest,
+47% of outcomes land below it against a nominal 50%, but its q25 is not, at 15%
+against a nominal 25% and 5% on receptions. q25 is half the width, so the
+quantile spread ran 1.4 to 1.9 times the window spread, every z came out that
+much smaller, and the shipped bar was far stricter than the measured one.
+
+Walk-forward with the ladder refitted out of sample for every season, all four
+combinations on the same rows:
+
+| numerator / denominator | picks | hit | ROI | units |
+|---|---:|---|---:|---:|
+| **median / window** | **1,558** | **59.1% [56.3, 62.0]** | **+11.0%** | **+171.6** |
+| projection / window | 1,236 | 59.0% [56.1, 61.9] | +10.3% | +127.9 |
+| median / quantile (was shipped) | 696 | 57.9% [53.7, 62.2] | +8.0% | +55.5 |
+| projection / quantile | 413 | 57.9% [52.5, 63.1] | +6.1% | +25.0 |
+
+The denominator is worth 860 picks and 116 units. The numerator is worth almost
+nothing, and the little it is worth favours the median.
+
+I had this backwards for a day and the correction is worth recording. Three
+graded weeks of 2026 showed the median below the line on every market and the
+board publishing 70 unders out of 73 picks, which read as a centring problem, so
+I moved the gap onto the point projection. It was not a centring problem. Those
+three weeks went over 52% of the time and the backtest seasons go over 47%: a
+board that leans under is right about a market that settles under. What was
+actually strangling it was the scale. See [docs/eda/WEEK3.md](eda/WEEK3.md).
+
+Two honest limits on that table. The odds history is overwhelmingly one season,
+7,299 of 7,726 priced props are 2025, so this is close to a single-season
+result. And 2026 to date is negative under every one of the four, on a sample
+too small to separate from noise.
 
 The over bar is higher, and by a measured amount. Walk-forward over 2024-2025 on
 every priced prop rather than only the ones published:

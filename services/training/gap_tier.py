@@ -54,6 +54,7 @@ buckets were measured rather than tuned to maximise anything.
 
 from __future__ import annotations
 
+import math
 import os
 
 # In standard deviations of the player's own predicted distribution, and higher
@@ -153,9 +154,65 @@ def sd_from_quantiles(q25, q75, market_code: str) -> float | None:
     return sd if sd >= floor else None
 
 
-def gap_z(median_projection, line, q25, q75, market_code: str) -> float | None:
+# Which spread divides the gap.
+#
+# "window": the standard deviation of the player's own recent games, which is
+# the scale every threshold in this file was measured on, in
+# backtest_gap_system.py and in research_gap_selection.py.
+#
+# "quantile": (q75 - q25) / 1.349 from the fitted ladder. This is what the
+# board actually used until it was measured, and it is much too wide, because
+# the ladder's lower quantiles are badly calibrated. Walk-forward over
+# 2024-2026, share of outcomes landing below each predicted quantile:
+#
+#     market        <q10   <q25   <q50   <q75   <q90
+#     target         10%    25%    50%    75%    90%
+#     recs            4%     5%    47%    75%    89%
+#     rush_att        0%    20%    46%    73%    87%
+#     ALL             6%    15%    47%    74%    88%
+#
+# The median is fine. q25 is not, and q25 is half the width. So the quantile
+# spread runs 1.4 to 1.9 times the window spread, every z comes out that much
+# smaller, and the thresholds here silently became far stricter than the ones
+# that were measured. It cost most of the board:
+#
+#     numerator / denominator       picks     hit              ROI    units
+#     median     / window            1558   59.1% [56.3, 62.0]  +11.0%  +171.6
+#     projection / window            1236   59.0% [56.1, 61.9]  +10.3%  +127.9
+#     median     / quantile           696   57.9% [53.7, 62.2]   +8.0%   +55.5
+#     projection / quantile           413   57.9% [52.5, 63.1]   +6.1%   +25.0
+#
+# Fixing the ladder's lower quantiles is the better long-term answer and is a
+# separate job. Until then the gap is scaled by the spread it was measured on.
+GAP_SCALE = os.getenv("GAP_SCALE", "window")
+
+
+def sd_for(q25, q75, window_sd, market_code: str) -> float | None:
+    """The spread to divide by, under the configured scale.
+
+    A window spread that is missing or below the market's floor returns None
+    rather than falling back to the quantile spread, because a z computed in
+    one scale and tiered against thresholds measured in another is the bug this
+    whole note is about. No usable spread is not a small edge, it is no
+    measurement, and tier_for already shows that as context rather than ranking
+    it as weak.
+    """
+    if GAP_SCALE != "window":
+        return sd_from_quantiles(q25, q75, market_code)
+    try:
+        sd = float(window_sd)
+    except (TypeError, ValueError):
+        return None
+    if not (sd > 0) or not math.isfinite(sd):
+        return None
+    floor = MIN_SD.get(market_code, MIN_SD_DEFAULT)
+    return sd if sd >= floor else None
+
+
+def gap_z(median_projection, line, q25, q75, market_code: str,
+          window_sd=None) -> float | None:
     """Signed disagreement in standard deviations. Positive means over."""
-    sd = sd_from_quantiles(q25, q75, market_code)
+    sd = sd_for(q25, q75, window_sd, market_code)
     if sd is None:
         return None
     try:

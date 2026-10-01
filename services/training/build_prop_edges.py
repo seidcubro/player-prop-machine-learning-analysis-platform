@@ -48,10 +48,19 @@ POSTGRES_USER = os.getenv("POSTGRES_USER", "app")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "app")
 ARTIFACT_DIR = os.getenv("ARTIFACT_DIR", "/artifacts")
 
-# Rank picks on the point projection rather than the ladder's median, which is
-# what gap_tier's thresholds were measured against. Set to 0 to go back to the
-# median; see the long note at the gap_z call for what that did to the board.
-GAP_FROM_PROJECTION = os.getenv("GAP_FROM_PROJECTION", "1") != "0"
+# Measure the gap from the point projection instead of the ladder's median.
+#
+# Off. I turned this on for a day on the strength of three live weeks where the
+# median sat below the line on every market and the board came out 70 unders
+# out of 73 picks. Measured properly, walk-forward over 2024-2026 with the
+# ladder fitted out of sample, it is the worst of the four options and the
+# median is the best. The three weeks were an over-heavy sample: outcomes went
+# over 52% of the time in them and 47% of the time across the three seasons,
+# and a board tilted toward unders is right about a market that settles under.
+#
+# The real defect those three weeks were showing was the denominator, which is
+# GAP_SCALE in gap_tier.py.
+GAP_FROM_PROJECTION = os.getenv("GAP_FROM_PROJECTION", "0") != "0"
 
 DATABASE_URL = (
     f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
@@ -2059,47 +2068,51 @@ def main():
         # 51.4, 51.9, 53.7, 53.6, 52.7 across quintiles, which is not a ranking,
         # while ranked by the size of the disagreement it is 48.7, 51.1, 53.8,
         # 53.6, 57.3, which is. See gap_tier.py and research_gap_selection.py.
-        # The gap is measured from the point projection, not from the ladder's
-        # median, and that is a correction rather than a preference.
+        # Scaled by the player's own recent spread, not by the fitted ladder's
+        # interquartile range, and centred on the ladder's median.
         #
-        # gap_tier's thresholds were measured in backtest_gap_system, which
-        # computes z as (point projection - line) / spread. This line fed it
-        # (quantile median - line) / spread instead, and the two are not the
-        # same statistic. Over 2026 weeks 1 to 3, on 1,172 priced props with a
-        # live projection and a box score:
+        # Both halves of this were wrong at once and they hid each other.
         #
-        #     centre, mean distance from the line     rec_yds   rush_yds
-        #     quantile median                          -7.11      -3.91
-        #     point projection                         +0.30      +1.23
+        # The thresholds in gap_tier were measured in backtest_gap_system,
+        # which divides by the standard deviation of the player's recent games.
+        # This divided by (q75 - q25) / 1.349 from the quantile ladder. The
+        # ladder's median is honest, 47% of outcomes below it against a nominal
+        # 50%, but its q25 is not: 15% of outcomes land below it against a
+        # nominal 25%, and 5% on receptions. q25 is half the width, so the
+        # quantile spread ran 1.4 to 1.9 times the window spread, every z came
+        # out that much smaller, and the shipped thresholds quietly became far
+        # stricter than the ones anybody measured.
         #
-        # The median sat below the line on every market. So z was negative on
-        # 71% of priced props while the outcome landed under on 49%, and the
-        # Week 3 board published 70 unders out of 73 picks. That is not a read
-        # on the slate, it is the selection statistic having a floor under it.
+        # Walk-forward over 2024-2026 with the ladder refitted out of sample
+        # for every season, all four combinations on the same rows:
         #
-        # The ladder is not wrong to sit low. These targets are right-skewed, a
-        # conditional median belongs below a conditional mean, and the ladder
-        # is also mildly miscalibrated on top of that: 43% of outcomes landed
-        # below the published p50 against a nominal 50%. Both are real. Neither
-        # is an argument for ranking picks on a number the thresholds were
-        # never measured against.
+        #     numerator / denominator     picks     hit              ROI    units
+        #     median     / window          1558   59.1% [56.3, 62.0]  +11.0%  +171.6
+        #     projection / window          1236   59.0% [56.1, 61.9]  +10.3%  +127.9
+        #     median     / quantile         696   57.9% [53.7, 62.2]   +8.0%   +55.5
+        #     projection / quantile         413   57.9% [52.5, 63.1]   +6.1%   +25.0
         #
-        # median_value is untouched. It still publishes, and the probability
-        # still comes from the same distribution it does, because a row that
-        # states two different distributions was its own bug once already.
-        # Only the ranking moves.
+        # The denominator is worth 1,100 picks and 116 units. The numerator is
+        # worth almost nothing, and what little it is worth favours the median,
+        # which is where it started.
         #
-        # What this does not claim is more money. On those three weeks the
-        # published board goes 49.2% [41.7, 59.8] to 53.1% [43.1, 60.7], which
-        # is nothing at n=254. The case for it is that the shipped rule now
-        # matches the measured one and the side balance stops being absurd:
-        # overs among published picks go from 2% to 15%, against a slate that
-        # went over 51% of the time.
+        # I had this backwards for a day. Three graded weeks of 2026 showed the
+        # median sitting below the line on every market and the board publishing
+        # 70 unders out of 73, which read as a centring bug. It was not. Those
+        # three weeks went over 52% of the time; the three seasons go over 47%.
+        # A board tilted toward unders is right about a market that settles
+        # under, and the thing actually strangling it was the scale.
+        #
+        # A row with no usable window spread gets no z and no tier. That is
+        # 14% of priced props, almost all of them players with too little
+        # recent football to measure a spread from, and showing them as context
+        # is better than ranking them on a scale this file no longer uses.
         gap_centre = (projection if GAP_FROM_PROJECTION else median_value)
         z = gap_tier.gap_z(gap_centre, line_value,
                            cal_q.get(0.25) if isinstance(cal_q, dict) else None,
                            cal_q.get(0.75) if isinstance(cal_q, dict) else None,
-                           market_code)
+                           market_code,
+                           window_sd=frow.get("stddev"))
         tier = (gap_tier.tier_for(z, market_code) if gap_tier.ENABLED else ev_tier)
 
 

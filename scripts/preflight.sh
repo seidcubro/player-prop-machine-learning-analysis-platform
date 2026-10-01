@@ -217,16 +217,27 @@ fi
 echo
 echo "== selection =="
 
-# The board ranked picks on the quantile median while every threshold in
-# gap_tier was measured on the point projection, which tilted it twenty points
-# toward the under and went unnoticed for weeks. This is the cheap guard.
+# The board divided the gap by the quantile ladder's interquartile range while
+# every threshold in gap_tier was measured against the spread of the player's
+# recent games. The ladder's spread runs 1.4 to 1.9 times wider, so the bar was
+# far stricter than the measured one and the board published a third of the
+# picks it should have. This is the cheap guard.
+# This asks the image, not the working tree, because the image is what runs.
+# An absent answer means the container predates the code it is being checked
+# against, which is worth knowing on its own before an hour-long build.
 gap=$($COMPOSE run --rm -T training python -c "
-import build_prop_edges as bp
-print('projection' if bp.GAP_FROM_PROJECTION else 'median')
-" 2>/dev/null | tr -d '\r[:space:]')
-[ "$gap" = "projection" ] \
-  && ok "gap is measured from the point projection, as the thresholds were" \
-  || warn "gap is measured from the median; gap_tier's thresholds were not"
+import gap_tier
+print(getattr(gap_tier, 'GAP_SCALE', 'ABSENT'))
+" 2>/dev/null | tr -d '[:space:]')
+case "$gap" in
+  window)
+    ok "the gap is scaled by the window spread, as the thresholds were" ;;
+  ABSENT|"")
+    die "the training image predates gap_tier.GAP_SCALE; rebuild it with
+        docker compose build training before anything else runs" ;;
+  *)
+    warn "the gap is scaled by '$gap'; the thresholds were measured on the window spread" ;;
+esac
 
 echo
 echo "== odds =="

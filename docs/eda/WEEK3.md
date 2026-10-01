@@ -91,24 +91,23 @@ and the slate went over 52% of the time. The median agreed 34% of the time.
 
 The board ranks on the median.
 
-And the thresholds it ranks against were measured on the projection.
+And the thresholds it ranks against were measured on something else again.
 `backtest_gap_system.py`, which is where the 58.6% and the +9.4% ROI in
 [FINDINGS.md](FINDINGS.md) and in [MODEL.md](../MODEL.md) come from, computes
 
-    z = (point projection - line) / spread
+    z = (point projection - line) / the spread of the player's recent games
 
 while `build_prop_edges.py` was computing
 
-    z = (quantile median  - line) / spread
+    z = (quantile median  - line) / (q75 - q25) / 1.349
 
-Those are not the same statistic. Over the three graded weeks of 2026, on 1,172
-priced props with a live projection and a box score, the production statistic
-was negative on 71% of them while the outcome landed under on 49%. Every
-threshold in `gap_tier.py` was calibrated in units it was never being fed.
+Two differences, not one, and I only saw the first. Over the three graded weeks
+of 2026, on 1,172 priced props with a live projection and a box score, the
+production statistic was negative on 71% of them while the outcome landed under
+on 49%, so I took the numerator to be the problem and moved the gap onto the
+point projection.
 
-So the validated system and the shipped system were different systems, and the
-gap between them was a systematic 20-point tilt toward the under. That is the
-Week 3 board.
+Read on. That was the wrong half.
 
 It is worth being clear about what the ladder was doing wrong and what it was
 not. A conditional median *belongs* below a conditional mean on a right-skewed
@@ -119,17 +118,50 @@ with 5% below p10 against 10% and 86% below p90 against 90%. Both things are
 true. Neither is an argument for ranking picks on a number the thresholds were
 never measured against.
 
-**The fix is one line.** `gap_z` is now computed from the point projection.
-`median_value` is untouched: it still publishes, and the probability still comes
-from the same distribution it does, because a row that stated two different
-distributions at once was already a bug here once.
+**My first fix for this was wrong, and the correction matters more than the
+original.**
 
-What the fix does not claim is more money. Over the three graded weeks the
-published board goes from 49.2% [41.7, 59.8] to 53.1% [43.1, 60.7], which at
-n=254 is nothing at all. The case for it is that the shipped rule now matches
-the measured one, and that overs among published picks go from 2% to 15% against
-a slate that went over 51% of the time. A board that can only say "under" is not
-a model, it is a mood.
+I moved `gap_z` onto the point projection, on the strength of the table above.
+Then I built `backtest_production.py`, which refits the quantile ladder
+walk-forward so the backtest and the board compute the same statistic from the
+same objects, and ran all four combinations of numerator and denominator on the
+same rows:
+
+    numerator / denominator     picks     hit                 ROI    units
+    median     / window          1558   59.1% [56.3, 62.0]  +11.0%  +171.6
+    projection / window          1236   59.0% [56.1, 61.9]  +10.3%  +127.9
+    median     / quantile         696   57.9% [53.7, 62.2]   +8.0%   +55.5
+    projection / quantile         413   57.9% [52.5, 63.1]   +6.1%   +25.0
+
+I had shipped the bottom row. The numerator was never the problem. **The
+denominator was**, and it was costing 860 picks and 116 units.
+
+The ladder's median is honest: 47% of outcomes land below it against a nominal
+50%. Its q25 is not, at 15% against 25%, and 5% on receptions. q25 is half the
+width of the spread the board divides by, so the quantile spread ran 1.4 to 1.9
+times the window spread, every z came out that much smaller, and a bar meant to
+publish a thousand picks published four hundred.
+
+And the premise of this whole page was a small sample. Those three weeks went
+over 52% of the time. The backtest seasons go over **47%**. A board that leans
+under is correct about a market that settles under, and the 70-of-73 split was
+not a bug announcing itself, it was a real tilt plus a bad week. What the three
+weeks were genuinely showing was that something had squeezed the board to a
+third of its size, and that was the scale.
+
+So: the gap is centred on the median, as it was, and divided by the standard
+deviation of the player's own recent games, which is what every threshold in
+`gap_tier.py` was measured against. `GAP_SCALE=quantile` goes back.
+
+Two limits worth stating. The odds history is overwhelmingly one season, 7,299
+of 7,726 priced props are 2025. And 2026 to date loses money under all four
+configurations, on 350 published picks with an interval that spans break-even,
+so none of this is a promise about Week 4.
+
+I also tested whether the early-season thin windows were the problem, since the
+window spread in Week 3 is computed from two games. They are not: windows of one
+or two games returned 60.7% and +15.7%, the best bucket of the four. No minimum
+games guard, because the data refused it.
 
 ## Two smaller things that were also wrong
 
@@ -179,7 +211,7 @@ now a null, which counts.
 
 | | |
 |---|---|
-| the board ranked on a statistic its thresholds were never measured on | `gap_z` reads the point projection |
+| the board ranked on a spread its thresholds were never measured on | `gap_z` divides by the window spread, which is where they came from |
 | backup quarterbacks projected as though they played | same rule as the edge builder, called from the same function |
 | kick returners reading as starters on the player pages | offensive-slot filter, matching the other three places |
 | a sixteen-percent-snap game counting as a full game in the window | snap floor for every position, not just quarterbacks |
