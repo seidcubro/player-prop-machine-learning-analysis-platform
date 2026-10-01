@@ -187,26 +187,71 @@ def sd_from_quantiles(q25, q75, market_code: str) -> float | None:
 GAP_SCALE = os.getenv("GAP_SCALE", "window")
 
 
-def sd_for(q25, q75, window_sd, market_code: str) -> float | None:
-    """The spread to divide by, under the configured scale.
+# The window spread and the ladder's spread are not the same size, so they
+# cannot share a floor.
+#
+# MIN_SD above says what it is, in its own comment: "a predicted interquartile
+# range below this is treated as no distribution at all". I reused it on the
+# window standard deviation, which is 0.45 to 0.64 times as large, measured on
+# the same priced props:
+#
+#     market      median window sd   median ladder sd   ratio
+#     rec_yds              15.65             24.30      0.644
+#     rush_yds             15.31             25.85      0.592
+#     rush_att              2.40              4.34      0.553
+#     recs                  1.17              2.61      0.447
+#
+# On mid-season rows that refused 10 to 20% of the board, which is bad and
+# survived a backtest. In the first weeks of a season it is fatal: the
+# season-only window holds two or three games then, and the standard deviation
+# of three numbers is frequently zero. Going into Week 4 of 2026 the median
+# window spread was 2.83 on receiving yards against a floor of 6.00, and 0.00
+# on both rushing markets. The board came out with four picks on it, ninety
+# minutes from kickoff, and that is entirely my doing.
+WINDOW_PER_LADDER = {
+    "rec_yds": 0.644, "rush_yds": 0.592, "rush_att": 0.553, "recs": 0.447,
+}
+# Markets with no priced history to measure the ratio on. Deliberately the
+# conservative end of the measured range rather than the middle: a ratio that
+# is too high floors too hard, and flooring too hard is the failure above.
+WINDOW_PER_LADDER_DEFAULT = 0.45
 
-    A window spread that is missing or below the market's floor returns None
-    rather than falling back to the quantile spread, because a z computed in
-    one scale and tiered against thresholds measured in another is the bug this
-    whole note is about. No usable spread is not a small edge, it is no
-    measurement, and tier_for already shows that as context rather than ranking
-    it as weak.
+
+def sd_for(q25, q75, window_sd, market_code: str) -> float | None:
+    """The spread to divide by, in the units the thresholds were measured in.
+
+    The window standard deviation when the window can support one, and the
+    ladder's spread converted into window units when it cannot. One scale, one
+    set of thresholds, and no row left without a scale just because the player
+    has three quiet games behind him.
+
+    The conversion is a measured constant per market, not a fudge: the two
+    spreads describe the same uncertainty and differ by a stable factor. The
+    alternative, which is what shipped for one day, is to refuse a tier
+    whenever the window is thin, and a thin window is the normal state of
+    affairs in September.
     """
     if GAP_SCALE != "window":
         return sd_from_quantiles(q25, q75, market_code)
+
+    ratio = WINDOW_PER_LADDER.get(market_code, WINDOW_PER_LADDER_DEFAULT)
+    floor = MIN_SD.get(market_code, MIN_SD_DEFAULT) * ratio
+
     try:
         sd = float(window_sd)
     except (TypeError, ValueError):
+        sd = float("nan")
+    if math.isfinite(sd) and sd >= floor:
+        return sd
+
+    # Thin or degenerate window: read the spread off the ladder instead and
+    # convert. sd_from_quantiles applies the ladder's own floor, which is the
+    # right one for the ladder's units.
+    ladder = sd_from_quantiles(q25, q75, market_code)
+    if ladder is None:
         return None
-    if not (sd > 0) or not math.isfinite(sd):
-        return None
-    floor = MIN_SD.get(market_code, MIN_SD_DEFAULT)
-    return sd if sd >= floor else None
+    converted = ladder * ratio
+    return converted if converted >= floor else None
 
 
 def gap_z(median_projection, line, q25, q75, market_code: str,
