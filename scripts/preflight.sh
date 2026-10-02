@@ -248,6 +248,34 @@ fresh=$(psql_q "SELECT count(*) FROM odds_snapshots
 [ "${fresh:-0}" -gt 100 ] && ok "$fresh priced outcomes for upcoming games" \
   || warn "only ${fresh:-0} priced outcomes for upcoming games; the board will be thin"
 
+# A game nobody bought prices for is a game with no picks in it, and that is
+# the cheapest money this project loses. Week 2 of 2026 had twelve games on the
+# Sunday and 486 prices across them, about forty a game, against eleven
+# thousand the week before and thirty-one thousand the week after: two or three
+# markets instead of nine. It cost the whole week, 23 published picks where the
+# neighbouring weeks had 222 and 190.
+#
+# A fully priced game carries several hundred outcomes. Under a hundred means
+# the sync bought one or two markets and stopped, which is what a credit floor
+# or a half-finished run looks like from here.
+thin=$(psql_q "
+  SELECT count(*) FROM (
+    SELECT e.provider_event_id
+    FROM odds_events e JOIN odds_player_props p
+      ON p.provider_event_id = e.provider_event_id
+    WHERE e.commence_time > NOW()
+      AND e.commence_time < NOW() + INTERVAL '8 days'
+    GROUP BY 1 HAVING count(*) < 100) t;")
+games=$(psql_q "
+  SELECT count(*) FROM odds_events
+   WHERE commence_time > NOW() AND commence_time < NOW() + INTERVAL '8 days';")
+if [ "${thin:-0}" -eq 0 ]; then
+  ok "all ${games:-0} upcoming game(s) priced across the full market set"
+else
+  warn "${thin} of ${games:-0} upcoming game(s) have under 100 priced outcomes;
+        those games produce no picks. priorline@early buys them"
+fi
+
 echo
 if [ "$fails" -gt 0 ]; then
   echo "$fails check(s) failed, $warns warning(s). Fix before building."
