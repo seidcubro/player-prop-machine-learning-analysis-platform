@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -126,6 +127,14 @@ def sync_odds_player_props(
 
     market_keys = list(ODDS_API_MARKET_MAP.values())
     inserts = 0
+    # What came back, so a configured book that quietly returns nothing is
+    # visible. The best price across books is worth about +0.6% a bet against
+    # the median book and +3.0% against the worst, measured on 20,733 priced
+    # sides, and that is the whole return on shopping. It is only earned by the
+    # books that actually answer. ODDS_API_BOOKMAKERS has carried four names
+    # and three of them ever appear in odds_snapshots.
+    seen_books: set[str] = set()
+    seen_markets: set[str] = set()
 
     for row in rows:
         event_id = row["provider_event_id"]
@@ -134,11 +143,15 @@ def sync_odds_player_props(
         bookmakers = payload.get("bookmakers") or []
         for book in bookmakers:
             book_key = book.get("key")
+            if book_key:
+                seen_books.add(book_key)
             book_title = book.get("title")
             book_update = book.get("last_update")
 
             for market in book.get("markets") or []:
                 market_key = market.get("key")
+                if market_key:
+                    seen_markets.add(market_key)
                 # Market first, bookmaker second.
                 #
                 # This read the bookmaker's timestamp only, and came back empty
@@ -201,12 +214,28 @@ def sync_odds_player_props(
                     )
                     inserts += 1
 
+    # Which of the things we asked for actually answered.
+    #
+    # Both of these have failed silently before. A bookmaker key the provider
+    # does not recognise is simply absent from every response, and a market the
+    # books have not posted yet comes back missing rather than empty, which is
+    # how a whole Sunday came back as anytime touchdown and nothing else.
+    asked_books = [b.strip() for b in
+                   (os.getenv("ODDS_API_BOOKMAKERS", "") or "").split(",")
+                   if b.strip()]
+    missing_books = [b for b in asked_books if b not in seen_books]
+    missing_markets = [m for m in market_keys if m not in seen_markets]
+
     db.commit()
     # The balance is reported so a scheduled run can log what it spent.
     return {
         "ok": True,
         "events_synced": len(rows),
         "player_prop_rows_upserted": inserts,
+        "bookmakers_returned": sorted(seen_books),
+        "bookmakers_requested_but_silent": missing_books,
+        "markets_returned": len(seen_markets),
+        "markets_requested_but_missing": missing_markets,
         "credits_remaining": OddsApiClient.last_remaining,
         "credits_used_total": OddsApiClient.last_used,
     }

@@ -528,6 +528,65 @@ def check_live_odds_table(engine):
         ok(f"all {row['total']} rows are for upcoming games")
 
 
+def check_slate_priced(engine):
+    """Did the slate about to kick off actually get prices bought for it?
+
+    Week 2 of 2026 is the case. Twelve games on the Sunday, and the only market
+    anybody bought for them was anytime touchdown: 486 rows, nothing on
+    receptions or yardage or attempts, on a site that does not publish anytime
+    touchdown. The board for that week carried 23 picks. The weeks on either
+    side carried 222 and 190.
+
+    Nothing announced it. The sync had run, the table was not empty, and every
+    other check here passed. A game with no usable prices is a game with no
+    picks in it, and that is the cheapest money this project loses.
+
+    Sportsbooks post the touchdown market days before the rest, so a
+    touchdown-only response is the normal state of a game bought too early.
+    `--early` already knows this and refuses to count those games as bought.
+    What was missing is anything that notices when the re-buy never happens.
+
+    Fails rather than warns inside twelve hours of kickoff, because by then
+    there is no run left to fix it and somebody should be told.
+    """
+    print()
+    print("[8b] slate pricing")
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT e.provider_event_id,
+                   e.commence_time,
+                   e.home_team, e.away_team,
+                   EXTRACT(EPOCH FROM (e.commence_time - NOW())) / 3600 AS hours,
+                   count(*) FILTER (
+                     WHERE s.market_key IS NOT NULL
+                       AND s.market_key <> 'player_anytime_td') AS usable
+            FROM odds_events e
+            LEFT JOIN odds_snapshots s
+              ON s.provider_event_id = e.provider_event_id
+            WHERE e.commence_time > NOW()
+              AND e.commence_time < NOW() + INTERVAL '8 days'
+            GROUP BY 1, 2, 3, 4
+            ORDER BY e.commence_time
+        """)).mappings().all()
+    if not rows:
+        ok("no upcoming games in the next eight days")
+        return
+    bare = [r for r in rows if not r["usable"]]
+    if not bare:
+        ok(f"all {len(rows)} upcoming game(s) carry prices beyond anytime TD")
+        return
+    soon = [r for r in bare if r["hours"] is not None and r["hours"] <= 12]
+    label = ", ".join(f"{r['away_team']} at {r['home_team']} "
+                      f"({r['hours']:.0f}h)" for r in bare[:6])
+    more = f" and {len(bare) - 6} more" if len(bare) > 6 else ""
+    msg = (f"{len(bare)} of {len(rows)} upcoming game(s) have no prices beyond "
+           f"anytime touchdown, so they will produce no picks: {label}{more}")
+    if soon:
+        fail(msg + f". {len(soon)} kick off inside 12 hours")
+    else:
+        warn(msg + ". priorline@early buys them")
+
+
 def check_market_map_agreement():
     """Do the two services still ask for the same markets?
 
@@ -1158,6 +1217,7 @@ def main():
     check_projection_coverage(engine)
     check_quantile_calibration(engine)
     check_live_odds_table(engine)
+    check_slate_priced(engine)
     check_market_map_agreement()
     check_projection_agreement(engine)
     check_board_internal_consistency(engine)

@@ -33,6 +33,7 @@ import os
 
 import build_prop_edges as bp
 import eval as ev
+import gap_tier
 import numpy as np
 import pandas as pd
 import train as tr
@@ -53,11 +54,16 @@ CREATE INDEX IF NOT EXISTS idx_edge_results_source ON prop_edge_results (source)
 
 
 def tier_for(ev_value: float, side: str = "under") -> str:
-    """Exactly the cuts build_prop_edges.py uses.
+    """The retired expected-value cuts. Kept only to re-read an old record.
 
-    If these drift apart the track record stops describing the product, so they
-    are deliberately stated identically in both places rather than imported
-    across a module boundary that would make the coupling easy to miss.
+    These were "exactly the cuts build_prop_edges.py uses", and the comment
+    that said so asked for them to be kept in step. They were not. The board
+    moved to gap tiers in September and this stayed on expected value, so the
+    published track record has been describing a product that no longer exists,
+    and the interval calibrator has been fitting its map on that record.
+
+    gap_tier.tier_for is the live rule and is imported rather than restated,
+    because restating it is what allowed the drift.
     """
     cuts = ((0.12, 0.09, 0.06, 0.03) if side == "over"
             else (0.06, 0.04, 0.02, 0.0))
@@ -295,21 +301,37 @@ def main():
             m["market_code"] = market
             m["season"] = season
             m["model_name"] = model_name
-            m["edge_tier"] = [tier_for(v, sd) for v, sd in
-                              zip(m["expected_value"], m["recommended_side"])]
+            # The live rule, imported, not a copy of it.
+            m["gap_z"] = [
+                gap_tier.gap_z(mid, ln, a, b, market, window_sd=w)
+                for mid, ln, a, b, w in zip(
+                    m["projection_median"], m["line"], m["q25"], m["q75"],
+                    m.get("stddev", pd.Series([None] * len(m), index=m.index)))]
+            m["edge_tier"] = [gap_tier.tier_for(z, market) for z in m["gap_z"]]
 
             won = np.where(m["recommended_side"] == "over",
                            m["actual"] > m["line"], m["actual"] < m["line"])
             push = m["actual"] == m["line"]
             m["hit"] = np.where(push, None, won)
 
-            # The live builder drops anything it does not make better than
-            # even money, so the record has to as well.
-            keep = (m["edge_tier"] != "none") & (~push) & (m["win_prob"] > 0.5)
-            m = m[keep]
+            # Every priced prop with a graded outcome is kept, tiered, and
+            # written. The record reads only the published tiers; the interval
+            # calibrator reads all of them, and that difference is the point.
+            #
+            # This used to drop everything below a tier and everything the model
+            # did not make better than even money. For a track record that is
+            # right. For a calibration map it is poison: it conditions on the
+            # size of the gap and on the model's own probability, which are the
+            # two things whose calibration the map is supposed to measure. The
+            # published ladder has been running five to nine points low at every
+            # level and the correction fitted on this table kept declining to
+            # fix it, because the rows it saw were the rows already selected for
+            # disagreeing.
+            m = m[~push]
             if not m.empty:
                 all_rows.append(m)
-                print(f"  {season} {market}: {len(m)} graded picks")
+                print(f"  {season} {market}: {len(m)} graded priced props, "
+                      f"{int((m['edge_tier'] != 'none').sum())} tiered")
 
     if not all_rows:
         raise SystemExit("nothing to write")
@@ -341,15 +363,18 @@ def main():
 
     # The Best Bet selection, recorded rather than described.
     #
-    # This is the rule build_prop_edges applies to the live board: an under, in
-    # the elite or strong tier, one per player and market and one per player and
+    # This is the rule build_prop_edges applies to the live board: elite or
+    # strong, either side, one per player and market and one per player and
     # game, keeping the best paying row. It is the headline number on the FAQ
     # and it was never written to the results table at all, so the one selection
     # with a verified out-of-sample edge could not be scored against its own
     # record.
+    #
+    # Either side, because the under-only condition came off the live rule in
+    # September. Overs clear a harder bar to be published at all, and the ones
+    # that do returned +22.1% at the elite tier against +9.2% for unders.
     w["best_bet"] = False
-    eligible = w[(w["recommended_side"] == "under")
-                 & (w["edge_tier"].isin(["elite", "strong"]))]
+    eligible = w[w["edge_tier"].isin(["elite", "strong"])]
     if len(eligible):
         keep = (eligible.sort_values("ev_per_unit", ascending=False)
                         .drop_duplicates(subset=["player_name", "market_code"])

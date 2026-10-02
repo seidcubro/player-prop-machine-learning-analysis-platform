@@ -424,3 +424,61 @@ makes re-runs instant. `EDA_OUT` is where the figures land, defaulting here.
 
 EDA is not a gate you pass once. The data science loop comes back to it every
 time the data changes, and everything above had been live for months.
+
+
+## Five follow-ups, October 2026
+
+Graded 2025 walk-forward and the three live weeks of 2026, then worked the list
+that came out of it.
+
+**Weeks where the slate was never priced.** Week 2's Sunday bought 486 outcomes
+across twelve games, all of them anytime touchdown, which this site does not
+publish. The board that week carried 23 picks against 222 and 190 either side.
+`--early` already refuses to count a touchdown-only response as bought; nothing
+noticed when the re-buy never happened. The freshness audit now fails inside
+twelve hours of kickoff on any game with no prices beyond touchdowns, and
+preflight warns on any game under a hundred priced outcomes.
+
+**The peak of the ladder is not the top of it.** Hit rate against |z| rises to
+0.75–1.00 and flattens above. Split 2025 in half and that band is the best in
+both halves, +9.0% then +19.2%. Offering from 0.75 up, scored only on the half
+it was not found on: 502 picks, 62.7%, +82 units, against elite alone at 268
+picks, 61.6%, +37 units. Strong is offered now.
+
+**rush_yds is not stably bad, it is unstable.** -9.7% in the first half of 2025
+and +17.3% in the second, on 197 picks. There is no bar that rescues it: 0.50
+returns +0.2%, 0.75 returns +0.1%, 1.00 returns -1.6% and it gets worse above
+that. Raising the bar does not help because the bar is not the problem, and 197
+picks is not enough to drop a market on. Left alone, deliberately.
+
+**Line shopping is already being taken, and there is not much of it.** Best
+price against the median book is worth +0.61% a bet, against the worst book
++3.02%, measured on 20,733 priced sides. Three books answer: DraftKings, BetMGM,
+FanDuel. A fourth has been configured for months and has never appeared in a
+single row. The sync now reports which requested bookmakers and markets actually
+came back, so a dead key stops being invisible.
+
+**The published ladder sits five to nine points low at every level.** Measured
+on what production actually shipped over 1,172 priced props:
+
+    market        <p10   <p25   <p50   <p75   <p90
+    target         10%    25%    50%    75%    90%
+    ALL             6%    18%    41%    66%    84%
+
+The width is right, 0.85 to 1.18 of what the errors need. It is the location
+that is off, and uniformly, which is a shift rather than a shape problem.
+
+The correction for it is fitted by `fit_interval_calibrator.py` on
+`prop_edge_results`, and that table was being written by `backfill_track_record.py`
+with the **expected-value tier rule the board stopped using in September**, then
+filtered to rows that cleared a tier and whose win probability beat 0.5. So the
+map meant to measure the ladder's calibration was being fitted on rows selected
+for the size of their gap and for the model's own confidence, which are the two
+things it is supposed to be measuring. It kept declining to correct, and it was
+right to, on that sample.
+
+That backfill now uses `gap_tier` imported rather than restated, and writes
+every graded priced prop instead of only the ones that became picks. The record
+still reads the published tiers; the calibrator reads all of them. Re-running it
+is what actually fixes the ladder, and it needs the production odds history to
+do it.

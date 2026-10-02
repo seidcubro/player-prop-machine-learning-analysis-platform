@@ -488,9 +488,32 @@ under side down to +4.3% overall.
 | Tier | Under needs | Over needs | On the site |
 |---|---:|---:|---|
 | Elite | \|z\| ≥ 1.0 | \|z\| ≥ 1.5 | offered as a bet |
-| Strong | \|z\| ≥ 0.75 | \|z\| ≥ 1.0 | shown, not offered |
+| Strong | \|z\| ≥ 0.75 | \|z\| ≥ 1.0 | offered as a bet |
 | Medium | \|z\| ≥ 0.5 | \|z\| ≥ 0.75 | shown, not offered |
 | Small | \|z\| ≥ 0.25 | \|z\| ≥ 0.375 | graded, not shown |
+
+Strong is offered as well as elite, and that is the opposite of what the tier
+names suggest. Hit rate against \|z\| does not keep climbing; it peaks in the
+0.75 to 1.00 band and flattens above it:
+
+| \|z\| | picks | hit | ROI |
+|---|---:|---|---:|
+| 0.50–0.75 | 1,027 | 54.4% | +2.9% |
+| **0.75–1.00** | **545** | **60.6%** | **+13.4%** |
+| 1.00–1.50 | 407 | 55.8% | +3.8% |
+| 1.50–2.50 | 222 | 57.2% | +7.4% |
+| 2.50+ | 97 | 56.7% | +5.1% |
+
+The peak is the band elite excludes. Split 2025 in half and the 0.75–1.00 band
+is the best in both, +9.0% then +19.2%, so this is not one season's accident
+inside one season. Scored only on the half it was not found on, offering from
+0.75 up is 502 picks at 62.7% and +82 units against elite's 268 at 61.6% and
++37. Similar hit rate, twice the volume.
+
+The biggest disagreements being no better than the merely large ones is the
+oldest finding in this project and it keeps coming back: a four-standard-
+deviation gap is usually the model not knowing something about a role, not an
+edge nobody else saw.
 
 The best-bet flag used to add one more condition on top of the tier: the pick
 had to be an under. That was correct when the measured edge was star unders at
