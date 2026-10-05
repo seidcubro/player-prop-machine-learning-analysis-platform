@@ -288,6 +288,38 @@ def check_data_freshness(engine):
         else:
             ok("player_game_stats_app has every season 2022-2025")
 
+        # Season is not enough. Week 4 of 2026 was played on the Sunday and by
+        # the Monday the box scores for it were simply absent, while every
+        # check above passed because 2026 was present and 2026 is the newest
+        # season. Nothing downstream of the ingest can work then: grading has
+        # nothing to grade, the interval calibrator has nothing new to fit on,
+        # and every projection on the board is built from a window that ends a
+        # week early, which is exactly the role-change blindness that costs
+        # this product most of its losses.
+        row = c.execute(text(
+            "SELECT "
+            " (SELECT max(week) FROM nfl_games "
+            "   WHERE season = (SELECT max(season) FROM nfl_games "
+            "                    WHERE game_date <= CURRENT_DATE) "
+            "     AND game_type = 'REG' AND home_score IS NOT NULL "
+            "     AND game_date <= CURRENT_DATE - 1) AS played, "
+            " (SELECT max(week) FROM player_game_stats "
+            "   WHERE season = (SELECT max(season) FROM nfl_games "
+            "                    WHERE game_date <= CURRENT_DATE) "
+            "     AND season_type = 'REG') AS ingested"
+        )).mappings().first()
+        played, ingested = row["played"], row["ingested"]
+        if played is None:
+            ok("no completed weeks this season yet")
+        elif ingested is None:
+            fail(f"week {played} has been played and no box scores exist at all")
+        elif ingested < played:
+            fail(f"box scores stop at week {ingested}, but week {played} has "
+                 f"been played. Grading, calibration and every rolling window "
+                 f"are a week behind; run the full ingest")
+        else:
+            ok(f"box scores current through week {ingested}")
+
         nulls = c.execute(text(
             "SELECT count(*) FROM player_market_features WHERE team IS NULL"
         )).scalar()

@@ -69,6 +69,40 @@ else
 fi
 
 echo
+echo "== scheduled runs =="
+
+# Whether anything has been failing quietly.
+#
+# The timers fire. That is not the same as the work happening. --daily failed
+# every morning for four days while the board kept publishing, because the only
+# thing that would have said so is alert.sh, and alert.sh exits silently when
+# no channel is configured. A machine with no alerting configured should not
+# fail its own alerting, but it should not be the only thing standing between a
+# broken pipeline and nobody knowing either.
+if command -v systemctl >/dev/null 2>&1; then
+  failed=""
+  for m in closing early board daily weekly; do
+    if systemctl is-failed --quiet "priorline@${m}.service" 2>/dev/null; then
+      failed="$failed $m"
+    fi
+  done
+  if [ -n "$failed" ]; then
+    die "these scheduled runs are in a failed state:$failed
+        journalctl -u priorline@<mode> -n 40 --no-pager"
+  else
+    ok "no scheduled run is in a failed state"
+  fi
+  if [ -n "${ALERT_NTFY_TOPIC:-}${ALERT_WEBHOOK:-}" ]; then
+    ok "failure alerting is configured"
+  else
+    die "no ALERT_NTFY_TOPIC or ALERT_WEBHOOK in the environment, so a failed
+        run tells nobody. This is how four days of dead ingests went unnoticed"
+  fi
+else
+  warn "systemctl not available here, skipping the scheduled-run checks"
+fi
+
+echo
 echo "== schema =="
 
 applied=$(psql_q "SELECT count(*) FROM schema_migrations;")

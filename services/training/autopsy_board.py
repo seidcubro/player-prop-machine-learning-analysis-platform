@@ -138,7 +138,23 @@ def load(engine, lo: str, hi: str) -> pd.DataFrame:
 
     d["actual"] = [look(r, STAT[r.market_code]) for r in d.itertuples()]
     d["snap_pct"] = [look(r, "offense_pct") for r in d.itertuples()]
+    before_outcome = len(d)
     d = d[d.actual.notna()].copy()
+    if d.empty:
+        # Loudly, because the silent version of this printed an empty table and
+        # a row of nan% and looked like an answer. Week 4 of 2026 went four days
+        # with no box scores and that output is what it produced.
+        raise SystemExit("\n".join([
+            f"nothing to grade between {lo} and {hi}.",
+            f"  projections recorded : {len(proj):,}",
+            f"  priced props matched : {before_outcome:,}",
+            "  with a box score     : 0",
+            "",
+            "A box score count of zero means the ingest has not pulled those",
+            "games yet. player_game_stats is refreshed only by the full ingest,",
+            "which --daily runs; --board and --refresh deliberately skip it.",
+            "Run priorline@daily, confirm it did not fail, then try again.",
+        ]))
     if os.getenv("INCLUDE_RECONSTRUCTED") != "1":
         before = len(d)
         d = d[d.projected_at.dt.date >= (d.game_date.dt.date - pd.Timedelta(days=10))]
