@@ -2,11 +2,21 @@
 Description=PriorLine early price buy, so the board is live before kickoff day
 
 [Timer]
-# Friday morning. Sunday's slate is inside the 72 hour window by then, so the
+# Friday morning. The whole slate is inside the 96 hour window by then, so the
 # board is populated from Friday instead of from ninety minutes before kickoff.
 # Persistent, so a machine that was down on Friday still buys when it returns
 # rather than leaving the weekend unpriced.
 OnCalendar=Fri *-*-* 09:00:00
+# And again on Sunday morning, which is not a second purchase.
+#
+# The run skips any game that already carries prices beyond anytime touchdown,
+# so Friday's buy is not repeated. What this catches is what Friday could not:
+# a kickoff that moved, a game added late, and above all the Monday night game.
+# Week 4 of 2026 went to air with no prices on Detroit at Carolina or Atlanta at
+# New Orleans, which is to say no board at all on the Sunday night and Monday
+# night games, because a Friday run with a 72 hour window cannot see them.
+# Cost is only the games still unbought, about nine credits each.
+OnCalendar=Sun *-*-* 09:00:00
 Persistent=true
 
 [Install]

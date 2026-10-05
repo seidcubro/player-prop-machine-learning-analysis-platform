@@ -126,12 +126,12 @@ log() { printf '\n[%s] ==> %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
 # projections are rebuilt as well as the edges because the edge builder reads
 # who is ruled out from the same tables.
 rebuild_on_current_news() {
-  log "re-read injuries and depth charts"
+  log "re-read injuries, depth charts and rosters"
   docker build -q -f jobs/ingestion/Dockerfile -t priorline-ingest . >/dev/null
   docker run --rm --network "$INGEST_NETWORK" \
     -e DATABASE_URL="$INGEST_DATABASE_URL" \
     -e SEASON_START="$SEASON_START" -e SEASON_END="$SEASON_END" \
-    -e ONLY=injuries,depth_charts priorline-ingest
+    -e ONLY=injuries,depth_charts,players priorline-ingest
 
   $COMPOSE build -q training >/dev/null
   log "rebuild projections"
@@ -395,7 +395,21 @@ fi
 
 if [ "$MODE" = "--early" ]; then
   : "${ADMIN_TOKEN:?set ADMIN_TOKEN to the value the API is running with}"
-  WINDOW_H="${EARLY_WINDOW_H:-72}"
+  # Ninety-six hours, not seventy-two.
+  #
+  # The timer fires Friday at 09:00. Seventy-two hours from there is Monday at
+  # 09:00, and Monday Night Football kicks off at about 20:15. So the Monday
+  # game was outside the window every single week, by construction, and had
+  # never once been bought by this mode. Week 4 of 2026: fourteen games priced
+  # in one batch, and the two latest kickoffs, Detroit at Carolina on the Sunday
+  # night and Atlanta at New Orleans on the Monday, with no prices at all. No
+  # prices means no board, and no board means somebody opens the site on a
+  # Monday and finds nothing on the only game being played.
+  #
+  # Ninety-six reaches Tuesday morning, which covers every kickoff in an NFL
+  # week from a Friday start. It does not buy more games, it buys the same
+  # sixteen; it just stops missing the last two.
+  WINDOW_H="${EARLY_WINDOW_H:-96}"
 
   # Put a board up days before kickoff, not minutes.
   #
@@ -435,7 +449,10 @@ if [ "$MODE" = "--early" ]; then
 
   # A hard ceiling, because this is the one mode that can reach a whole slate.
   # Nine markets a game, so the default cap is about 135 credits.
-  MAX_GAMES="${EARLY_MAX_GAMES:-15}"
+  # Seventeen, because a full slate is sixteen and a cap below the slate size
+  # silently drops whichever game sorts last. Nine markets a game, so the
+  # ceiling is about 153 credits for a week where nothing was bought already.
+  MAX_GAMES="${EARLY_MAX_GAMES:-17}"
   if [ "$unpriced" -gt "$MAX_GAMES" ]; then
     log "early: $unpriced games need prices, which is more than EARLY_MAX_GAMES=$MAX_GAMES; buying the first $MAX_GAMES"
     unpriced="$MAX_GAMES"
@@ -572,9 +589,19 @@ $COMPOSE build -q training >/dev/null
 # The frequent run pulls only that, though. A full ingest re-downloads every
 # season of every dataset, which is minutes of transfer and buys nothing when no
 # game has been played since the last run.
+# players is in the frequent pull, not just the daily one.
+#
+# A player placed on injured reserve never appears on a weekly injury report
+# again, because teams do not file one for him. The only thing in this database
+# that says De'Von Achane tore an ACL and is gone for the year is
+# players.status flipping to RES, and players was refreshed once a day at 08:00
+# by --daily and by nothing else. So between a Sunday injury and the next
+# morning the board kept projecting him, and if --daily failed, for days.
+#
+# It is two more nflverse files and about fifteen seconds.
 if [ "$FAST" = "1" ]; then
-  ONLY_ARG="-e ONLY=injuries,depth_charts"
-  log "nflverse ingest: injuries and depth charts only"
+  ONLY_ARG="-e ONLY=injuries,depth_charts,players"
+  log "nflverse ingest: injuries, depth charts and rosters only"
 else
   ONLY_ARG=""
   log "nflverse ingest, seasons $SEASON_START-$SEASON_END"
