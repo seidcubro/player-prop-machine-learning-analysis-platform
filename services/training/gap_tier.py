@@ -132,7 +132,41 @@ MIN_SD_DEFAULT = 0.25
 # Beyond this the number is not a claim about football.
 Z_CEILING = 6.0
 
-ENABLED = os.getenv("GAP_TIERS", "1") != "0"
+# Off.
+#
+# This rule replaced expected-value tiering on 27 September, on the strength of
+# research_gap_selection.py: ranked by expected value the hit rate ran 51.4,
+# 51.9, 53.7, 53.6, 52.7 across quintiles, which is not a ranking, while ranked
+# by the size of the disagreement it ran 48.7, 51.1, 53.8, 53.6, 57.3, which is.
+# That was a true statement about ranking and it was never checked against the
+# thing the product is actually judged on, which is units.
+#
+# Scored head to head on 8,548 graded rows across 2023-2025, both rules applied
+# to identical rows with identical probabilities and quantiles:
+#
+#     selection                        picks     hit      ROI     units
+#     EV elite+strong unders            2931   53.8%    +3.6%   +104.5
+#     EV published board                4638   53.0%    +1.9%    +87.9
+#     gap published board               1849   56.2%    +2.6%    +48.8
+#     gap elite+strong unders           1002   55.5%    +2.2%    +22.3
+#
+# The gap rule is better per pick and publishes 60% fewer of them, and the
+# selectivity costs far more than the quality gains. Nor is there a lower bar
+# that fixes it: re-cutting the gap on unders alone gives -0.6% at 1.00, +1.9%
+# at 0.75, +4.8% at 0.60, +2.5% at 0.50, +1.1% at 0.30. That is not a ladder,
+# it is noise around a positive mean, and the best cut on it still returns
+# +68.9 units against expected value's +104.6 on the same rows.
+#
+# So the board ranks on calibrated expected value again. Everything else that
+# shipped alongside the gap rule is independent of it and stays: the season
+# window, the depth chart fix, the starting-quarterback rule, the position
+# eligibility, the priced-population filter.
+#
+# GAP_TIERS=1 turns it back on. The thresholds and the scale work in
+# gap_tier.py and backtest_production.py stay here because the ranking result
+# was real and may be worth something at a different bar; what it is not is a
+# replacement for the rule it displaced.
+ENABLED = os.getenv("GAP_TIERS", "0") != "0"
 
 
 def sd_from_quantiles(q25, q75, market_code: str) -> float | None:

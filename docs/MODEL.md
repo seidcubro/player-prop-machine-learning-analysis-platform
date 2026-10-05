@@ -430,6 +430,32 @@ sit at the longest prices rather than on the likeliest outcomes. And 27% of the
 picks that reached a bet tier under that rule sat within a quarter of a standard
 deviation of the line, hitting 49.7%.
 
+**That switch has since been reversed, and the rest of this section describes a
+rule that is off.** Scored head to head on 8,548 graded rows across 2023-2025,
+both rules applied to identical rows with identical probabilities:
+
+| selection | picks | hit | ROI | units |
+|---|---:|---|---:|---:|
+| **EV elite+strong unders** | **2,931** | 53.8% | +3.6% | **+104.5** |
+| EV published board | 4,638 | 53.0% | +1.9% | +87.9 |
+| gap published board | 1,849 | 56.2% | +2.6% | +48.8 |
+| gap elite+strong unders | 1,002 | 55.5% | +2.2% | +22.3 |
+
+The gap rule is better per pick and publishes 60% fewer of them, and the
+selectivity costs more than the quality gains. There is no lower bar that fixes
+it either: re-cut on unders it gives -0.6% at \|z\| 1.00, +1.9% at 0.75, +4.8%
+at 0.60, +2.5% at 0.50, +1.1% at 0.30, which is noise around a positive mean
+rather than a ladder, and its best cut still returns +68.9 units against
+expected value's +104.6 on the same rows.
+
+The quintile result that justified the switch was a true statement about
+ranking. It was never checked against units, which is what the product is
+judged on. `GAP_TIERS=1` turns it back on.
+
+With it off, the tier is cut on calibrated expected value as it was before
+27 September. What follows describes the gap rule, kept because the ranking
+result was real and may be worth something at a different bar.
+
 So the tier is cut on **|z|**, the gap between the median projection and the
 line divided by **the standard deviation of the player's own recent games**.
 Standard deviations rather than yards, because two yards of disagreement on a

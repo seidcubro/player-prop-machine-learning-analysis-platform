@@ -211,7 +211,14 @@ def main():
                    for q in tq.QUANTILES})
 
             m = grp.merge(ids, on="key", how="inner").merge(
-                test[["player_id", "as_of_game_date", "pred", ev.LABEL_COL]
+                # stddev comes through because gap_tier scales the gap by the
+                # player's own window spread, and without it every z here fell
+                # back to the converted ladder spread. That is a different
+                # scale from the live board's, so the tiers in this table were
+                # not the tiers the product publishes, and the record computed
+                # from them was describing a system nobody runs.
+                test[["player_id", "as_of_game_date", "pred", ev.LABEL_COL,
+                      "stddev"]
                      + [f"q{int(q * 100)}" for q in tq.QUANTILES]],
                 left_on=["external_id", "game_date"],
                 right_on=["player_id", "as_of_game_date"], how="inner",
@@ -306,8 +313,15 @@ def main():
                 gap_tier.gap_z(mid, ln, a, b, market, window_sd=w)
                 for mid, ln, a, b, w in zip(
                     m["projection_median"], m["line"], m["q25"], m["q75"],
-                    m.get("stddev", pd.Series([None] * len(m), index=m.index)))]
-            m["edge_tier"] = [gap_tier.tier_for(z, market) for z in m["gap_z"]]
+                    m["stddev"])]
+            # The live rule, whichever one that is. gap_tier.ENABLED is the
+            # same switch build_prop_edges reads, so the record cannot describe
+            # a different selection from the board again.
+            if gap_tier.ENABLED:
+                m["edge_tier"] = [gap_tier.tier_for(z, market) for z in m["gap_z"]]
+            else:
+                m["edge_tier"] = [tier_for(v, sd) for v, sd in
+                                  zip(m["expected_value"], m["recommended_side"])]
 
             won = np.where(m["recommended_side"] == "over",
                            m["actual"] > m["line"], m["actual"] < m["line"])
@@ -346,6 +360,11 @@ def main():
     cols = ["external_id", "app_id", "name", "game_date", "market_code", "line",
             "projection", "projection_median", "recommended_side", "win_prob",
             "expected_value", "edge_tier", "actual", "hit", "season",
+            # gap_z is written as well as expected_value, so the two decision
+            # rules this project has used can be scored on identical rows
+            # instead of on two reconstructions that differ in a dozen ways.
+            # It was computed and then dropped before the insert.
+            "gap_z",
             "price_american", "q10", "q25", "q75", "q90"]
     w = out[cols].rename(columns={"external_id": "player_id", "name": "player_name"})
     w = w.drop(columns=["app_id"])
