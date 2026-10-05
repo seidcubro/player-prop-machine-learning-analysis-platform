@@ -68,6 +68,27 @@ else
   die "training container cannot open a database connection (driver or credentials)"
 fi
 
+# And the ingest image, which is a separate image built from a separate
+# Dockerfile and reads the same DATABASE_URL. It had only psycopg2 while the
+# server supplies a psycopg 3 URL, so the full nflverse ingest raised
+# ModuleNotFoundError on its first statement every morning for four days. The
+# training image had been fixed for exactly this in September; nobody checked
+# the other one.
+if docker build -q -f jobs/ingestion/Dockerfile -t priorline-ingest . >/dev/null 2>&1; then
+  if docker run --rm priorline-ingest python -c "
+import os, sqlalchemy
+u = os.getenv('DATABASE_URL') or os.getenv('INGEST_DATABASE_URL')     or 'postgresql+psycopg://a:b@h:5432/d'
+sqlalchemy.create_engine(u)
+" >/dev/null 2>&1; then
+    ok "ingest image can build an engine for its DATABASE_URL dialect"
+  else
+    die "the ingest image cannot load the driver its DATABASE_URL asks for;
+        the nflverse ingest will die before it writes anything"
+  fi
+else
+  warn "could not build the ingest image to check its driver"
+fi
+
 echo
 echo "== scheduled runs =="
 
