@@ -370,11 +370,12 @@ def main():
     # with a verified out-of-sample edge could not be scored against its own
     # record.
     #
-    # Either side, because the under-only condition came off the live rule in
-    # September. Overs clear a harder bar to be published at all, and the ones
-    # that do returned +22.1% at the elite tier against +9.2% for unders.
+    # Unders only, matching build_prop_edges. Opening it to both sides took
+    # this selection from -0.2% to -3.9% over 755 graded picks; see the note
+    # there.
     w["best_bet"] = False
-    eligible = w[w["edge_tier"].isin(["elite", "strong"])]
+    eligible = w[(w["recommended_side"] == "under")
+                 & (w["edge_tier"].isin(["elite", "strong"]))]
     if len(eligible):
         keep = (eligible.sort_values("ev_per_unit", ascending=False)
                         .drop_duplicates(subset=["player_name", "market_code"])

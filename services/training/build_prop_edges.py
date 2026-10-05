@@ -2337,26 +2337,32 @@ def main():
     # has actually been shown to work.
     out["best_bet"] = False
     if len(out):
-        # Either side, not unders only.
+        # Unders only. I opened this to both sides for one day and the full
+        # record said no.
         #
-        # This filter was written when the measured edge was "star unders at
-        # the best price", and it was right then. The gap system replaced that
-        # rule and holds overs to a higher bar on purpose (OVER_ELITE 1.5
-        # against ELITE 1.0 in gap_tier), which is the mechanism that makes an
-        # over safe to publish. Nobody came back to the best-bet flag, so every
-        # over that cleared the harder bar was hidden from the one list people
-        # actually read.
+        # The case for opening it was elite overs at 67.7% and +22.1% on 96
+        # picks, measured walk-forward over four markets in 2025. That is a
+        # real measurement of a small slice. The graded record across eleven
+        # markets and three seasons is 3,643 over-side picks at -5.3%, with a
+        # 95% interval of [-9.6%, -0.9%] that does not contain zero, and it is
+        # the only figure on the whole board whose interval clears zero in
+        # either direction.
         #
-        # Walk-forward 2024-2026, elite and strong picks:
+        # What the change actually did, on the same 755-pick population:
         #
-        #     side                picks     hit              ROI    units
-        #     unders (flagged)      333   60.1% [54.0, 66.1]  +13.4%  +44.50
-        #     overs (excluded)      331   58.0% [50.6, 65.0]   +6.4%  +21.29
+        #     best bets, unders only      -0.2%
+        #     best bets, either side      -3.9%
         #
-        # and at the elite bar alone the order reverses outright: overs 67.7%
-        # [58.6, 76.7] at +22.1% against unders 57.4% [50.5, 63.6] at +9.2%.
-        # The best bets on the board were excluding the best bets.
-        eligible = out[out["edge_tier"].isin(["elite", "strong"])]
+        # So it cost 3.7 points. The 96-pick result was a slice of one season
+        # in four markets and I generalised from it, which is the same error as
+        # reading three weeks of 2026 as a centring bug. A small sample that
+        # agrees with what you were hoping is still a small sample.
+        #
+        # The over side losing is also the oldest established finding in this
+        # project: -6.1% against -0.2% for unders, measured before the gap
+        # system existed. It survived the rule change.
+        eligible = out[(out["recommended_side"] == "under")
+                       & (out["edge_tier"].isin(["elite", "strong"]))]
         if len(eligible):
             # Ranked on profit per unit, not on the probability edge.
             #

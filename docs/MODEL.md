@@ -515,14 +515,18 @@ oldest finding in this project and it keeps coming back: a four-standard-
 deviation gap is usually the model not knowing something about a role, not an
 edge nobody else saw.
 
-The best-bet flag used to add one more condition on top of the tier: the pick
-had to be an under. That was correct when the measured edge was star unders at
-the best price, and it outlived the rule it belonged to. The gap system already
-holds overs to the harder bar in the table above, which is the thing that makes
-an over safe to publish, so the extra filter was hiding exactly the picks that
-had cleared the extra bar. Walk-forward over 2024-2026 at the elite bar, overs
-went 67.7% [58.6, 76.7] at +22.1% against unders at 57.4% [50.5, 63.6] and
-+9.2%. Either side can be a best bet now.
+The best-bet flag adds one condition on top of the tier: the pick has to be an
+under. I removed that condition for a day, on the strength of elite overs
+returning 67.7% and +22.1% on 96 walk-forward picks across four markets in 2025,
+and the full graded record overruled it. Over 3,643 over-side picks across
+eleven markets and three seasons the over side returns **-5.3%, interval
+[-9.6%, -0.9%]**, which is the only figure on this board whose interval clears
+zero in either direction. On the same 755-pick best-bet population the change
+went from -0.2% to -3.9%.
+
+A 96-pick slice that agreed with what I wanted is still a 96-pick slice. The
+over side losing is the oldest established result in this project and it
+survived the rule change.
 
 **Receiving yards is held to |z| ≥ 0.75 on both sides.** It was the one market
 that lost money, at 52.1% against a 52.7% break-even, and it is the largest by

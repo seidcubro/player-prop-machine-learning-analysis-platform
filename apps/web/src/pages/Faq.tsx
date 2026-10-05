@@ -155,13 +155,11 @@ function Plain() {
           about 4.4% per unit bet, with a 95% interval of [+0.2%, +8.2%].
         </p>
         <p>
-          It used to be unders only, because that was the pattern that held when
-          it was first measured. The selection rule changed underneath it: an
-          over now has to disagree with the book by half again as much as an
-          under before it is published at all. Holding the overs that clear that
-          bar out of the Best Bets was hiding the best picks on the board, so
-          they are in. Walk-forward over 2024 to 2026 the top tier returned
-          +22.1% on overs against +9.2% on unders.
+          Unders only. The over side has lost money in every test this project
+          has run: across 3,643 graded over picks it returns -5.3%, with an
+          interval of [-9.6%, -0.9%] that does not contain zero. That is the
+          only figure on the whole board certain enough to act on, and what it
+          says is which half of the board not to bet.
         </p>
         <p>
           That number used to read 6.6%, on a sample that quietly excluded night

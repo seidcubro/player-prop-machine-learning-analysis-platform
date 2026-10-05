@@ -123,10 +123,10 @@ const TERMS: Term[] = [
     short: "The verified selection",
     body: (
       <>
-        The strongest disagreements with the book, one pick per player per
-        game, at the best price available. Either side: an over has to clear a
-        higher bar than an under to get here, and the ones that do have been
-        the best picks on the board. The rest is research.
+        The strongest disagreements with the book, on the under side, one pick
+        per player per game, at the best price available. The over side has
+        lost money in every test this project has run, so it is shown and not
+        offered. The rest of the board is research.
       </>
     ),
   },
