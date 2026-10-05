@@ -274,6 +274,12 @@ DROP_DUPLICATE_FEATURES = os.getenv("DROP_DUPLICATE_FEATURES", "1") != "0"
 # skew this project already found once.
 MISSING_INDICATORS = os.getenv("MISSING_INDICATORS", "0") != "0"
 
+# Feature names to leave out, comma separated. For A/B runs: a new feature can
+# then be measured against its own absence on the same table, which is the only
+# honest comparison when adding one means rebuilding the features.
+DROP_FEATURES = {c.strip() for c in os.getenv("DROP_FEATURES", "").split(",")
+                 if c.strip()}
+
 BASE_FEATURE_COLS = [
     "mean",
     "stddev",
@@ -455,6 +461,12 @@ def _build_feature_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]
         if added:
             print(f"  added {len(added)} missingness indicator(s) for "
                   f"partially absent features")
+
+    if DROP_FEATURES:
+        drop = [c for c in X.columns if c in DROP_FEATURES]
+        if drop:
+            print(f"  dropping {len(drop)} feature(s) by request: {sorted(drop)}")
+            X = X.drop(columns=drop)
 
     feature_cols = list(X.columns)
 
