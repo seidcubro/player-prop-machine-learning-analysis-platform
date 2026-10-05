@@ -230,10 +230,15 @@ def backup_qb_behind_healthy_starter(ctx: dict, *, team, position, player_id,
     props whose under cannot lose, and publishing them is worse than publishing
     nothing.
 
-    `vacated` already holds the opposite case: a team whose starting quarterback
-    is ruled out, so his backup inherits the job. This is the same fact read the
-    other way. If the team is not in that set, the starter is playing, and anyone
-    listed behind him is withheld.
+    The rule is a single name per team. load_current_context resolves it once:
+    the quarterback with the best depth rank who is not Out or Doubtful. If a
+    starter is ruled out the next man becomes that name and is projected as the
+    starter he now is; everyone else on the roster is withheld.
+
+    Reading it as "depth rank 2 or worse, unless the team's QB role is vacated"
+    is what shipped first, and vacated is a team-level fact, so on a team whose
+    starter was out it withheld nobody: Tampa Bay came back with five
+    quarterbacks projected and Chicago, Minnesota and Washington with three.
 
     Withheld rather than projected at zero, because a zero would still be a
     number on a board and would still be priced against a line. There is no prop
@@ -243,10 +248,21 @@ def backup_qb_behind_healthy_starter(ctx: dict, *, team, position, player_id,
     # does not rush for yards either.
     if position != "QB" or not team:
         return None
+    # One name per team, resolved once in load_current_context: the best depth
+    # rank who is not ruled out. If this is him he plays; if it is not, he does
+    # not, and that is the whole rule.
+    qb1 = ctx.get("qb1") or {}
+    starter = qb1.get(team)
+    if starter is not None:
+        if player_id == starter:
+            return None
+        return "not the starting QB; the starter takes every snap"
+
+    # No resolved starter for this team, which means the roster lookup failed
+    # rather than that nobody is starting. Fall back to the old depth reading
+    # so a lookup failure cannot put a whole team's quarterbacks on the board.
     vacated = ctx.get("vacated") or set()
     if (team, "QB") in vacated:
-        # The starter is out, so this man may well be the starter. That case is
-        # vacated_role's, and it re-projects rather than withholds.
         return None
     depth = ctx.get("depth")
     rank = None
@@ -471,6 +487,21 @@ def load_current_context(engine) -> dict:
                 FROM depth_charts
                 WHERE depth_team IS NOT NULL
                   AND depth_position IN ('QB', 'RB', 'FB', 'WR', 'TE')
+                  -- The current season only.
+                  --
+                  -- Without this, DISTINCT ON takes each player's most recent
+                  -- depth entry *ever*, so a man who retired in 2022 keeps a
+                  -- permanent rank 1 and outranks everyone actually playing.
+                  -- Tom Brady resolved as Tampa Bay's starting quarterback and
+                  -- Derek Carr as New Orleans's, which withheld both teams'
+                  -- real starters as backups behind a ghost. Every consumer of
+                  -- this map was affected: the backup-QB rule, the vacated-role
+                  -- rule and the stale-role correction.
+                  --
+                  -- build_projections.py filters its own depth CTE to the max
+                  -- season and always did. This is the same fact stated twice
+                  -- and only fixed in one of them.
+                  AND season = (SELECT MAX(season) FROM depth_charts)
                 GROUP BY player_id, season, week
             ) d
             ORDER BY player_id, season DESC, week DESC
@@ -756,8 +787,62 @@ def load_current_context(engine) -> dict:
         f"  current context: {len(depth)} depth ranks, {len(inj)} injury rows, "
         f"{len(games)} scheduled games, {len(opp_form)} defense/position form rows"
     )
+    # Exactly one quarterback per team: the best depth rank who is not ruled
+    # out. Everybody else in that room gets nothing at all.
+    #
+    # The previous rule withheld a quarterback at depth 2 or worse unless his
+    # team's QB role was vacated, and "vacated" is a team-level fact, so on a
+    # team whose starter was out it withheld nobody. Tampa Bay came back with
+    # five quarterbacks projected; Chicago, Minnesota and Washington with three
+    # each. A quarterback room is not a committee. One man takes every snap
+    # unless he cannot, and then exactly one other man does.
+    qb1: dict[str, str] = {}
+    try:
+        ranks = {}
+        if depth is not None and "depth_team" in getattr(depth, "columns", []):
+            ranks = depth["depth_team"].to_dict()
+        ruled_out = set()
+        if inj is not None and len(inj):
+            for pid in inj.index:
+                status = str(inj.at[pid, "report_status"] or "").strip()
+                if status in ("Out", "Doubtful"):
+                    ruled_out.add(pid)
+        qbs = pd.read_sql(
+            text("SELECT external_id AS player_id, team FROM players "
+                 "WHERE position = 'QB' AND team IS NOT NULL "
+                 "AND status IN ('ACT', 'DEV')"),
+            engine,
+        )
+        for team, grp in qbs.groupby("team"):
+            # Only quarterbacks who appear on the current depth chart.
+            #
+            # players carries every man who has ever held the job: New Orleans
+            # lists twenty-two quarterbacks, most of them retired, with no depth
+            # entry at all. Giving the unranked a sentinel rank and taking the
+            # minimum handed the starting job to whichever retired name the
+            # iteration reached first, and the real starter, who was ranked and
+            # on the slate, lost the tie-break to a ghost.
+            best, best_rank = None, None
+            for pid in grp["player_id"]:
+                if pid in ruled_out:
+                    continue
+                try:
+                    rank = float(ranks.get(pid))
+                except (TypeError, ValueError):
+                    continue
+                if best_rank is None or rank < best_rank:
+                    best, best_rank = pid, rank
+            if best is not None:
+                qb1[str(team)] = best
+    except Exception as exc:
+        # A roster lookup that fails must not empty the board. Without this map
+        # the rule falls back to the depth check, which is the old behaviour.
+        print(f"  could not resolve starting quarterbacks: "
+              f"{type(exc).__name__}: {exc}")
+
     return {
         "depth": depth,
+        "qb1": qb1,
         "injuries": inj,
         "games": by_team_date,
         "opp_form": opp_form,

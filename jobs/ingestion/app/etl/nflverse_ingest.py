@@ -47,6 +47,47 @@ def _col(df: pd.DataFrame, name: str, default=None) -> pd.Series:
     return df[name] if name in df.columns else pd.Series([default] * len(df))
 
 
+def _write(out: pd.DataFrame, table: str, conn, **kwargs):
+    """to_sql, with the frame's types made to match the table's.
+
+    nflverse hands back a season as the string '2022' and a week as the float
+    1.0, and both of those columns are INTEGER here. psycopg2 cast them on the
+    way in and never said anything. psycopg 3 does not: it raises
+
+        column "season" is of type integer but expression is of type
+        character varying
+
+    which is how adding the psycopg 3 driver to this image, to fix a different
+    failure, turned a silent type mismatch into a crash that took down the
+    whole daily ingest at ff_opportunity. The mismatch was always there.
+
+    So rather than fix the one loader that happened to surface it, every write
+    goes through here: read which columns the target table declares as integer,
+    coerce exactly those, and leave the rest alone. Values that cannot be
+    coerced become NULL rather than failing the batch, which is the right
+    outcome for a feed that occasionally sends an empty string for a week.
+    """
+    cols = pd.read_sql(
+        text("SELECT column_name, data_type FROM information_schema.columns "
+             "WHERE table_name = :t"),
+        conn, params={"t": table})
+    ints = set(cols.loc[cols.data_type.isin(
+        ["integer", "bigint", "smallint"]), "column_name"])
+    fix = [c for c in out.columns if c in ints]
+    if fix:
+        out = out.copy()
+        for c in fix:
+            # round() before the cast: pandas refuses to narrow a float column
+            # to Int64 when any value is not already integral, and nflverse
+            # sends plenty of integer-valued floats plus the occasional 1.0000001
+            # from an aggregation. The destination column is an integer either
+            # way, so rounding is the coercion the database would do.
+            out[c] = (pd.to_numeric(out[c], errors="coerce")
+                        .round()
+                        .astype("Int64"))
+    out.to_sql(table, conn, if_exists="append", index=False, **kwargs)
+
+
 def _season_range(start: int, end: int) -> list[int]:
     return list(range(start, end + 1))
 
@@ -764,7 +805,7 @@ def ingest_players():
         out[c] = out[c].astype("Int64")
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE nfl_players"))
-        out.to_sql("nfl_players", conn, if_exists="append", index=False)
+        _write(out, "nfl_players", conn)
     print(f"  ingest_players: {len(out)} rows")
     
 def sync_players_dimension():
@@ -868,7 +909,7 @@ def ingest_schedules(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE nfl_games"))
-        out.to_sql("nfl_games", conn, if_exists="append", index=False)
+        _write(out, "nfl_games", conn)
     print(f"  ingest_schedules: {len(out)} rows")
 
 
@@ -1030,7 +1071,7 @@ def ingest_player_game_stats(seasons: Iterable[int]):
 
         existing_keep_cols = [c for c in keep_cols if c in out.columns]
         out = out[existing_keep_cols].copy()
-        out.to_sql("player_game_stats", conn, if_exists="append", index=False)
+        _write(out, "player_game_stats", conn)
     print(f"  ingest_player_game_stats: {len(out)} rows")
 
 
@@ -1069,7 +1110,7 @@ def ingest_snap_counts(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE snap_counts"))
-        out.to_sql("snap_counts", conn, if_exists="append", index=False)
+        _write(out, "snap_counts", conn)
     print(f"  ingest_snap_counts: {len(out)} rows")
 
 
@@ -1155,7 +1196,7 @@ def ingest_ngs(seasons: Iterable[int]):
 
         with _engine().begin() as conn:
             conn.execute(text(f"TRUNCATE TABLE {table}"))
-            out.to_sql(table, conn, if_exists="append", index=False)
+            _write(out, table, conn)
         print(f"  ingest_ngs_{stat_type}: {len(out)} rows")
 
 
@@ -1272,7 +1313,7 @@ def ingest_pfr_advstats(seasons: Iterable[int]):
 
         with _engine().begin() as conn:
             conn.execute(text(f"TRUNCATE TABLE {table}"))
-            out.to_sql(table, conn, if_exists="append", index=False)
+            _write(out, table, conn)
         print(f"  ingest_pfr_adv_{stat_type}: {len(out)} rows")
 
 
@@ -1351,7 +1392,7 @@ def ingest_ftn_charting(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE ftn_charting_game"))
-        out.to_sql("ftn_charting_game", conn, if_exists="append", index=False)
+        _write(out, "ftn_charting_game", conn)
     print(f"  ingest_ftn_charting_game: {len(out)} rows")
 
 
@@ -1468,7 +1509,7 @@ def ingest_participation(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE participation_game"))
-        out.to_sql("participation_game", conn, if_exists="append", index=False)
+        _write(out, "participation_game", conn)
     print(f"  ingest_participation_game: {len(out)} rows")
 
 
@@ -1617,7 +1658,7 @@ def ingest_pbp_aggregated(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE pbp_player_game"))
-        out.to_sql("pbp_player_game", conn, if_exists="append", index=False)
+        _write(out, "pbp_player_game", conn)
     print(f"  ingest_pbp_aggregated: {len(out)} rows")
 
 
@@ -1705,7 +1746,7 @@ def ingest_ff_opportunity(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE ff_opportunity"))
-        out.to_sql("ff_opportunity", conn, if_exists="append", index=False)
+        _write(out, "ff_opportunity", conn)
     print(f"  ingest_ff_opportunity: {len(out)} rows")
 
 
@@ -1823,7 +1864,7 @@ def ingest_depth_charts(seasons: Iterable[int]):
         out = out.drop_duplicates(
             subset=["player_id", "season", "week", "depth_position"]
         )
-        out.to_sql("depth_charts", conn, if_exists="append", index=False)
+        _write(out, "depth_charts", conn)
     print(f"  ingest_depth_charts: {len(out)} rows")
 
 
@@ -1854,7 +1895,7 @@ def ingest_rosters_weekly(seasons: Iterable[int]):
 
     with _engine().begin() as conn:
         conn.execute(text("TRUNCATE TABLE rosters_weekly"))
-        out.to_sql("rosters_weekly", conn, if_exists="append", index=False)
+        _write(out, "rosters_weekly", conn)
     print(f"  ingest_rosters_weekly: {len(out)} rows")
 
 
@@ -1884,7 +1925,7 @@ def ingest_injuries(seasons: Iterable[int]):
         out = out.drop_duplicates(
             subset=["player_id", "season", "week"]
         )
-        out.to_sql("injuries", conn, if_exists="append", index=False)
+        _write(out, "injuries", conn)
     print(f"  ingest_injuries: {len(out)} rows")
 
 
