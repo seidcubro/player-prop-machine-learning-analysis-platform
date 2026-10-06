@@ -97,7 +97,8 @@ def rows():
         if not m:
             raise SystemExit(f"no market {MARKET_CODE}")
         cur.execute("""
-            SELECT pmf.player_id, p.position, pmf.as_of_game_date,
+            SELECT pmf.player_id, p.name AS player_name, p.position,
+                   pmf.as_of_game_date,
                    pmf.mean, pmf.stddev, pmf.weighted_mean, pmf.trend,
                    pmf.aux_mean, pmf.aux_trend, pmf.extra_features,
                    pmf.label_actual
@@ -183,13 +184,19 @@ def score(params, d, lines, cols):
     j = now.copy()
     for q in QUANTILES:
         j[f"q{int(q * 100)}"] = preds[q]
-    j["player_name"] = j.get("name", j.get("player_name"))
-    if lines.empty or "player_name" not in j:
+    if lines.empty or "player_name" not in j.columns:
         return mean_pinball, np.nan, np.nan, np.nan, 0
     j["d"] = j["as_of_game_date"]
     j = j.merge(lines, on=["player_name", "d"], how="inner")
     if j.empty:
-        return mean_pinball, np.nan, np.nan, np.nan, 0
+        # Loudly. A candidate that silently scores nan on the only metric that
+        # matters looks exactly like a candidate that was tried and found
+        # wanting, and the first run of this file spent half an hour that way.
+        raise SystemExit(
+            f"no priced line joined to any holdout row for {MARKET_CODE}. "
+            f"holdout rows {len(now)}, lines {len(lines)}; check that "
+            f"player_name and the game date match between the feature table "
+            f"and odds_snapshots.")
 
     qp = {q: j[f"q{int(q * 100)}"].to_numpy() for q in QUANTILES}
     p_over = 1.0 - np.clip(tq.cdf_level(qp, j["line"].to_numpy()), 0.01, 0.99)
