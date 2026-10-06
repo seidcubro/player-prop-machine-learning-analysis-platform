@@ -34,9 +34,14 @@ is the noise rule applied to the quantity that pays.
     MARKET_CODE=recs TUNE=point python tune.py   the point model
     GRID=wide python tune.py                     more candidates, much slower
 
-A run over the default grid is about 20 minutes per market. Nothing is written:
-this prints a table and the decision is a human one, because a search that
-writes its own winner is a search that will eventually overfit into production.
+A run over the default grid is 36 candidates, each fitting five quantile
+models, so about an hour a market. Every row prints as it lands rather than at
+the end, because a search you cannot watch is a search you cannot abandon when
+the first ten rows have already told you the answer.
+
+Nothing is written: this prints a table and the decision is a human one,
+because a search that writes its own winner is a search that will eventually
+overfit into production.
 """
 
 from __future__ import annotations
@@ -225,20 +230,23 @@ def main():
     print(f"{len(combos)} candidates, {len(cols)} features\n")
 
     print(f"  {'n_est':>6}{'lr':>7}{'depth':>7}{'leaf':>6}{'sub':>6}"
-          f"{'pinball':>10}{'top2':>9}{'bot2':>9}{'spread':>9}{'picks':>7}  ")
+          f"{'pinball':>10}{'top2':>9}{'bot2':>9}{'spread':>9}{'picks':>7}  ",
+          flush=True)
     results = []
     t0 = time.time()
     for i, c in enumerate(combos, 1):
         try:
             pb, hi, lo, sp, n = score(c, d, lines, cols)
         except Exception as exc:
-            print(f"  candidate {i} failed: {type(exc).__name__}: {exc}")
+            print(f"  candidate {i} failed: {type(exc).__name__}: {exc}",
+                  flush=True)
             continue
         tag = "  <- incumbent" if c == base else ""
         results.append((c, pb, hi, lo, sp, n))
         print(f"  {c['n_estimators']:>6}{c['learning_rate']:>7.2f}"
               f"{c['max_depth']:>7}{c['min_samples_leaf']:>6}{c['subsample']:>6.1f}"
-              f"{pb:>10.4f}{hi:>+9.1%}{lo:>+9.1%}{sp:>+9.1%}{n:>7}{tag}")
+              f"{pb:>10.4f}{hi:>+9.1%}{lo:>+9.1%}{sp:>+9.1%}{n:>7}{tag}",
+              flush=True)
     print(f"\n  {time.time() - t0:.0f}s")
 
     if not results:
