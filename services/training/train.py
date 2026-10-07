@@ -260,6 +260,32 @@ MIN_FEATURE_COVERAGE = float(os.getenv("MIN_FEATURE_COVERAGE", "0.05"))
 # in an importance table while carrying the model. See docs/eda/FINDINGS.md.
 DROP_DUPLICATE_FEATURES = os.getenv("DROP_DUPLICATE_FEATURES", "1") != "0"
 
+# Drop a feature the builder used to write and does not write any more.
+#
+# The coverage test above is taken over the whole training set, which spans four
+# seasons. A feature emitted for three years and then retired in a refactor is
+# present on most rows, passes that test, and stays in the model's feature
+# space. Every row built from then on arrives without it, inference fills a
+# zero, and nothing complains: the held-out fit is computed on the same old rows
+# that still carry it, so the metrics look normal while the served projection is
+# quietly missing a column.
+#
+# opp_pass_attempts_trend and opp_yards_per_attempt_trend are this exact bug.
+# They were written when opponent defense was averaged over the lookback window,
+# which was itself the bug that made those features describe the defenses a
+# player had just faced; when that moved to the target game's own row the two
+# trend columns stopped being written. Nothing has emitted them since, the
+# active pass_yds model still names them, and the freshness audit has failed
+# every board and daily run naming them.
+#
+# So coverage is measured a second time over the newest rows only. Present
+# across the history and absent from the recent past means retired, not sparse,
+# and a retired feature cannot be refreshed at inference by anything. The test
+# is one-sided on purpose: a genuinely new feature exists only on recent rows,
+# so its recent coverage is high and it is never caught here.
+RECENT_COVERAGE = float(os.getenv("RECENT_COVERAGE", "0.05"))
+RECENT_FRACTION = float(os.getenv("RECENT_FRACTION", "0.25"))
+
 # Add an explicit "this feature was absent" column beside each partially
 # absent feature.
 #
@@ -424,6 +450,33 @@ def _build_feature_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]
                   f"{MIN_FEATURE_COVERAGE:.0%} of {n} rows: "
                   + ", ".join(f"{k} ({covered[k]})" for k in sparse))
             X = X.drop(columns=sparse)
+
+    # Retired features: covered over the history, absent from the recent past.
+    # See RECENT_COVERAGE. Measured on the newest RECENT_FRACTION of rows by
+    # date, and skipped when that slice is too small to mean anything.
+    if (not extra_df.empty and RECENT_COVERAGE > 0
+            and "as_of_game_date" in df.columns):
+        dates = pd.to_datetime(df["as_of_game_date"], errors="coerce")
+        cutoff = dates.quantile(1.0 - RECENT_FRACTION)
+        recent = (dates >= cutoff).to_numpy()
+        n_recent = int(recent.sum())
+        if n_recent < 50:
+            print(f"  skipping the retired-feature test: only {n_recent} recent row(s)")
+        else:
+            keep_cols = set(X.columns)
+            recent_dicts = [d for d, r in zip(extras_series.to_numpy(), recent) if r]
+            retired = sorted(
+                k for k in extra_keys
+                if k in keep_cols
+                and sum(1 for d in recent_dicts if k in d) < RECENT_COVERAGE * n_recent
+            )
+            if retired:
+                seen = {k: sum(1 for d in recent_dicts if k in d) for k in retired}
+                print(f"  dropping {len(retired)} retired feature(s), present on "
+                      f"under {RECENT_COVERAGE:.0%} of the {n_recent} rows since "
+                      f"{cutoff.date() if pd.notna(cutoff) else '?'}: "
+                      + ", ".join(f"{k} ({seen[k]})" for k in retired))
+                X = X.drop(columns=retired)
 
     # Exact copies, dropped after the sparsity pass so the survivors are the
     # columns that actually reach a model. The first spelling wins, which keeps

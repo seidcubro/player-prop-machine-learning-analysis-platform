@@ -799,6 +799,27 @@ if [ "$FAST" = "0" ]; then
   log "grade whatever has been played"
   $COMPOSE run --rm training python grade_edges.py
 
+  # Regenerate the figures the site states as fact, from the week just graded.
+  #
+  # Weekly only, because it is a season statistic and nothing an hourly run does
+  # can move it. This was the last hand-copied number in the project: a person
+  # had to read eval_strategy's printout and edit the JSON, so it drifted, the
+  # site claimed an elite return of +4.0% against an actual +0.7%, and the audit
+  # check written to catch that then failed every board run for days because the
+  # only fix was manual. Automated here, and the audit now only fails the run
+  # that can do this.
+  if [ "$MODE" = "--weekly" ]; then
+    log "regenerate the published record"
+    $COMPOSE run --rm -e WRITE_RECORD=1 training python eval_strategy.py \
+      | tail -20
+    # Said out loud, because the file is committed and a scheduled run has just
+    # changed a tracked file on the server.
+    if ! git -C . diff --quiet -- apps/web/src/lib/published-record.json 2>/dev/null; then
+      log "published-record.json changed; commit it so the site rebuilds with it"
+      git -C . --no-pager diff --stat -- apps/web/src/lib/published-record.json || true
+    fi
+  fi
+
   # Refit before building edges, never after. The edge builder reads this to
   # correct P(over) before it picks a side, so building first would publish a
   # slate against the previous calibration.
@@ -861,8 +882,13 @@ if [ "$MODE" != "--board" ] && [ "${ODDS:-0}" = "1" ]; then
 fi
 
 # ------------------------------------------------------------------ gate
+# AUDIT_MODE lets the audit decide which findings are this run's business. A
+# model naming a retired feature, or a published figure that has gone stale, can
+# only be cleared by a retrain, and failing the hourly board run for it sent a
+# push every hour for days about something no board run could fix. Those now
+# fail --weekly and inform everything else. See audit_freshness.fail_on_retrain.
 log "freshness audit"
-$COMPOSE run --rm training python audit_freshness.py
+$COMPOSE run --rm -e AUDIT_MODE="$MODE" training python audit_freshness.py
 
 # Whether the numbers are believable, which is not the same question as whether
 # they are current, and had been failing while the freshness audit passed. See

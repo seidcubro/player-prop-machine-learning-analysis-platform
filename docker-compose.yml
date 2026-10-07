@@ -72,11 +72,19 @@ services:
       # drifted the sync quietly stopped buying a market nothing noticed was
       # missing.
       - ./services/api/app/odds_market_map.py:/opt/api_odds_market_map.py:ro
-      # Read-only so audit_freshness.py can check the figures the site states
-      # as fact against the record they are supposed to describe. They are
-      # written into the pages as text and go stale every time the backfill
-      # rebuilds prop_edge_results.
-      - ./apps/web/src/lib/published-record.json:/opt/published_record.json:ro
+      # The figures the site states as fact. audit_freshness.py check [16]
+      # compares them against the record they are supposed to describe, and
+      # eval_strategy.py with WRITE_RECORD=1 regenerates them.
+      #
+      # Writable, which it was not. Read-only meant the only way to clear a
+      # stale figure was for a person to run eval_strategy by hand and commit
+      # the result, so nobody did, so the audit failed every hourly run for days
+      # on a number no board run could move. The weekly rewrites it now. The
+      # consequence is that a scheduled run can leave this committed file dirty
+      # on the server, which is the right trade: the site's own numbers being
+      # correct matters more than the checkout staying clean, and `git diff`
+      # after a weekly is exactly the review this change needs.
+      - ./apps/web/src/lib/published-record.json:/opt/published_record.json
     depends_on:
       - postgres
 

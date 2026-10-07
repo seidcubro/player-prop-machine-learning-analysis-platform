@@ -43,13 +43,42 @@ DATABASE_URL = os.getenv(
     ),
 )
 
+# Which run is being audited, so a finding can fail the run that can fix it and
+# only inform the ones that cannot.
+#
+# This exists because of alert fatigue, which is a real failure mode and not a
+# comfort problem. Two conditions -- a model naming a feature nothing writes any
+# more, and a published figure that disagrees with the database -- can only be
+# cleared by a retrain or a regrade. Both were failing the hourly board run,
+# which sent an ntfy push every hour for days for something no board run could
+# act on, and the effect of that is that the next genuine failure is one more
+# push in a stream nobody reads. A gate that cries wolf is worse than no gate.
+#
+# So: a finding that needs the weekly to clear it fails the weekly and warns
+# everywhere else. A finding that means the board being served right now is
+# wrong still fails every run, because that one is actionable immediately.
+AUDIT_MODE = os.getenv("AUDIT_MODE", "").strip().lstrip("-").lower()
+RETRAIN_MODES = {"weekly", "migrate", "refresh"}
+
 failures: list[str] = []
 warnings: list[str] = []
+deferred: list[str] = []
 
 
 def fail(msg):
     failures.append(msg)
     print(f"  FAIL  {msg}")
+
+
+def fail_on_retrain(msg):
+    """Fails the retraining run; informs the runs that cannot fix it."""
+    if not AUDIT_MODE or AUDIT_MODE in RETRAIN_MODES:
+        failures.append(msg)
+        print(f"  FAIL  {msg}")
+    else:
+        deferred.append(msg)
+        print(f"  STALE {msg}")
+        print(f"        (needs a retrain; --{AUDIT_MODE} cannot clear this)")
 
 
 def warn(msg):
@@ -170,7 +199,16 @@ def check_feature_refresh(engine):
         missing = {c for c in cols if is_current_game_feature(c)} - overridden
         total_missing |= missing
         if missing:
-            fail(f"{a['code']}: not refreshed -> {sorted(missing)}")
+            # Only a retrain can take a column out of a model's feature space,
+            # so an hourly board run is told and not failed. train.py drops a
+            # feature the builder has retired (see RECENT_COVERAGE there), which
+            # is what makes the next weekly actually clear this rather than
+            # reproducing it.
+            fail_on_retrain(
+                f"{a['code']}: active model {a['model_name']} names "
+                f"{sorted(missing)}, which inference cannot refresh -> retrain "
+                f"{a['code']} so the column leaves its feature space"
+            )
     if not total_missing and actives:
         ok(f"all current-game features refreshed across {len(actives)} markets")
 
@@ -1167,7 +1205,10 @@ def check_published_figures(engine):
         if abs(actual - float(stated)) > 0.01:
             bad.append(f"{tier} stated {float(stated):+.1%}, actual {actual:+.1%}")
     for b in bad:
-        fail(f"published tier return is out of date: {b}")
+        # Regenerating this needs the record rebuilt, which is the weekly's job
+        # (WRITE_RECORD=1 on eval_strategy.py). A board run cannot move it, so
+        # it is told rather than failed.
+        fail_on_retrain(f"published tier return is out of date: {b}")
 
     if not bad:
         print(f"  OK: {len(claimed.get('tiers') or {})} published tier returns "
@@ -1261,14 +1302,30 @@ def main():
     check_corrections_present(engine)
 
     print("\n" + "=" * 62)
+
+    def tail():
+        # Printed on both paths. A deferred finding is a real one that this run
+        # cannot act on, so it stays visible in the log every time even though
+        # it does not set the exit code and does not send a push.
+        if deferred:
+            print(f"\n{len(deferred)} finding(s) waiting on the next retrain:")
+            for d in deferred:
+                print(f"  - {d}")
+        if warnings:
+            print(f"\n{len(warnings)} warning(s):")
+            for w in warnings:
+                print(f"  - {w}")
+
     if failures:
-        print(f"{len(failures)} FAILURE(S), {len(warnings)} warning(s)")
+        print(f"{len(failures)} FAILURE(S), {len(deferred)} deferred, "
+              f"{len(warnings)} warning(s)")
         for f in failures:
             print(f"  - {f}")
+        tail()
         sys.exit(1)
-    print(f"ALL CHECKS PASSED ({len(warnings)} warning(s))")
-    for w in warnings:
-        print(f"  - {w}")
+    print(f"ALL CHECKS PASSED ({len(deferred)} deferred, "
+          f"{len(warnings)} warning(s))")
+    tail()
 
 
 if __name__ == "__main__":
