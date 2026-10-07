@@ -42,6 +42,40 @@ the first ten rows have already told you the answer.
 Nothing is written: this prints a table and the decision is a human one,
 because a search that writes its own winner is a search that will eventually
 overfit into production.
+
+Verdict, October 2026, receptions, the full 200-tree block of 18 candidates
+over three learning rates, three depths and two leaf sizes:
+
+    quantity                  range           sd
+    pinball loss     0.4026 to 0.4085     0.0021
+    top EV decile      16.5% to 20.8%        1.4
+    EV decile spread   20.7% to 32.1%        2.5
+
+Pinball responds. It falls monotonically with depth at both low learning rates
+and the ordering is consistent, which is a real and well-behaved response.
+
+The picks do not. The top decile, which is what the board collects, varies by
+4.3 points across eighteen materially different models, and each decile holds
+about 500 picks. The standard error of a decile's mean return at that size is
+roughly 4.5 points. **The entire observed variation is smaller than the error
+on a single estimate**, so nothing is being measured.
+
+The two best candidates make the point on their own:
+
+    best pinball      0.4026, top decile +19.3%
+    best top decile   +20.8%, pinball 0.4084, the worst in the table
+
+Correlation between pinball and top decile across the eighteen is -0.164.
+
+This is the same finding the EDA reached from the feature side and the gap
+head-to-head reached from the selection side: a better fit does not move picks,
+because the book sets the line where the density is highest, and that is
+exactly where improving the fit changes the least. Tuning the regression is
+not where the improvement is.
+
+What this does not say is that the defaults are good, only that they are not
+costing anything. Depth 4 fits better than the shipped depth 3 and returns the
+same money.
 """
 
 from __future__ import annotations
