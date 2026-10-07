@@ -42,11 +42,43 @@ Two risks, stated before the numbers.
   probability you can subtract a price from. It needs the same isotonic
   treatment the current path gets, fitted on a season it did not see.
 
-Scored the way tune.py scores: fitted on earlier seasons, read on a holdout it
+Scored the way tune.py scores: fitted on earlier rows, read on later ones it
 never saw, reported on log loss and on the expected-value decile spread, which
 is what the product collects. Ships nothing.
 
     MARKET_CODE=recs python research_direct_probability.py
+
+Verdict, October 2026, receptions. It loses, and not narrowly.
+
+                                      AUC   log loss    Brier   claimed   actual
+    quantile ladder (incumbent)    0.5733     0.6882   0.2467     0.458    0.466
+    direct classifier, raw         0.5273     0.7157   0.2594     0.451    0.466
+    direct classifier, calibrated  0.5265     1.2582   0.3608     0.428    0.466
+
+                                     top2     bot2   spread   picks
+    quantile ladder (incumbent)    +24.9%    -2.0%   +26.9%     239
+    direct classifier, calibrated  +12.7%    -3.6%   +16.2%     239
+
+The incumbent wins on every measure. It orders the outcome far better, 0.5733
+against 0.5265, and its top expected-value decile returns twice as much.
+
+The isotonic step made things worse rather than better, which is its own
+lesson: log loss goes from 0.716 to 1.258. Fitted on 1,858 rows an isotonic map
+produces long flat steps and a few extreme ones, and an extreme probability
+that is wrong costs far more under log loss than a timid one that is also
+wrong. Calibration is not free on small samples.
+
+The likeliest reason is simply data. The classifier sees 1,858 priced rows; the
+ladder sees every labelled player-game before the same date, roughly ten times
+as many. A regression learns what a player does from games nobody priced, and
+then the line is applied afterwards. That turns out to be worth more than
+seeing the line during training, at this sample size.
+
+Which is the honest limit on this verdict. It refutes the idea *on one season
+of odds history*, which is all there is. The experiment is kept because it is
+worth re-running if the archive ever gets deeper: the argument for modelling the
+quantity you select on has not been shown to be wrong, only to be outweighed by
+having ten times the rows.
 """
 
 from __future__ import annotations
