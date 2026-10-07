@@ -24,7 +24,7 @@ of them keys the right defense.
 
 Writes nothing. Run it, read it, then decide what to change.
 
-    docker compose run --rm -T trainer python diagnose_audit_failures.py
+    docker compose run --rm training python diagnose_audit_failures.py
 """
 
 import json
