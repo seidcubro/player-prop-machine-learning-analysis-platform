@@ -74,7 +74,11 @@ if systemctl cat 'priorline@.service' 2>/dev/null | grep -q '^OnFailure='; then
 else
   echo "  OnFailure NOT wired: a failed run tells nobody"
 fi
-for v in NTFY_URL NTFY_TOPIC; do
+# The names deploy/alert.sh actually reads. An earlier version of this check
+# guessed NTFY_URL and NTFY_TOPIC and reported both unset on a machine that was
+# delivering alerts perfectly well, which is the same class of mistake as a
+# freshness check measuring a quantity the builder never computed.
+for v in ALERT_NTFY_TOPIC ALERT_WEBHOOK; do
   if grep -q "^$v=" /etc/priorline/env 2>/dev/null; then
     echo "  $v set in /etc/priorline/env"
   else
@@ -122,6 +126,37 @@ for m in $MODES; do
     printf '  %-8s no failure recorded in the log\n' "$m"
   fi
 done
+
+echo
+echo "[8] installed units against the ones in the repo"
+# git pull does not install systemd units. Every change under deploy/systemd
+# needs cp plus daemon-reload, and nothing enforces it, so a unit can sit in the
+# repo for weeks while the machine runs the version from before the change.
+#
+# This is not hypothetical: priorline@early.timer gained a Sunday 09:00 schedule
+# and the installed copy never got it, so the Sunday buy silently never ran and
+# the slate went unpriced with every timer reporting healthy.
+drifted=0
+for f in deploy/systemd/*; do
+  b=$(basename "$f")
+  i="$UNITS/$b"
+  pad=$(printf '%-28s' "$b")
+  if [ ! -f "$i" ]; then
+    echo "  $pad NOT INSTALLED"
+    drifted=$((drifted + 1))
+  elif cmp -s "$f" "$i"; then
+    echo "  $pad matches"
+  else
+    echo "  $pad DIFFERS from the repo"
+    diff -u "$i" "$f" 2>/dev/null | sed -n '3,14p' | sed 's/^/      /'
+    drifted=$((drifted + 1))
+  fi
+done
+if [ "$drifted" -gt 0 ]; then
+  echo
+  echo "  $drifted unit(s) out of date. To install them:"
+  echo "      sudo sh deploy/install_units.sh"
+fi
 
 echo
 echo "============================================================"
