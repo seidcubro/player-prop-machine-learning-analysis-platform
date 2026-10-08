@@ -59,6 +59,11 @@ DATABASE_URL = os.getenv(
 # wrong still fails every run, because that one is actionable immediately.
 AUDIT_MODE = os.getenv("AUDIT_MODE", "").strip().lstrip("-").lower()
 RETRAIN_MODES = {"weekly", "migrate", "refresh"}
+# The modes that rebuild player_market_features, and so are the only ones that
+# can change what a stored feature value is. --board and --refresh are FAST=1
+# and reproject from the rows already there. See NEED_FEATURES in
+# scripts/scheduled_update.sh.
+REBUILD_MODES = {"daily", "weekly", "migrate", "refresh"}
 
 failures: list[str] = []
 warnings: list[str] = []
@@ -72,13 +77,22 @@ def fail(msg):
 
 def fail_on_retrain(msg):
     """Fails the retraining run; informs the runs that cannot fix it."""
-    if not AUDIT_MODE or AUDIT_MODE in RETRAIN_MODES:
+    _deferrable(msg, RETRAIN_MODES, "a retrain")
+
+
+def fail_on_rebuild(msg):
+    """Fails the runs that rebuild features; informs the ones that cannot."""
+    _deferrable(msg, REBUILD_MODES, "a feature rebuild")
+
+
+def _deferrable(msg, modes, remedy):
+    if not AUDIT_MODE or AUDIT_MODE in modes:
         failures.append(msg)
         print(f"  FAIL  {msg}")
     else:
         deferred.append(msg)
         print(f"  STALE {msg}")
-        print(f"        (needs a retrain; --{AUDIT_MODE} cannot clear this)")
+        print(f"        (needs {remedy}; --{AUDIT_MODE} cannot clear this)")
 
 
 def warn(msg):
@@ -255,7 +269,15 @@ def check_opponent_features(engine):
     corr = df["stored"].corr(df["truth"])
     err = (df["stored"] - df["truth"]).abs().mean()
     if corr is None or corr < 0.5:
-        fail(
+        # A stored feature value can only be changed by rebuilding features, so
+        # the hourly board run is told and not failed. It had been failing every
+        # run at corr=0.47 to 0.49 against this 0.50 threshold, which is both
+        # unactionable there and too close to the line to be read as evidence:
+        # this check has already been corrected once for measuring a quantity
+        # the builder never computed. diagnose_audit_failures.py settles which
+        # of the two is wrong by putting the stored value beside opp_pos_form
+        # recomputed with the builder's own SQL.
+        fail_on_rebuild(
             f"opponent feature barely tracks the real opponent "
             f"(corr={corr:.2f}, mean abs diff={err:.1f} over {len(df)} rows)"
         )

@@ -1,3 +1,24 @@
+# Deliberately NOT the production project name.
+#
+# The live stack is deploy/docker-compose.prod.yml, which declares
+# `name: priorline` and keeps its database on a volume called `pgdata`. This
+# file is the development stack: it publishes 5432, has no Caddy, and mounts
+# `postgres_data`.
+#
+# The two names being different is a guard, not an oversight. /etc/priorline/env
+# sets COMPOSE_FILE and COMPOSE_PROJECT_NAME so the scheduled runs drive the
+# production file, but an interactive shell has neither, so a bare
+# `docker compose` in /opt/priorline resolves to THIS file. If it also claimed
+# the project name `priorline`, that command would compare this postgres service
+# against the running production container, find a different volume and a
+# different port mapping, and recreate production's database container against
+# an empty volume.
+#
+# Which is exactly what happened on 2026-10-08 when this said `priorline` for
+# one commit. `priorline-postgres-1` was recreated onto a new, empty
+# `priorline_postgres_data` while the real data sat in `priorline_pgdata`, and
+# the only reason it did not come up serving an empty database is that the port
+# was still held by another container. Leave this name alone.
 name: player-prop-platform
 
 services:
