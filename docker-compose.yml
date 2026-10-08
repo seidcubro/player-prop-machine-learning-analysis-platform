@@ -1,17 +1,4 @@
-# The project name the deployment actually runs under.
-#
-# This said player-prop-platform while /etc/priorline/env sets
-# COMPOSE_PROJECT_NAME=priorline, and the env var wins, so every scheduled run
-# has always been the `priorline` project and every hand-typed `docker compose`
-# in /opt/priorline was a different one. A diagnostic run that way did not fail:
-# it created a second network, a second empty postgres volume and a second
-# database, then reported on it. Nothing was lost, but the output described a
-# stack with no data in it, which is worse than an error.
-#
-# COMPOSE_PROJECT_NAME and -p still override this, so the server is unaffected.
-# A local checkout that already holds a player-prop-platform_postgres_data
-# volume will stop seeing it and needs its dev database re-initialised.
-name: priorline
+name: player-prop-platform
 
 services:
   postgres:
