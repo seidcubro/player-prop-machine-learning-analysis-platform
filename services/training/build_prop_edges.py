@@ -1473,10 +1473,46 @@ def main():
         total = pd.read_sql(
             text("SELECT COUNT(*) AS n FROM odds_player_props"), engine
         )["n"].iloc[0]
-        if int(total) == 0:
+
+        # An empty table is no longer evidence of anything on its own.
+        #
+        # The check above read a count of zero as a failed sync or a stray
+        # truncation. That was true when it was written and stopped being true
+        # when prune_played_props.sql shipped: the prune drops live prices for
+        # games that have kicked off and been archived, which by Tuesday morning
+        # is every game of the week. So the Tuesday weekly pruned the table a
+        # few hundred lines earlier in the same script, arrived here, found zero
+        # rows, called its own housekeeping a failed sync, and exited 1 under
+        # `set -e`. Every Tuesday: no closing line value, no freshness audit, no
+        # plausibility audit, and an ntfy push. The run before this one died at
+        # exactly that line after an hour of retraining.
+        #
+        # The condition worth stopping for is narrower than an empty table: live
+        # prices missing for a game that has NOT kicked off. The prune cannot
+        # cause that, so if an upcoming event has archived prices and no live
+        # ones, something deleted rows it had no business deleting. With nothing
+        # upcoming priced at all, there is simply nothing on sale, which is what
+        # a Tuesday looks like.
+        orphaned = pd.read_sql(
+            text("""
+                SELECT COUNT(DISTINCT e.provider_event_id) AS n
+                FROM odds_events e
+                JOIN odds_snapshots s
+                  ON s.provider_event_id = e.provider_event_id
+                WHERE e.commence_time > NOW()
+            """),
+            engine,
+        )["n"].iloc[0]
+        if int(total) == 0 and int(orphaned) > 0:
             raise RuntimeError(
-                "odds_player_props is empty, which is a failed sync rather than "
-                "a quiet week. Not touching the board.")
+                f"odds_player_props is empty, but {int(orphaned)} game(s) that "
+                "have not kicked off hold archived prices. Live prices were "
+                "deleted for a game still on the schedule, which the prune "
+                "cannot do. Not touching the board.")
+        if int(total) == 0:
+            print("no upcoming game has prices and none are archived either, so "
+                  "there is nothing on sale and no board to build.")
+            return
         print("no upcoming game has prices yet, so there is no board to build. "
               f"{int(total)} prop rows are stored for games already played.")
         return
