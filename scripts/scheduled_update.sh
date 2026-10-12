@@ -409,7 +409,27 @@ if [ "$MODE" = "--early" ]; then
   # Ninety-six reaches Tuesday morning, which covers every kickoff in an NFL
   # week from a Friday start. It does not buy more games, it buys the same
   # sixteen; it just stops missing the last two.
-  WINDOW_H="${EARLY_WINDOW_H:-96}"
+  # Each run buys what kicks off before the next one, and no further.
+  #
+  # One fixed window cannot serve three run days. Ninety-six hours from Friday
+  # reaches Tuesday morning, which is what Sunday night and Monday night games
+  # need; ninety-six hours from Wednesday reaches Sunday morning, which would
+  # buy the whole Sunday slate four days out. A price bought four days out is
+  # not a price anybody can bet by kickoff, and it is the one this board would
+  # then publish a signal against.
+  #
+  #   Wednesday  48h  -> Thursday night, nothing else
+  #   Friday     96h  -> Saturday, Sunday and Monday night, so a board is up
+  #                      all weekend
+  #   Sunday     40h  -> this afternoon and Monday night, re-bought fresh
+  #
+  # EARLY_WINDOW_H still overrides all of it for a manual run.
+  case "$(date +%u)" in
+    3) DEFAULT_WINDOW_H=48 ;;
+    7) DEFAULT_WINDOW_H=40 ;;
+    *) DEFAULT_WINDOW_H=96 ;;
+  esac
+  WINDOW_H="${EARLY_WINDOW_H:-$DEFAULT_WINDOW_H}"
 
   # Put a board up days before kickoff, not minutes.
   #

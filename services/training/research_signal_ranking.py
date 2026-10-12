@@ -37,12 +37,30 @@ from sqlalchemy import create_engine, text
 import build_prop_edges as bp
 pd.set_option("display.width",250)
 e=create_engine(bp.DATABASE_URL, future=True)
+# Which population to rank over.
+#
+# source='backtest' is the walk-forward reconstruction, which is the right
+# population for a historical claim and the wrong one for asking whether the
+# board we are running right now ranks profit. SOURCE='' drops the filter and
+# reads every graded pick, live ones included; SINCE restricts by date.
+#
+#   SOURCE=  SINCE=2026-09-01  python research_signal_ranking.py
+SOURCE = os.getenv("SOURCE", "backtest")
+SINCE = os.getenv("SINCE", "")
+where = ["hit IS NOT NULL", "win_prob IS NOT NULL"]
+params = {}
+if SOURCE:
+    where.append("source = :source")
+    params["source"] = SOURCE
+if SINCE:
+    where.append("game_date >= :since")
+    params["since"] = SINCE
 d=pd.read_sql(text("""
   SELECT market_code, game_date, recommended_side, win_prob, expected_value,
-         hit, price_american, line, projection_median
+         hit, price_american, line, projection_median, edge_tier
   FROM prop_edge_results
-  WHERE hit IS NOT NULL AND win_prob IS NOT NULL AND source='backtest'
-"""), e)
+  WHERE """ + " AND ".join(where)), e, params=params)
+print(f"population: source={SOURCE or 'any'}  since={SINCE or 'all time'}")
 pay=np.where(d.price_american>0, d.price_american/100.0, 100.0/d.price_american.abs())
 d["units"]=np.where(d.hit.astype(bool), pay, -1.0)
 d["cluster"]=d.game_date.astype(str)
@@ -71,3 +89,21 @@ for col,label in (("win_prob","win probability"),
                   ("gap_rel","gap relative to line"),
                   ("breakeven","the price (short to long)")):
     deciles(col,label)
+
+
+# The tiers as shipped, because the deciles above are a research ranking and the
+# board does not bet deciles. Season to date the ordering is not monotone --
+# elite +15.2%, medium +4.7%, strong -1.9% -- and strong is the only tier under
+# break-even. That is 227 live picks saying a boundary is in the wrong place.
+if "edge_tier" in d.columns and d.edge_tier.notna().any():
+    print()
+    print(f"  {'tier':<12}{'picks':>7}{'hit':>8}{'ROI':>9}{'units':>9}  95% CI on ROI")
+    for tier in ("elite", "strong", "medium", "small"):
+        s_ = d[d.edge_tier == tier]
+        if len(s_) < 30:
+            continue
+        w = s_.units.to_numpy()
+        r, lo_, hi_ = S.clustered_bootstrap(
+            lambda i, w=w: float(np.mean(w[i])), s_.cluster.to_numpy(), n_boot=1500)
+        print(f"  {tier:<12}{len(s_):>7}{s_.hit.mean():>8.1%}{r:>+9.1%}"
+              f"{w.sum():>+9.2f}  [{lo_:>+6.1%}, {hi_:>+6.1%}]")

@@ -7,16 +7,24 @@ Description=PriorLine early price buy, so the board is live before kickoff day
 # Persistent, so a machine that was down on Friday still buys when it returns
 # rather than leaving the weekend unpriced.
 OnCalendar=Fri *-*-* 09:00:00
-# And again on Sunday morning, which is not a second purchase.
+# And again on Sunday morning, which IS a second purchase and is meant to be.
 #
-# The run skips any game that already carries prices beyond anytime touchdown,
-# so Friday's buy is not repeated. What this catches is what Friday could not:
-# a kickoff that moved, a game added late, and above all the Monday night game.
-# Week 4 of 2026 went to air with no prices on Detroit at Carolina or Atlanta at
-# New Orleans, which is to say no board at all on the Sunday night and Monday
-# night games, because a Friday run with a 72 hour window cannot see them.
-# Cost is only the games still unbought, about nine credits each.
+# The skip-what-is-already-bought guard only looks back EARLY_RECHECK_H hours,
+# twenty by default, so Friday's prices are two days stale by Sunday and get
+# re-bought. That is the point: a Friday line on a Sunday game is not a line
+# anybody can still bet, and an inactive ruled out on Sunday morning moves his
+# team-mates' numbers before this run reads them. It also catches what Friday
+# could not: a kickoff that moved, a game added late, and the Monday night game.
+# Cost is a full re-buy of the Sunday slate, roughly 135 credits.
 OnCalendar=Sun *-*-* 09:00:00
+# And Wednesday, for the Thursday night game.
+#
+# Friday was the earliest run, and Thursday's game kicks off before it, so that
+# game was never bought by this mode at all and the week opened with no board.
+# Wednesday's run uses a 48 hour window, so it buys the Thursday game and
+# nothing else: Sunday is still four days out and a price bought that early is
+# a price nobody can bet by kickoff.
+OnCalendar=Wed *-*-* 09:00:00
 Persistent=true
 
 [Install]
