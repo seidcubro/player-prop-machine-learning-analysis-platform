@@ -24,6 +24,7 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -298,7 +299,36 @@ def check_model_consistency(engine):
         meta_p = ARTIFACTS / f"{a['model_name']}_{a['code']}_lb{a['lookback']}.json"
         if not meta_p.exists():
             continue
-        point_cols = json.loads(meta_p.read_text())["feature_cols"]
+        point_meta = json.loads(meta_p.read_text())
+        point_cols = point_meta["feature_cols"]
+
+        # The JSON and the joblib it names are two separate lookups and can land
+        # on different fits. When they did, every board, daily and closing run
+        # died on "Feature names seen at fit time, yet now missing: is_fb,
+        # recs_mean, recs_trend" and no board was published at all. Serving now
+        # asks the model what it was fitted on, so a drifted pair publishes
+        # rather than crashes, which is exactly why it has to be failed here:
+        # otherwise the repair never happens and nobody finds out.
+        jp = ARTIFACTS / Path(point_meta.get("artifact_path", "")).name
+        if jp.name and jp.exists():
+            try:
+                fitted = getattr(joblib.load(jp), "feature_names_in_", None)
+            except Exception as e:
+                warn(f"{a['code']}: could not read {jp.name} ({type(e).__name__})")
+                fitted = None
+            if fitted is not None:
+                fitted = [str(c) for c in fitted]
+                if fitted != list(point_cols):
+                    only_fit = [c for c in fitted if c not in point_cols]
+                    only_meta = [c for c in point_cols if c not in fitted]
+                    fail_on_retrain(
+                        f"{a['code']}: {meta_p.name} declares {len(point_cols)} "
+                        f"features and {jp.name} was fitted on {len(fitted)}"
+                        + (f"; only in the model: {sorted(only_fit)[:6]}" if only_fit else "")
+                        + (f"; only in the metadata: {sorted(only_meta)[:6]}" if only_meta else "")
+                        + " -> retrain this market"
+                    )
+
         qp = ARTIFACTS / f"quant_v1_{a['code']}_lb{a['lookback']}.json"
         if not qp.exists():
             warn(f"{a['code']}: no quantile bundle (win prob falls back to Gaussian)")

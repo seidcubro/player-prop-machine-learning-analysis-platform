@@ -1324,6 +1324,28 @@ def calibrated_quantiles(qpreds: dict, calibration=None) -> dict:
     return out
 
 
+def predict_one(model, x: pd.DataFrame) -> float:
+    """Predict a single row, against the columns this model was fitted on.
+
+    The point model and the quantile ladder are separate artifacts trained at
+    separate times, and the ladder takes its feature space from whatever the
+    point model's metadata said on the day it was fitted. So the one frame built
+    for the point model is not guaranteed to be the frame the ladder wants, and
+    scikit-learn rejects the whole prediction over a single name.
+
+    Reindexing to the model's own feature_names_in_ fills a column it expects
+    and we no longer build with 0.0, which is what the training frame does for
+    an absent extra feature, and drops one it never saw. A model without
+    feature_names_in_ (fitted on a bare array) is given the frame unchanged.
+    """
+    names = getattr(model, "feature_names_in_", None)
+    if names is not None:
+        want = [str(c) for c in names]
+        if list(x.columns) != want:
+            x = x.reindex(columns=want, fill_value=0.0).astype(float)
+    return float(model.predict(x)[0])
+
+
 def load_quantile_bundle(artifact_dir: Path, market_code: str, lookback: int):
     """Load the quantile ensemble for a market, if one has been trained."""
     name = os.getenv("QUANT_MODEL_NAME", "quant_v1")
@@ -1377,6 +1399,40 @@ def load_model_meta(artifact_dir: Path, market_code: str, engine=None):
         return None
 
     model = joblib.load(artifact_path)
+
+    # The fitted model is the authority on its own feature space, not the JSON.
+    #
+    # The metadata file is chosen by active_models (model_name, lookback) while
+    # the joblib comes from whatever path that JSON recorded, so the two are
+    # separate lookups that can land on different fits. When they do, the frame
+    # is built from the JSON's column list and handed to a model fitted on a
+    # different one, and scikit-learn refuses it:
+    #
+    #   Feature names seen at fit time, yet now missing:
+    #   - is_fb
+    #   - recs_mean
+    #   - recs_trend
+    #
+    # Every board, daily and closing run died there, so no board was published
+    # at all. A model that carries feature_names_in_ knows exactly what it was
+    # fitted on; asking it is both correct and impossible to drift. The
+    # disagreement is still printed, and audit_freshness check [3] fails on it,
+    # because serving around a stale artifact is a way to keep publishing while
+    # the real repair waits for a retrain, not a substitute for the repair.
+    fitted = getattr(model, "feature_names_in_", None)
+    if fitted is not None:
+        fitted = [str(c) for c in fitted]
+        declared = list(meta.get("feature_cols", []))
+        if fitted != declared:
+            missing = [c for c in fitted if c not in declared]
+            extra_cols = [c for c in declared if c not in fitted]
+            print(f"  {market_code}: metadata disagrees with the fitted model "
+                  f"({len(declared)} declared vs {len(fitted)} fitted"
+                  + (f"; absent from metadata: {missing[:6]}" if missing else "")
+                  + (f"; absent from the model: {extra_cols[:6]}" if extra_cols else "")
+                  + "). Serving the model's own feature space.")
+            meta["feature_cols"] = fitted
+
     print(f"  {market_code}: using {meta['model_name']}")
     return meta, model
 
@@ -1807,7 +1863,7 @@ def main():
 
         x = pd.DataFrame([row_features])
 
-        model_projection_raw = float(model.predict(x)[0])
+        model_projection_raw = predict_one(model, x)
 
         if meta.get("target_transform") == "log1p":
             model_projection = math.expm1(model_projection_raw)
@@ -1879,7 +1935,7 @@ def main():
             # P(over) off an unshrunk CDF would report a confidence that belongs
             # to a projection we no longer believe.
             qp = {
-                q: max(0.0, float(qm.predict(x)[0])) * stale_factor
+                q: max(0.0, predict_one(qm, x)) * stale_factor
                 for q, qm in quant["models"].items()
             }
             # The thin-sample anchor, applied to the range before anything is

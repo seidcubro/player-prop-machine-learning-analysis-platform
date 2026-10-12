@@ -339,7 +339,7 @@ def main():
             feats.pop("_last_game_date", None)
 
             x = pd.DataFrame([feats])
-            pred = max(0.0, float(model.predict(x)[0]))
+            pred = max(0.0, bp.predict_one(model, x))
 
             # Players returning in a reduced role produce well under what their
             # stale window implies; the factor is measured per market and only
@@ -399,7 +399,7 @@ def main():
                 # beside a mean of 2.61 on the same row.
                 _, qs = bp.count_distribution(pred, 0.5)
             elif quant is not None:
-                raw = {q: max(0.0, float(qm.predict(x)[0]))
+                raw = {q: max(0.0, bp.predict_one(qm, x))
                        for q, qm in quant["models"].items()}
                 # The thin-sample anchor, applied to the raw ladder before the
                 # calibration and the stale factor.
