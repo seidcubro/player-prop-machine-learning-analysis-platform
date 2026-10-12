@@ -59,7 +59,40 @@ STAT = {m: "actual" for m in
          "pass_completions", "pass_yds", "pass_td", "any_td")}
 
 MIN_GAIN = 0.002   # 0.2% of MAE, below this is noise
-MIN_ROWS = 400
+
+# Split chronologically, not by season.
+#
+# The season holdout could not be made to work here, and the reason is the odds
+# archive rather than this script: prop_edge_results is effectively one full
+# season of history. Holding out the newest season with "enough" rows picked
+# 2026 in week five, so every market had a few hundred rows to score against
+# and the whole file came back empty:
+#
+#   rec_yds   2697 to fit,  331 to score, need 400 -> skipped
+#   recs      2618 to fit,  354 to score, need 400 -> skipped
+#   rush_att  1067 to fit,  143 to score, need 400 -> skipped
+#   pass_att     0 to fit,   77 to score, need 400 -> skipped
+#
+# Nothing had failed. The gate was asking a third of a season to look like a
+# whole one, and meanwhile the board under-projects passing yards by 12 and
+# receiving yards by 3 every week, which is the exact bias this corrects. The
+# audit reported "corrects nothing" as though that were a measurement.
+#
+# Moving the holdout back to 2025 does not fix it, it moves the hole: the mass
+# of the archive IS 2025, so fitting on what comes before leaves the thin
+# markets with nothing to fit on.
+#
+# A chronological split has neither problem. The map being fitted is a monotone
+# one-dimensional function from prediction to outcome, so a season boundary
+# carries no special meaning for it, and training strictly before a date and
+# scoring strictly after is the out-of-sample discipline that actually matters.
+SPLIT_FRACTION = float(os.getenv("SPREAD_SPLIT_FRACTION", "0.70"))
+
+# Asymmetric on purpose. The fit needs enough rows to place 24 isotonic knots;
+# the holdout only needs enough to measure a mean absolute error, and demanding
+# the same count of both is what left four markets unmeasurable.
+MIN_FIT_ROWS = 400
+MIN_TEST_ROWS = 250
 
 
 
@@ -156,42 +189,36 @@ def main():
         return
 
     df["season"] = season_of(df["game_date"])
+    df["game_date"] = pd.to_datetime(df["game_date"])
 
-    # The most recent season with enough rows to score against, not simply the
-    # most recent season. In September the current season is one week old and a
-    # few hundred rows, which is not a holdout, it is a rounding error. Holding
-    # out the last complete season is the split this project already uses
-    # everywhere else, and for the same reason.
-    counts = df.groupby("season").size()
-    # A season counts as complete if it has at least half the rows a typical
-    # season has. In September the current one holds about 1,800 rows against a
-    # normal 36,000, which is a week of football and not a holdout.
-    eligible = counts[counts >= 0.5 * counts.median()]
-    if eligible.empty:
-        print("no season has enough rows to hold out yet; nothing to fit")
-        OUT.write_text("{}", encoding="utf-8")
-        return
-    holdout = int(eligible.index.max())
-    print(f"fitting on seasons before {holdout}, scoring on {holdout}\n")
-    print(f"{'market':<18}{'n test':>8}{'pt gain':>9}{'pt top10%':>11}"
-          f"{'med gain':>9}{'med top10%':>11}  keeps")
+    # The cut is a date taken per market below, so one game-day never lands on
+    # both sides of it.
+    print(f"{len(df):,} graded rows, {df.game_date.min().date()} to "
+          f"{df.game_date.max().date()}")
+    print(f"fitting on the earliest {SPLIT_FRACTION:.0%} of each market's rows "
+          f"by date, scoring on the rest")
+    print()
+    print(f"{'market':<18}{'n fit':>7}{'n test':>8}{'from':>12}"
+          f"{'pt gain':>9}{'pt top10%':>11}{'med gain':>9}{'med top10%':>11}  keeps")
 
     out = {}
     for market, g in df.groupby("market_code"):
         c = STAT.get(market)
         if not c or c not in g:
             continue
-        g = g.dropna(subset=["projection", c])
-        fit = g[g["season"] < holdout]
-        test = g[g["season"] == holdout]
-        if len(fit) < MIN_ROWS or len(test) < MIN_ROWS:
-            # One column for n, because the header has one. This printed the
-            # fit count and the test count into a single "n test" column, so
-            # rec_yds read 1667 rows against recs reading 354 and 1762, and the
-            # two lines were not describing the same quantity.
-            print(f"{market:<18}{len(test):>8}{'-':>9}{'-':>11}"
-                  f"{'-':>9}{'-':>11}  too few rows "
-                  f"({len(fit)} to fit, {len(test)} to score, need {MIN_ROWS})")
+        g = g.dropna(subset=["projection", c]).sort_values("game_date")
+        cut = g["game_date"].quantile(SPLIT_FRACTION)
+        fit = g[g["game_date"] < cut]
+        test = g[g["game_date"] >= cut]
+        when = str(pd.Timestamp(cut).date()) if len(g) else "-"
+        if len(fit) < MIN_FIT_ROWS or len(test) < MIN_TEST_ROWS:
+            # The fit count and the test count, in their own columns. These
+            # were printed into one "n test" column, so rec_yds read 1667
+            # against recs reading 354 and 1762 and the two were not the same
+            # quantity.
+            print(f"{market:<18}{len(fit):>7}{len(test):>8}{when:>12}"
+                  f"{'-':>9}{'-':>11}{'-':>9}{'-':>11}  too few rows "
+                  f"(need {MIN_FIT_ROWS} to fit, {MIN_TEST_ROWS} to score)")
             continue
 
         entry = {}
@@ -206,7 +233,8 @@ def main():
         for field, key in (("projection", "point"), ("p50", "median")):
             f = fit.dropna(subset=[field])
             t = test.dropna(subset=[field])
-            if len(f) < MIN_ROWS or len(t) < MIN_ROWS or f[field].std() == 0:
+            if (len(f) < MIN_FIT_ROWS or len(t) < MIN_TEST_ROWS
+                    or f[field].std() == 0):
                 cells.append(("-", "-", "-", "-"))
                 continue
             b, a = np.polyfit(f[field].to_numpy(dtype=float),
@@ -246,10 +274,11 @@ def main():
 
         verdict = "+".join(sorted(k for k in entry)) if entry else "no gain"
         pt, md = cells[0], cells[1]
-        print(f"{market:<18}{len(test):>8}{pt[1]:>9}{pt[2]:>11}"
-              f"{md[1]:>9}{md[2]:>11}  {verdict}")
+        print(f"{market:<18}{len(fit):>7}{len(test):>8}{when:>12}"
+              f"{pt[1]:>9}{pt[2]:>11}{md[1]:>9}{md[2]:>11}  {verdict}")
         if entry:
-            entry["holdout_season"] = holdout
+            entry["holdout_from"] = when
+            entry["holdout_rows"] = int(len(test))
             out[market] = entry
 
     OUT.write_text(json.dumps(out, indent=2), encoding="utf-8")
