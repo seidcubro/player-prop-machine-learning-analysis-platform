@@ -603,6 +603,51 @@ def check_quantile_calibration(engine):
         else:
             ok(line)
 
+    # And again on the live board of the current season alone.
+    #
+    # The loop above pools every graded row ever written: three seasons of
+    # walk-forward reconstruction plus this year's live picks. Pooled, each
+    # market came back six to eight points optimistic and every line read ok,
+    # because this check only fails at fifteen points. Six points is not a
+    # rounding error here. At -110 a pick needs 52.4% to break even, so a board
+    # claiming 59% while hitting 51% computes every expected value about eight
+    # points too high, and an expected-value filter then selects bets that are
+    # negative. That is what the 2026 season did: 1,279 live graded props,
+    # -84.74 units, and expected value ranking profit BACKWARDS, top two
+    # deciles -10.7% against bottom two -6.5%.
+    #
+    # The calibrator is fitted pooled across every season with no recency
+    # weighting, and production falls about 3% a year, so it carries old
+    # seasons' hit rates into a lower-scoring one. Measured here on the
+    # population that is actually being bet, now, and failed at five points,
+    # which is the size that flips a standard price.
+    season = date.today().year if date.today().month >= 3 else date.today().year - 1
+    with engine.connect() as c:
+        live = c.execute(text("""
+            SELECT count(*) AS picks,
+                   avg(win_prob) AS claimed,
+                   avg(CASE WHEN hit THEN 1.0 ELSE 0 END) AS actual
+            FROM prop_edge_results
+            WHERE hit IS NOT NULL AND win_prob IS NOT NULL
+              AND source = 'live'
+              AND edge_tier IN ('elite', 'strong', 'medium')
+              AND game_date >= :since
+        """), {"since": f"{season}-08-01"}).mappings().first()
+    if live and live["picks"] and live["picks"] >= 200:
+        gap = float(live["actual"]) - float(live["claimed"])
+        line = (f"live {season} board: claimed {float(live['claimed']):.3f}, "
+                f"actual {float(live['actual']):.3f}, off by {gap:+.3f} "
+                f"on {live['picks']} published picks")
+        if gap < -0.05:
+            fail_on_retrain(line + " -> refit the probability calibrator; "
+                            "every expected value on the board is inflated "
+                            "by about this much")
+        else:
+            ok(line)
+    elif live and live["picks"]:
+        warn(f"only {live['picks']} live published picks this season; "
+             "too few to judge the board's own calibration yet")
+
     if worst > 0.10:
         warn("probabilities run optimistic across the board. Expected before a "
              "season has been played, since no calibration can anticipate a "
