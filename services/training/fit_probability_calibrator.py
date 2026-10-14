@@ -61,9 +61,44 @@ MIN_PER_MARKET = int(os.getenv("MIN_PER_MARKET", "250"))
 ARTIFACT = "probability_calibrator.joblib"
 
 
-def fit_isotonic(p, y):
+# How fast an old season stops counting.
+#
+# The map was fitted pooled across every graded row with equal weight, and
+# production falls about 3% a player-game a year, so a curve built mostly from
+# 2023-2025 reads high all through 2026. Measured on the 2026 holdout, fitted
+# on the 8,548 rows before it:
+#
+#   claimed     0.4062   Brier 0.2738
+#   calibrated  0.4687   Brier 0.2519
+#   actual      0.5192
+#
+# The map closes about half the gap and leaves five points. Five points is
+# what decides a bet at -110, so every expected value on the board is inflated
+# by roughly that much and the filter selects negatives. The board does not
+# believe in overs: it says they happen 40.6% of the time and they happen
+# 51.9% of the time.
+#
+# A half-life of one season halves the weight of each season you go back, so
+# the most recent complete season carries about as much as everything before
+# it combined. Set CAL_HALF_LIFE=0 to restore the old equal-weight fit; the
+# report mode below prints both so the choice is made on the holdout and not
+# on an argument.
+CAL_HALF_LIFE = float(os.getenv("CAL_HALF_LIFE", "1.0"))
+
+
+def season_weights(season, half_life=None):
+    """Exponential decay in seasons, newest season weight 1.0."""
+    hl = CAL_HALF_LIFE if half_life is None else half_life
+    s = np.asarray(season, dtype=float)
+    if hl <= 0:
+        return np.ones_like(s)
+    return np.power(0.5, (np.nanmax(s) - s) / hl)
+
+
+def fit_isotonic(p, y, w=None):
     ir = IsotonicRegression(out_of_bounds="clip", y_min=0.01, y_max=0.99)
-    ir.fit(np.asarray(p, dtype=float), np.asarray(y, dtype=float))
+    ir.fit(np.asarray(p, dtype=float), np.asarray(y, dtype=float),
+           sample_weight=None if w is None else np.asarray(w, dtype=float))
     return ir
 
 
@@ -118,21 +153,25 @@ def main():
         fit, test = d[d["season"] < h], d[d["season"] == h]
         if fit.empty or test.empty:
             raise SystemExit(f"no data either side of {h}")
-        ir = fit_isotonic(fit["p_over"], fit["over_hit"])
-        cal = ir.predict(test["p_over"].to_numpy())
         print(f"holdout {h}: {len(test)} picks, fitted on {len(fit)}")
         print("  scored as P(over), which is the quantity the edge builder uses")
-        print(f"  claimed   {test['p_over'].mean():.4f}  "
+        print(f"  claimed   {test['p_over'].mean():>10.4f}  "
               f"Brier {brier(test['p_over'], test['over_hit']):.4f}")
-        print(f"  calibrated{cal.mean():>10.4f}  "
-              f"Brier {brier(cal, test['over_hit']):.4f}")
+        # Both fits, same rows, same holdout. The noise rule decides.
+        for label, hl in (("equal weight", 0.0), (f"half-life {CAL_HALF_LIFE:g}", CAL_HALF_LIFE)):
+            w = season_weights(fit["season"], hl)
+            ir = fit_isotonic(fit["p_over"], fit["over_hit"], w)
+            cal = ir.predict(test["p_over"].to_numpy())
+            print(f"  {label:<16}{cal.mean():>10.4f}  "
+                  f"Brier {brier(cal, test['over_hit']):.4f}  "
+                  f"still {test['over_hit'].mean() - cal.mean():+.4f} from actual")
         print(f"  actual    {test['over_hit'].mean():>10.4f}")
         return
 
     models: dict[str, IsotonicRegression] = {}
     report: dict[str, dict] = {}
 
-    pooled = fit_isotonic(d["p_over"], d["over_hit"])
+    pooled = fit_isotonic(d["p_over"], d["over_hit"], season_weights(d["season"]))
     models["__pooled__"] = pooled
     report["__pooled__"] = {
         "picks": int(len(d)),
@@ -145,7 +184,8 @@ def main():
     for market, sub in d.groupby("market_code"):
         if len(sub) < MIN_PER_MARKET:
             continue
-        ir = fit_isotonic(sub["p_over"], sub["over_hit"])
+        ir = fit_isotonic(sub["p_over"], sub["over_hit"],
+                          season_weights(sub["season"]))
         models[market] = ir
         report[market] = {
             "picks": int(len(sub)),
