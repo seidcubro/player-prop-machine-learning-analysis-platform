@@ -61,6 +61,26 @@ d=pd.read_sql(text("""
   FROM prop_edge_results
   WHERE """ + " AND ".join(where)), e, params=params)
 print(f"population: source={SOURCE or 'any'}  since={SINCE or 'all time'}")
+
+# Say what is actually in the frame, every time.
+#
+# SOURCE= drops the filter, which mixes the live board with the walk-forward
+# reconstruction of the same weeks, and the two are not the same thing: one is
+# what was published and settled, the other is what today's models would have
+# said about games they have since been trained on. Mixed, the 2026 season read
+# -84.74 units while the board autopsy over the same weeks read +69.83, and
+# nothing in the output said why. Ask for source=live to read the record.
+mix = pd.read_sql(text("""
+  SELECT source, count(*) AS n, min(game_date) AS first, max(game_date) AS last
+  FROM prop_edge_results
+  WHERE hit IS NOT NULL AND win_prob IS NOT NULL    AND (:since = '' OR game_date >= :since)
+  GROUP BY source ORDER BY n DESC
+"""), e, params={"since": SINCE})
+for r in mix.itertuples(index=False):
+    print(f"  {str(r.source):<10}{r.n:>7} rows  {r.first} to {r.last}")
+if SOURCE == "" and len(mix) > 1:
+    print("  WARNING: this frame mixes the live board with a backtest "
+          "reconstruction of the same games. Pass SOURCE=live for the record.")
 pay=np.where(d.price_american>0, d.price_american/100.0, 100.0/d.price_american.abs())
 d["units"]=np.where(d.hit.astype(bool), pay, -1.0)
 d["cluster"]=d.game_date.astype(str)
