@@ -72,6 +72,28 @@ MIN_ROWS = int(os.getenv("MIN_ROWS", "150"))
 FLAT_PRICE = -110.0
 
 
+def shrunk_bias(resid) -> float:
+    """How far to move a median, shrunk toward zero by how much we have seen.
+
+    The MEDIAN residual, not the mean. Receiving yards are right-skewed: a
+    handful of 120 yard games pull the average well above the middle of the
+    distribution, and the book sets its line at the middle. On the 2026 season
+    the mean residual for rec_yds is +16.2 yards while the line sits 8.7 above
+    our median, so correcting by the mean would shove the whole market over the
+    line and bet the over on everyone. Correcting a median with a mean is the
+    same mean-versus-median error this project has already paid for once.
+
+    Shrinkage is multiplicative here rather than the sum-over-count trick, which
+    only works for a mean: n / (n + PRIOR_N) of the measured median, so a market
+    with 50 rows moves a quarter of the way and one with 600 moves four fifths.
+    """
+    r = np.asarray(resid, dtype=float)
+    r = r[np.isfinite(r)]
+    if r.size == 0:
+        return 0.0
+    return float(np.median(r) * (r.size / (r.size + PRIOR_N)))
+
+
 def payout(american):
     a = np.asarray(american, dtype=float)
     return np.where(a > 0, a / 100.0, 100.0 / np.abs(a))
@@ -112,7 +134,7 @@ def main():
         for m, g in past.groupby("market_code"):
             if len(g) < MIN_ROWS:
                 continue
-            bias[m] = float(g["resid"].sum() / (len(g) + PRIOR_N))
+            bias[m] = shrunk_bias(g["resid"])
         now["bias"] = now["market_code"].map(bias).fillna(0.0)
         rows.append(now)
     d = pd.concat(rows, ignore_index=True)
@@ -165,14 +187,14 @@ def main():
 
     # What the final bias would be, per market, fitted on the whole season.
     print()
-    print(f"  {'market':<18}{'n':>7}{'mean resid':>12}{'shrunk bias':>13}"
+    print(f"  {'market':<18}{'n':>7}{'med resid':>12}{'shrunk bias':>13}"
           f"{'median':>9}{'line':>9}")
     final = {}
     for m, g in d.groupby("market_code"):
         if len(g) < MIN_ROWS:
             continue
-        raw = float(g["resid"].mean())
-        shrunk = float(g["resid"].sum() / (len(g) + PRIOR_N))
+        raw = float(g["resid"].median())
+        shrunk = shrunk_bias(g["resid"])
         final[m] = shrunk
         print(f"  {m:<18}{len(g):>7}{raw:>+12.2f}{shrunk:>+13.2f}"
               f"{g['p50'].mean():>9.1f}{g['line'].mean():>9.1f}")
