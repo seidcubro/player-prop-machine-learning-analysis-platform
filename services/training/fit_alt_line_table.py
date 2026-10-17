@@ -50,6 +50,46 @@ FRACTIONS = (0.50, 0.60, 0.70, 0.80, 0.90)
 STEPS = (-3, -2, -1)
 
 
+
+def ratio_grid(cf, frac):
+    """The whole distribution of outcome against line, as a quantile grid.
+
+    A short list of thresholds cannot answer a quoted alternate line. The first
+    version of this stored rates at -3, -2 and -1 receptions and at 50% to 90%
+    of a yardage line, and the probe matched a quote to the NEAREST of those by
+    distance. A main line of 1.5 receptions with an alternate quoted at 6.5 got
+    matched to the -1 cell, so "clears 0.5 catches 84.5% of the time" was
+    reported as "clears 6.5 catches 84.5% of the time", and the probe announced
+    a 30% edge on 557 of 751 quotes. Every one of those numbers was an artefact
+    of the match.
+
+    Storing the distribution removes the problem rather than patching it. For
+    yardage the quantity is actual/line, for counts it is actual-line, and
+    P(clears t) is read straight off it at the exact t a book quoted. Outside
+    the observed support it refuses to answer, which is the behaviour that was
+    missing.
+    """
+    v = (cf["actual"] / cf["line"]) if frac else (cf["actual"] - cf["line"])
+    v = np.asarray(v, dtype=float)
+    v = v[np.isfinite(v)]
+    probs = np.linspace(0.0, 1.0, 201)
+    return {
+        "kind": "ratio" if frac else "diff",
+        "p": [float(x) for x in probs],
+        "q": [float(x) for x in np.quantile(v, probs)],
+        "n": int(v.size),
+    }
+
+
+def exceed(grid, target):
+    """P(outcome clears `target`), or None when target is off the support."""
+    q = np.asarray(grid["q"], dtype=float)
+    p = np.asarray(grid["p"], dtype=float)
+    if target < q[0] or target > q[-1]:
+        return None
+    return float(1.0 - np.interp(target, q, p))
+
+
 def fair_american(p: float):
     if not (0.0 < p < 1.0):
         return None
@@ -82,6 +122,7 @@ def main():
           f"{'fair':>9}  95% CI{'':<8}{'live n':>8}{'live':>8}{'drift':>8}")
 
     table = {}
+    dists = {}
     for market in sorted(d["market_code"].unique()):
         gf = fit[fit["market_code"] == market]
         gl = live[live["market_code"] == market]
@@ -104,6 +145,12 @@ def main():
             cl = gl[(gl["line"] >= lo) & (gl["line"] < hi)]
             if len(cf) < MIN_CELL:
                 continue
+            dist = ratio_grid(cf, frac)
+            dists.setdefault(market, []).append({
+                "line_min": None if np.isinf(lo) else float(lo),
+                "line_max": None if np.isinf(hi) else float(hi),
+                **dist,
+            })
             band = (f"{'' if np.isinf(lo) else f'{lo:g}'}"
                     f"-{'' if np.isinf(hi) else f'{hi:g}'}")
             for step in grid:

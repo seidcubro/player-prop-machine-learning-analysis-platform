@@ -58,6 +58,8 @@ ALT_MARKETS = os.getenv("ALT_MARKETS", ",".join([
     "player_pass_tds_alternate",
 ]))
 
+DRIFT = float(os.getenv("DRIFT_ALLOWANCE", "0.035"))
+
 ALT_TO_CODE = {
     "player_reception_yds_alternate": "rec_yds",
     "player_receptions_alternate": "recs",
@@ -78,20 +80,42 @@ def fmt(american) -> str:
     return f"{a:,.0f}" if a < 0 else f"+{a:,.0f}"
 
 
-def lookup(table, market, main_line, alt_line):
-    """The measured rate for this alternate line, from its own line band."""
-    cells = table.get(market) or []
-    best = None
-    for c in cells:
+def pick_dist(dists, market, main_line):
+    """The distribution for this market and this line's band."""
+    for c in dists.get(market) or []:
         lo = c["line_min"] if c["line_min"] is not None else float("-inf")
         hi = c["line_max"] if c["line_max"] is not None else float("inf")
-        if not (lo <= main_line < hi):
-            continue
-        want = main_line * c["step"] if c["kind"] == "fraction" else main_line + c["step"]
-        d = abs(want - alt_line)
-        if best is None or d < best[0]:
-            best = (d, c, want)
-    return best
+        if lo <= main_line < hi:
+            return c
+    return None
+
+
+def exceed(grid, target):
+    """P(outcome clears `target`), or None when target is off the support.
+
+    Refusing is the whole point. The first version of this matched a quote to
+    the NEAREST of a handful of stored thresholds, so a 1.5 reception main line
+    with an alternate quoted at 6.5 was scored against "clears 0.5 catches",
+    came back 84.5%, and the probe reported an 81 point edge. 557 of 751 quotes
+    "cleared", median edge +30.1%, and every number was an artefact of the
+    match. A quote outside what was measured gets no answer at all now.
+    """
+    import numpy as _np
+    q = _np.asarray(grid["q"], dtype=float)
+    p = _np.asarray(grid["p"], dtype=float)
+    if target < q[0] or target > q[-1]:
+        return None
+    return float(1.0 - _np.interp(target, q, p))
+
+
+def wilson(p, n, z=1.96):
+    """Interval on a proportion, so a thin tail cannot read as a certainty."""
+    if n <= 0:
+        return (0.0, 1.0)
+    d = 1.0 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
+    return (max(0.0, c - h), min(1.0, c + h))
 
 
 def main():
@@ -101,7 +125,13 @@ def main():
         raise SystemExit(
             f"{TABLE.name} not found. Run fit_alt_line_table.py with WRITE=1 first; "
             "there is nothing to compare a quote against without it.")
-    table = json.loads(TABLE.read_text(encoding="utf-8"))
+    blob = json.loads(TABLE.read_text(encoding="utf-8"))
+    dists = blob.get("distributions")
+    if not dists:
+        raise SystemExit(
+            f"{TABLE.name} has no distributions in it. Rerun fit_alt_line_table.py "
+            "with WRITE=1; the old format stored only a few fixed thresholds and "
+            "could not answer a quoted alternate line.")
 
     eng = create_engine(bp.DATABASE_URL, future=True)
     ev = pd.read_sql(text("""
@@ -154,6 +184,7 @@ def main():
     data = r.json()
 
     rows = []
+    refused = 0
     for bk in data.get("bookmakers", []):
         for mk in bk.get("markets", []):
             code = ALT_TO_CODE.get(mk.get("key"))
@@ -167,27 +198,34 @@ def main():
                 if player is None or point is None or price is None:
                     continue
                 ml = main_lines.get((player, code))
-                if ml is None:
+                if ml is None or ml == 0:
                     continue
-                hit = lookup(table, code, ml, float(point))
-                if hit is None:
+                g = pick_dist(dists, code, ml)
+                if g is None:
                     continue
-                _, cell, want = hit
+                # The quoted line expressed the way the distribution measures
+                # it: a ratio for yardage, a difference for counts.
+                target = (float(point) / ml if g["kind"] == "ratio"
+                          else float(point) - ml)
+                rate = exceed(g, target)
+                if rate is None:
+                    refused += 1
+                    continue
                 need = implied(price)
+                lo, hi = wilson(rate, g["n"])
+                # Cells drifted up to ten points between the backtest and the
+                # live season, so the honest edge is the interval floor less
+                # that drift allowance, not the point estimate.
+                floor = max(0.0, lo - DRIFT)
                 rows.append({
                     "book": bk.get("key"), "player": player, "market": code,
                     "main": ml, "alt": float(point), "price": float(price),
-                    "need": need, "measured": cell["rate"],
-                    "lo": cell["ci"][0], "n": cell["n"],
-                    "edge": cell["rate"] - need,
-                    # The table's cells moved up to ten points between the
-                    # backtest and the live season, so the honest edge uses the
-                    # bottom of the interval rather than the point estimate.
-                    "edge_lo": cell["ci"][0] - need,
-                    "nearest": want,
+                    "need": need, "measured": rate, "lo": lo, "n": g["n"],
+                    "edge": rate - need, "edge_lo": floor - need,
                 })
+    print(f"{refused} quote(s) refused: outside the range the data measures")
     if not rows:
-        print("no quoted alternate line matched a main line we hold")
+        print("no quoted alternate line could be scored against measured data")
         return
     d = pd.DataFrame(rows).sort_values("edge_lo", ascending=False)
     print(f"\n{len(d)} quoted alternate line(s) matched to a measured cell\n")
