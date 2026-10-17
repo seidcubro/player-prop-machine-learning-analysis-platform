@@ -205,8 +205,12 @@ def main():
         print("  the floor has to be refitted, not just looked up.")
 
     if os.getenv("WRITE") == "1":
-        OUT.write_text(json.dumps(table, indent=2), encoding="utf-8")
-        print(f"\nwrote {OUT.name}, {sum(len(v) for v in table.values())} cells")
+        OUT.write_text(json.dumps(
+            {"cells": table, "distributions": dists}, indent=2),
+            encoding="utf-8")
+        print(f"wrote {OUT.name}: "
+              f"{sum(len(v) for v in table.values())} printed cells and "
+              f"{sum(len(v) for v in dists.values())} distributions")
     else:
         print("\nnothing written. WRITE=1 to save the table.")
 
