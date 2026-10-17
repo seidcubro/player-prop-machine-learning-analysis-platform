@@ -24,6 +24,30 @@ against more than one event and prints the exact request before sending it.
     # see the request and spend nothing
     docker compose run --rm training python probe_alt_odds.py
 
+VERDICT, 2026-10-17. Asked and answered: alternate lines are priced efficiently.
+746 quotes across six markets and three books, each scored against the
+distribution at the exact line offered:
+
+    median edge at the point estimate   -3.1%
+    median edge at the interval floor   -8.7%
+    cleared the floor                   29 of 746
+
+Books price these at or above the true rate, so there is no systematic edge in
+buying them. Twelve credits to find that out rather than a schema change and a
+month of work.
+
+The 29 that cleared are not 29 findings. Six players account for all of them,
+Woody Marks alone for eleven, every one a long-shot OVER on a main line between
+9.8 and 15.5 at 1.7x to 5.4x that line. That is the shape a pooled base rate
+makes when it meets a book that prices individuals: the band says a player with
+a 15 yard receiving line clears 49.5 yards 19.5% of the time, and the book
+knows this one is a back with a capped ceiling. The apparent edge is our own
+heterogeneity, not their inefficiency.
+
+Kept rather than deleted. The table replicated at 0.957 and is the right tool if
+alternate pricing ever loosens, and this answers the question again for six
+credits whenever that is worth re-checking.
+
     # actually buy it
     docker compose run --rm -e SPEND=1 training python probe_alt_odds.py
 """
