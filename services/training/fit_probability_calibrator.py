@@ -106,6 +106,81 @@ def brier(p, y):
     return float(np.mean((np.asarray(p, dtype=float) - np.asarray(y, dtype=float)) ** 2))
 
 
+
+# How much of the current season's own level to believe.
+#
+# The pooled map gets the SHAPE right and the LEVEL wrong. Measured on the 2026
+# holdout it moves P(over) from 0.4062 to 0.4687 against an actual 0.5192, so it
+# closes about half the gap and leaves five points, and the live board then
+# claims 0.558 while hitting 0.487. Recency weighting across past seasons does
+# not reach it either: no past season ran as hot as this one and you cannot
+# reweight your way to a level you have never seen.
+#
+# So the level comes from the current season itself, as ONE number rather than a
+# second curve. With 1,296 live rows an isotonic map would chase noise; a single
+# offset is one parameter and is safe at that size.
+#
+#     offset = (actual over rate - calibrated over rate) * n / (n + PRIOR)
+#
+# Shrunk so week two cannot swing it. Written only if a walk-forward check says
+# it helps: for each game date, the offset is fitted on live rows strictly
+# before it and scored on that date, which is the only honest way to ask whether
+# using it would have helped rather than whether it describes what happened.
+SEASON_OFFSET_PRIOR = float(os.getenv("SEASON_OFFSET_PRIOR", "300"))
+CURRENT_SEASON = int(os.getenv("CURRENT_SEASON", "2026"))
+
+
+def fit_season_offset(d, models):
+    """One scalar for this season's level, with a walk-forward verdict."""
+    live = d[d["season"] == CURRENT_SEASON]
+    if "source" in live.columns:
+        live = live[live["source"] == "live"]
+    if len(live) < 200:
+        print(f"season offset: only {len(live)} current-season rows, skipped")
+        return None
+
+    def calibrated(rows):
+        out = np.empty(len(rows))
+        for i, (m, p) in enumerate(zip(rows["market_code"], rows["p_over"])):
+            ir = models.get(m) or models.get("__pooled__")
+            out[i] = float(ir.predict(np.asarray([p], dtype=float))[0])
+        return out
+
+    live = live.sort_values("game_date")
+    dates = sorted(live["game_date"].unique())
+    before = []
+    after = []
+    for dt in dates:
+        past, now = live[live["game_date"] < dt], live[live["game_date"] == dt]
+        if len(now) == 0:
+            continue
+        cal_now = calibrated(now)
+        before.append(np.abs(cal_now.mean() - now["over_hit"].mean()) * len(now))
+        if len(past) < 100:
+            after.append(before[-1])
+            continue
+        cal_past = calibrated(past)
+        off = ((past["over_hit"].mean() - cal_past.mean())
+               * len(past) / (len(past) + SEASON_OFFSET_PRIOR))
+        after.append(np.abs((cal_now + off).mean() - now["over_hit"].mean()) * len(now))
+
+    n = len(live)
+    err_before, err_after = sum(before) / n, sum(after) / n
+    cal_all = calibrated(live)
+    offset = float((live["over_hit"].mean() - cal_all.mean())
+                   * n / (n + SEASON_OFFSET_PRIOR))
+    print(f"season offset: {n} live {CURRENT_SEASON} rows, "
+          f"calibrated {cal_all.mean():.4f} against actual "
+          f"{live['over_hit'].mean():.4f}")
+    print(f"  walk-forward mean absolute level error "
+          f"{err_before:.4f} -> {err_after:.4f}")
+    if err_after >= err_before:
+        print("  it does not help week to week, so nothing is written")
+        return None
+    print(f"  shipping offset {offset:+.4f}")
+    return offset
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
     d = pd.read_sql(text("""
@@ -117,7 +192,7 @@ def main():
         -- refit learns the identity, and applying the identity takes the
         -- correction away again. Backtested rows have no raw column because
         -- they never went through this map, so their win_prob is already raw.
-        SELECT market_code, season,
+        SELECT market_code, season, game_date, source,
                COALESCE(win_prob_raw, win_prob) AS win_prob, hit,
                recommended_side, line, actual
         FROM prop_edge_results
@@ -197,7 +272,10 @@ def main():
 
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
     path = os.path.join(ARTIFACT_DIR, ARTIFACT)
+    offset = fit_season_offset(d, models)
     joblib.dump({"models": models, "fitted_on": int(len(d)),
+                 "season_offset": offset,
+                 "season_offset_for": CURRENT_SEASON,
                  "generated_at": date.today().isoformat()}, path)
     with open(os.path.join(ARTIFACT_DIR, "probability_calibrator.json"), "w") as f:
         json.dump(report, f, indent=2, sort_keys=True)

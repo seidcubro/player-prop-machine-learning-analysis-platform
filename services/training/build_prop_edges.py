@@ -1179,6 +1179,18 @@ def calibrate_probability(bundle, market_code: str, p: float) -> float:
     if ir is None:
         return _bounded(p)
     out = float(ir.predict(np.asarray([p], dtype=float))[0])
+
+    # The curve fixes the shape, one number fixes this season's level.
+    #
+    # The pooled map is fitted across every season and reads low on a season
+    # running hotter than any of them: on the 2026 holdout it moves P(over) from
+    # 0.4062 to 0.4687 against an actual 0.5192, and the live board then claims
+    # 0.558 while hitting 0.487. Seven points is what decides a pick, so it is
+    # not cosmetic. fit_probability_calibrator writes this offset only when a
+    # walk-forward check says using it would have helped week to week.
+    off = bundle.get("season_offset")
+    if off:
+        out += float(off)
     return _bounded(out)
 
 
