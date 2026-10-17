@@ -145,5 +145,42 @@ def main():
               f"{r:>+9.1%}  [{lo:>+6.1%},{hi:>+6.1%}]")
 
 
+    # What the prices themselves are costing.
+    #
+    # The naive rule and the board agreed on 100% of 1,296 live picks: the side
+    # is already chosen by median against line and nothing downstream moves it.
+    # So the selection layer is not destroying the signal by flipping, and the
+    # difference between the two ROI columns above is not strategy at all, it is
+    # the price. Weighted across markets it is 1.7 points, and on pass_td it is
+    # 9.7: at a flat -110 that market returns +0.9% and at the prices actually
+    # taken it returns -8.8%. The entire loss there is what we paid to get on.
+    #
+    # So the question is whether refusing short prices is worth more than the
+    # bets it costs us. A price floor is one line in the edge builder if it is.
+    print("ROI by the price taken, which is the lever the board does not pull")
+    print(f"  {'minimum price':<16}{'n':>7}{'share':>8}{'hit':>8}{'ROI':>9}"
+          f"  95% CI{'':<10}{'count mkts only':>18}")
+    for floor in (None, -200, -150, -130, -120, -110, -105, 100):
+        sub = d if floor is None else d[d["price_american"] >= floor]
+        if len(sub) < 40:
+            continue
+        w = sub["u_board"].to_numpy()
+        r, lo, hi = S.clustered_bootstrap(
+            lambda i: float(np.mean(w[i])), sub["cluster"].to_numpy(), n_boot=2000)
+        c = sub[sub["market_code"].isin(COUNT_MARKETS)]
+        if len(c) >= 40:
+            cw = c["u_board"].to_numpy()
+            cr, _, _ = S.clustered_bootstrap(
+                lambda i: float(np.mean(cw[i])), c["cluster"].to_numpy(), n_boot=1000)
+            ctxt = f"{len(c):>6} {cr:>+9.1%}"
+        else:
+            ctxt = f"{len(c):>6} {'-':>9}"
+        label = "everything" if floor is None else f"{floor:+d} or longer"
+        print(f"  {label:<16}{len(sub):>7}{len(sub)/len(d):>8.0%}"
+              f"{sub['hit'].mean():>8.1%}{r:>+9.1%}  [{lo:>+6.1%},{hi:>+6.1%}]"
+              f"{ctxt:>18}")
+
+
+
 if __name__ == "__main__":
     main()
