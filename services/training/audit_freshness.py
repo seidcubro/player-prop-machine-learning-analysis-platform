@@ -238,7 +238,7 @@ def check_opponent_features(engine):
           FROM player_market_features f
           JOIN player_game_stats_app g
             ON g.player_id = f.player_id AND g.game_date = f.as_of_game_date
-          WHERE f.market_id = 2 AND f.lookback = 5
+          WHERE f.market_id = :market_id AND f.lookback = :lookback
             AND f.extra_features ? 'opp_pos_rush_yds_allowed'
             AND g.position = 'RB'
           ORDER BY f.as_of_game_date DESC LIMIT 200
@@ -263,7 +263,26 @@ def check_opponent_features(engine):
                    LIMIT 8) t) AS truth
         FROM r
     """)
-    df = pd.read_sql(q, engine).dropna()
+    # Test the lookback the board actually serves, not a hardcoded 5.
+    #
+    # This asked market_id 2 at lookback 5 every time. diagnose_audit_failures
+    # measured both: the lb8 rows, which every active model except rec_yds uses,
+    # agree with the builder on 94.4% of props at corr 0.962. The lb5 rows agree
+    # on 64.8% and fell to 0% from 2026-10-01. So the check was failing on a
+    # population almost nothing serves while the served one was fine, and the
+    # correlation sat on 0.50 flipping the gate on and off run to run.
+    with engine.connect() as c:
+        row = c.execute(text(
+            "SELECT a.market_id, a.lookback FROM active_models a "
+            "JOIN prop_markets m ON m.id = a.market_id "
+            "WHERE m.code = 'rush_yds'"
+        )).mappings().first()
+    if not row:
+        warn("no active rush_yds model, cannot pick a lookback to verify")
+        return
+    df = pd.read_sql(q, engine, params=dict(row)).dropna()
+    print(f"  (market_id {row['market_id']}, lookback {row['lookback']}, "
+          f"the rows rush_yds is served from)")
     if df.empty:
         warn("no rows to verify opponent features against")
         return
@@ -622,6 +641,23 @@ def check_quantile_calibration(engine):
     # population that is actually being bet, now, and failed at five points,
     # which is the size that flips a standard price.
     season = date.today().year if date.today().month >= 3 else date.today().year - 1
+
+    # Only picks published since the calibrator last changed.
+    #
+    # This graded every live pick of the season, which can never improve: those
+    # probabilities were written by the calibrator that was in force at the
+    # time, and refitting it cannot reach back and change them. So the check
+    # failed, the fix shipped, and it failed again on exactly the same rows,
+    # which is the alert-fatigue pattern this file was reworked to stop. Judged
+    # now on the picks the current artifact actually produced.
+    cal = ARTIFACTS / "probability_calibrator.joblib"
+    since = f"{season}-08-01"
+    scope = "this season"
+    if cal.exists():
+        fitted = date.fromtimestamp(cal.stat().st_mtime)
+        if fitted > date(season, 8, 1):
+            since = fitted.isoformat()
+            scope = f"since the calibrator was refitted on {since}"
     with engine.connect() as c:
         live = c.execute(text("""
             SELECT count(*) AS picks,
@@ -632,10 +668,10 @@ def check_quantile_calibration(engine):
               AND source = 'live'
               AND edge_tier IN ('elite', 'strong', 'medium')
               AND game_date >= :since
-        """), {"since": f"{season}-08-01"}).mappings().first()
+        """), {"since": since}).mappings().first()
     if live and live["picks"] and live["picks"] >= 200:
         gap = float(live["actual"]) - float(live["claimed"])
-        line = (f"live {season} board: claimed {float(live['claimed']):.3f}, "
+        line = (f"live board {scope}: claimed {float(live['claimed']):.3f}, "
                 f"actual {float(live['actual']):.3f}, off by {gap:+.3f} "
                 f"on {live['picks']} published picks")
         if gap < -0.05:
@@ -644,9 +680,11 @@ def check_quantile_calibration(engine):
                             "by about this much")
         else:
             ok(line)
-    elif live and live["picks"]:
-        warn(f"only {live['picks']} live published picks this season; "
-             "too few to judge the board's own calibration yet")
+    else:
+        n = int(live["picks"]) if live and live["picks"] else 0
+        warn(f"only {n} published pick(s) {scope}; too few to judge the "
+             "board's own calibration yet. This is the expected state for a "
+             "week or two after a refit.")
 
     if worst > 0.10:
         warn("probabilities run optimistic across the board. Expected before a "
