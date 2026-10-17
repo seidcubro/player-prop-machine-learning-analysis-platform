@@ -105,7 +105,7 @@ def main():
     print(f"thresholds from {len(fit):,} backtest props, "
           f"accuracy read on {len(test):,} live props")
     print(f"  {'market':<18}{'elite at':>10}{'strong':>9}{'medium':>9}"
-          f"{'ordered on the fit':>21}")
+          f"{'elite beats the rest':>21}")
 
     out = {}
     for m in sorted(set(fit["market_code"]) & set(test["market_code"])):
