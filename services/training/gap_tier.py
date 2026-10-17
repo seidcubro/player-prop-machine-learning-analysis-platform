@@ -54,8 +54,10 @@ buckets were measured rather than tuned to maximise anything.
 
 from __future__ import annotations
 
+import json
 import math
 import os
+from pathlib import Path
 
 # In standard deviations of the player's own predicted distribution, and higher
 # on the over side.
@@ -340,3 +342,83 @@ def describe() -> str:
     return (f"gap tiers: unders elite >= {ELITE:g} sd, strong >= {STRONG:g}, "
             f"medium >= {MEDIUM:g}; overs elite >= {OVER_ELITE:g}, "
             f"strong >= {OVER_STRONG:g}, medium >= {OVER_MEDIUM:g}")
+
+
+# ---------------------------------------------------------------- v2 tiers
+#
+# Tier on the gap as a SHARE OF THE LINE, per market, with thresholds fitted by
+# fit_gap_tiers.py and only for markets that earned them.
+#
+# The tiers the board published before this carried no information at all. Live
+# 2026, one row per distinct prop: elite 50.0%, strong 49.8%, medium 46.8%,
+# small 51.6%. Small beat elite, because edge_tier() cuts on the probability
+# edge in percentage points and that quantity does not rank accuracy.
+#
+# The share-of-line gap does. Thresholds fitted on 8,548 backtest props and read
+# on 1,296 live ones they had never seen:
+#
+#     recs     elite 101 picks  62.4% [55.3%, 71.0%]
+#              strong            51.4%
+#              medium            46.5%
+#              small             49.6%
+#     pooled   elite 115 picks  63.5% [56.4%, 70.9%]
+#
+# Two markets earned a tiering and four did not. pass_yds, rec_yds, rush_att and
+# rush_yds show no separation on the fitting data, so they get no elite label:
+# every pick in them is "small", which is the honest word for "we cannot tell
+# which of these is better than a coin flip" and is exactly what their hit rate
+# says. A confident label on a coin flip is the thing that got us here.
+#
+# Set GAP_TIERS_V2=0 to fall back to whatever was tiering before.
+
+V2_ENABLED = os.getenv("GAP_TIERS_V2", "1") != "0"
+_V2_PATH = Path(os.getenv("ARTIFACT_DIR", "/artifacts")) / "gap_tiers.json"
+_V2: dict | None = None
+
+
+def v2_thresholds() -> dict:
+    """The per-market cuts, loaded once. Empty when the artifact is absent."""
+    global _V2
+    if _V2 is None:
+        try:
+            _V2 = json.loads(_V2_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            _V2 = {}
+    return _V2
+
+
+def share_gap(centre: float | None, line: float | None) -> float | None:
+    """|projection - line| / |line|, the only form of the gap that ranks.
+
+    In raw units the same measurement is flat: -0.2% [-10.9%, +10.7%] between
+    the widest and narrowest bands. Two yards is a different claim on a 4.5 yard
+    line than on a 70 yard one, and dividing by the line is what knows that. The
+    floor on the denominator keeps a half-point line from exploding the ratio.
+    """
+    if centre is None or line is None:
+        return None
+    try:
+        c, ln = float(centre), float(line)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(c) and math.isfinite(ln)):
+        return None
+    return abs(c - ln) / max(abs(ln), 0.5)
+
+
+def tier_v2(gap: float | None, market_code: str) -> str | None:
+    """elite/strong/medium/small for a market that earned a tiering, else None.
+
+    None means "this market has no validated ranking", and the caller publishes
+    the pick as small rather than inventing a grade for it.
+    """
+    t = v2_thresholds().get(market_code)
+    if t is None or gap is None:
+        return None
+    if gap >= t["elite"]:
+        return "elite"
+    if gap >= t["strong"]:
+        return "strong"
+    if gap >= t["medium"]:
+        return "medium"
+    return "small"

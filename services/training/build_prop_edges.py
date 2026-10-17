@@ -2290,7 +2290,30 @@ def main():
                            cal_q.get(0.75) if isinstance(cal_q, dict) else None,
                            market_code,
                            window_sd=frow.get("stddev"))
-        tier = (gap_tier.tier_for(z, market_code) if gap_tier.ENABLED else ev_tier)
+        # The tier the site advertises: how far our number sits from the line,
+        # as a share of the line, with cuts fitted per market by
+        # fit_gap_tiers.py and only where a market earned them.
+        #
+        # What this replaces was not close. Live 2026, one row per distinct
+        # prop, the tiers as published: elite 50.0%, strong 49.8%, medium 46.8%,
+        # small 51.6%. Small beat elite, because ev_tier cuts on the probability
+        # edge and that quantity does not rank being right.
+        #
+        # Fitted on 8,548 backtest props and read on 1,296 live ones they had
+        # never seen: recs elite 62.4% [55.3%, 71.0%] against strong 51.4%,
+        # medium 46.5%, small 49.6%; pooled elite 63.5% [56.4%, 70.9%].
+        #
+        # A market with no validated ranking returns None and its picks are
+        # published as small. That is the honest word for "we cannot tell which
+        # of these beats a coin flip", and it is what their hit rate says.
+        v2 = (gap_tier.tier_v2(gap_tier.share_gap(gap_centre, line_value),
+                               market_code)
+              if gap_tier.V2_ENABLED else None)
+        if gap_tier.V2_ENABLED and gap_tier.v2_thresholds():
+            tier = v2 or "small"
+        else:
+            tier = (gap_tier.tier_for(z, market_code)
+                    if gap_tier.ENABLED else ev_tier)
 
 
         # A bet the price already covers is not an edge, so it is not shown.
