@@ -115,12 +115,39 @@ def allocate(rng, totals, shares):
     return out
 
 
-def load_slate(engine) -> pd.DataFrame:
-    """Players with an upcoming game, and the inputs the simulation needs.
+def load_slate(engine, as_of=None) -> pd.DataFrame:
+    """Players with a game, and the inputs the simulation needs.
 
-    Everything comes from the most recent feature row per player, which already
-    carries expected shares, per-touch efficiency and team volume.
+    Everything comes from the feature row per player, which already carries
+    expected shares, per-touch efficiency and team volume.
+
+    `as_of` makes this answer for a PAST date instead of the upcoming slate:
+    the feature row is the one that ended on that game's date, and the game is
+    that day's. Without it the simulator could only ever be pointed at the
+    future, which is also why it has never been graded: our own note says do not
+    swap it in until it beats the quantile models on P(over), and that test
+    needs games whose outcomes are known.
     """
+    if as_of is not None:
+        return pd.read_sql(
+            text("""
+                SELECT f.player_id, m.code AS market_code, f.extra_features,
+                       f.weighted_mean, p.name, p.position, p.team, p.id AS pid,
+                       g.game_id, g.game_date, g.home_team, g.away_team,
+                       g.spread_line, g.total_line
+                FROM player_market_features f
+                JOIN prop_markets m ON m.id = f.market_id
+                JOIN players p ON p.external_id = f.player_id
+                JOIN nfl_games g
+                  ON (g.home_team = p.team OR g.away_team = p.team)
+                 AND g.game_date = f.as_of_game_date
+                WHERE f.lookback = :lb
+                  AND f.as_of_game_date = :as_of
+                  AND m.code IN ('rec_yds', 'recs', 'rush_yds', 'rush_att',
+                                 'pass_yds', 'pass_completions', 'pass_att')
+            """),
+            engine, params={"as_of": as_of, "lb": int(os.getenv("SIM_LOOKBACK", "5"))},
+        )
     return pd.read_sql(
         text("""
             WITH latest AS (
