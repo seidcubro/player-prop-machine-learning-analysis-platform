@@ -136,7 +136,16 @@ services:
       # missing.
       - ../services/api/app/odds_market_map.py:/opt/api_odds_market_map.py:ro
       # The figures the site states as fact, checked against the record.
-      - ../apps/web/src/lib/published-record.json:/opt/published_record.json:ro
+      # Writable, and it was not.
+      #
+      # audit_freshness check [16] compares the figures the site states as fact
+      # against the record, and eval_strategy.py with WRITE_RECORD=1
+      # regenerates them. The read-only mount here meant the weekly ran that
+      # step, could not write, and the audit failed on "strong stated -7.0%,
+      # actual -5.7%" on the very next run. I removed the :ro from the
+      # development compose file and left it here, which is the file production
+      # actually uses, so the fix never reached the machine it was for.
+      - ../apps/web/src/lib/published-record.json:/opt/published_record.json
     depends_on:
       postgres:
         condition: service_healthy

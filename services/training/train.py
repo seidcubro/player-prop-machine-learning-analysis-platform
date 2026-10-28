@@ -285,6 +285,9 @@ DROP_DUPLICATE_FEATURES = os.getenv("DROP_DUPLICATE_FEATURES", "1") != "0"
 # so its recent coverage is high and it is never caught here.
 RECENT_COVERAGE = float(os.getenv("RECENT_COVERAGE", "0.05"))
 RECENT_FRACTION = float(os.getenv("RECENT_FRACTION", "0.25"))
+# How far back still counts as "the builder is writing this". About a
+# season to date; see retired_features.
+RECENT_DAYS = int(os.getenv("RECENT_DAYS", "150"))
 
 # Add an explicit "this feature was absent" column beside each partially
 # absent feature.
@@ -359,7 +362,55 @@ def _normalize_extra_features(value: Any) -> dict[str, float]:
     return out
 
 
-def _build_feature_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+
+def retired_features(df: pd.DataFrame) -> set:
+    """Columns the builder used to write and has stopped writing.
+
+    Decided on the COMPLETE set of rows, before any train/test split, because
+    the whole question is "is this still being produced today" and a split by
+    definition hides today from one side of itself.
+
+    Presence is read from the raw feature dicts rather than from a filled
+    matrix, so a feature that is genuinely zero for most players keeps its
+    column. Absent and zero are different facts and only the first one retires
+    a feature.
+    """
+    if RECENT_COVERAGE <= 0 or "as_of_game_date" not in df.columns:
+        return set()
+    dates = pd.to_datetime(df["as_of_game_date"], errors="coerce")
+    # A window in DAYS, not a fraction of the rows.
+    #
+    # RECENT_FRACTION of 0.25 across four seasons is a full year, so a column
+    # last written on 2026-01-04 still appeared on 22% of the "recent" slice
+    # and cleared the 5% bar comfortably. The question is whether the builder
+    # is still producing a feature NOW, and only a window measured against the
+    # newest date in the data can answer that. 150 days is about a season to
+    # date, so anything the builder has written at any point this year counts
+    # as live and anything it stopped writing last season does not.
+    cutoff = dates.max() - pd.Timedelta(days=RECENT_DAYS)
+    recent = (dates >= cutoff).to_numpy()
+    if recent.sum() < 50:
+        print(f"  retired-feature test skipped: only {int(recent.sum())} rows "
+              f"since {cutoff.date() if pd.notna(cutoff) else '?'}")
+        return set()
+    dicts = df["extra_features"].apply(_normalize_extra_features).to_numpy()
+    recent_dicts = [d for d, r in zip(dicts, recent) if r]
+    keys = {k for d in dicts for k in d}
+    n = len(recent_dicts)
+    out = set()
+    for k in keys:
+        seen = sum(1 for d in recent_dicts if k in d)
+        if seen < RECENT_COVERAGE * n:
+            out.add(k)
+    if out:
+        print(f"  retired since {cutoff.date()}: {len(out)} feature(s) on under "
+              f"{RECENT_COVERAGE:.0%} of the {n} most recent rows")
+    return out
+
+
+def _build_feature_dataframe(
+    df: pd.DataFrame, force_drop=None
+) -> tuple[pd.DataFrame, list[str]]:
     # Base columns
     for c in BASE_FEATURE_COLS:
         if c not in df.columns:
@@ -451,32 +502,24 @@ def _build_feature_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]
                   + ", ".join(f"{k} ({covered[k]})" for k in sparse))
             X = X.drop(columns=sparse)
 
-    # Retired features: covered over the history, absent from the recent past.
-    # See RECENT_COVERAGE. Measured on the newest RECENT_FRACTION of rows by
-    # date, and skipped when that slice is too small to mean anything.
-    if (not extra_df.empty and RECENT_COVERAGE > 0
-            and "as_of_game_date" in df.columns):
-        dates = pd.to_datetime(df["as_of_game_date"], errors="coerce")
-        cutoff = dates.quantile(1.0 - RECENT_FRACTION)
-        recent = (dates >= cutoff).to_numpy()
-        n_recent = int(recent.sum())
-        if n_recent < 50:
-            print(f"  skipping the retired-feature test: only {n_recent} recent row(s)")
-        else:
-            keep_cols = set(X.columns)
-            recent_dicts = [d for d, r in zip(extras_series.to_numpy(), recent) if r]
-            retired = sorted(
-                k for k in extra_keys
-                if k in keep_cols
-                and sum(1 for d in recent_dicts if k in d) < RECENT_COVERAGE * n_recent
-            )
-            if retired:
-                seen = {k: sum(1 for d in recent_dicts if k in d) for k in retired}
-                print(f"  dropping {len(retired)} retired feature(s), present on "
-                      f"under {RECENT_COVERAGE:.0%} of the {n_recent} rows since "
-                      f"{cutoff.date() if pd.notna(cutoff) else '?'}: "
-                      + ", ".join(f"{k} ({seen[k]})" for k in retired))
-                X = X.drop(columns=retired)
+    # Retired features, decided elsewhere and applied here.
+    #
+    # This used to decide for itself, from the frame it was handed. main()
+    # hands it train_df, which _time_split has already cut to the earlier 75%
+    # of rows, so the frame contains no recent rows at all: on a set running to
+    # October 2026 the train split ends in October 2025. The test either looked
+    # at the middle of the previous season, where a column retired on
+    # 2026-01-04 is alive and well, or found one recent row and skipped itself.
+    # Either way opp_pass_attempts_trend survived every retrain while the audit
+    # failed on it week after week.
+    #
+    # retired_features() now makes the call once, on the complete set, and the
+    # answer is passed in. See main().
+    if force_drop:
+        present = [c for c in force_drop if c in X.columns]
+        if present:
+            print(f"  dropping {len(present)} retired feature(s): {sorted(present)}")
+            X = X.drop(columns=present)
 
     # Exact copies, dropped after the sparsity pass so the survivors are the
     # columns that actually reach a model. The first spelling wins, which keeps
@@ -643,8 +686,14 @@ def main():
 
         train_df, test_df = _time_split(df, test_frac=0.25)
 
-        X_train, feature_cols = _build_feature_dataframe(train_df)
-        X_test, _ = _build_feature_dataframe(test_df)
+        # One cutoff for every call, taken from the full set before it is
+        # split, so "recent" means recent in the season rather than recent
+        # within whichever slice happens to be in hand.
+        retired = retired_features(df)
+
+        X_train, feature_cols = _build_feature_dataframe(
+            train_df, force_drop=retired)
+        X_test, _ = _build_feature_dataframe(test_df, force_drop=retired)
         X_test = X_test.reindex(columns=feature_cols, fill_value=0.0)
 
         TARGET_TRANSFORM = os.getenv("TARGET_TRANSFORM", "none").lower().strip()
@@ -687,7 +736,7 @@ def main():
         # training rows would be worthless. `shipped_refit_on_all_rows` records
         # which of the two is in the joblib so this can never be misread later.
         shipped = build_model(model_name)
-        X_all, all_cols = _build_feature_dataframe(df)
+        X_all, all_cols = _build_feature_dataframe(df, force_drop=retired)
         X_all = X_all.reindex(columns=feature_cols, fill_value=0.0)
         y_all_raw = df[LABEL_COL].apply(_safe_float).astype(float)
         y_all = (y_all_raw.clip(lower=0.0).apply(math.log1p)
