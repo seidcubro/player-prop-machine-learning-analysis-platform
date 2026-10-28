@@ -886,6 +886,31 @@ def main():
             print("WARN: model registry tables not updated:", e)
 
         print("TRAINING COMPLETE")
+
+        # Say what has to happen next, because this file alone leaves the
+        # platform in a state the audit fails on.
+        #
+        # The quantile bundle takes its feature space from THIS model's
+        # metadata at the time it was fitted, so retraining the point model and
+        # stopping there leaves the two disagreeing. audit_freshness check [3]
+        # catches it -- "pass_yds: quantile bundle feature space differs from
+        # the point model (73 vs 69)" -- but only after the next board has been
+        # built against a mismatched pair. The weekly runs both in order; a
+        # retrain by hand is the case that forgets.
+        qp = os.path.join(ARTIFACT_DIR,
+                          f"quant_v1_{MARKET_CODE}_lb{LOOKBACK}.json")
+        stale = False
+        if os.path.exists(qp):
+            try:
+                stale = json.loads(open(qp).read()).get("feature_cols") != feature_cols
+            except Exception:
+                stale = True
+        if stale:
+            print()
+            print(f"  the quantile bundle for {MARKET_CODE} was fitted on a "
+                  f"different feature space and is now stale. Refit it:")
+            print(f"    MARKET_CODE={MARKET_CODE} LOOKBACK={LOOKBACK} "
+                  f"SPLIT_MODE=season python train_quantiles.py")
         print(json.dumps(meta, indent=2))
 
 
