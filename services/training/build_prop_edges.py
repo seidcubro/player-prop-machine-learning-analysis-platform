@@ -2372,6 +2372,10 @@ def main():
             "ev_per_unit": ev_per_unit_staked(expected_value, chosen_price),
             "recommended_side": recommended_side,
             "edge_tier": tier,
+            # Carried so the whole board can be tiered by rank below. A tier
+            # assigned row by row can only compare against a fixed number; a
+            # rank compares against the rest of tonight's board.
+            "gap_share": gap_tier.share_gap(gap_centre, line_value),
             # What the tier was cut on, stored so the site can say why a pick is
             # ranked where it is and so next season can check whether a full
             # standard deviation still hits 60%.
@@ -2405,6 +2409,36 @@ def main():
         return
 
     out = pd.DataFrame(rows)
+
+    # Tier by rank within tonight's board, per market.
+    #
+    # Week 7 of 2026, the first full week on the gap tiers, published ZERO
+    # elite picks. Week 6 published 15 and they hit 40.0%, while strong hit
+    # 65.3% on 72 and small hit 56.2% on 274. The grade was never landing on
+    # the good picks because the cut was an absolute gap taken from the
+    # backtest (recs elite at 0.344) applied to a live board whose gaps sit
+    # lower. Fitted on one population, applied to another.
+    #
+    # Whether the gap ranks accuracy is a claim about the world and it was
+    # validated out of sample. Where to cut is a presentation choice, and a
+    # share of the board answers it without assuming two seasons share a scale.
+    # See gap_tier.tiers_by_rank.
+    if gap_tier.V2_ENABLED and gap_tier.v2_thresholds() and not out.empty:
+        before = out["edge_tier"].value_counts().to_dict()
+        out["edge_tier"] = "small"
+        for code, idx in out.groupby("market_code").groups.items():
+            labels = gap_tier.tiers_by_rank(
+                out.loc[idx, "gap_share"].tolist(), code)
+            out.loc[idx, "edge_tier"] = labels
+        after = out["edge_tier"].value_counts().to_dict()
+        print("  tiers by rank within each market's board: "
+              + ", ".join(f"{t} {after.get(t, 0)}"
+                          for t in ("elite", "strong", "medium", "small")))
+        if before != after:
+            print(f"    (absolute cuts would have given "
+                  + ", ".join(f"{t} {before.get(t, 0)}"
+                              for t in ("elite", "strong", "medium", "small"))
+                  + ")")
 
     # Value flag: under on a top-quartile line, in the markets where the effect
     # holds up across seasons.

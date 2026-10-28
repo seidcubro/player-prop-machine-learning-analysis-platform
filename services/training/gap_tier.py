@@ -422,3 +422,73 @@ def tier_v2(gap: float | None, market_code: str) -> str | None:
     if gap >= t["medium"]:
         return "medium"
     return "small"
+
+
+# ---------------------------------------------------------- tiers by rank
+#
+# Cut the tiers by RANK within the board being published, not by an absolute
+# gap fitted on last season.
+#
+# Week 7 of 2026, the first full week on the gap tiers, published ZERO elite
+# picks. Week 6 published 15 and they hit 40.0%. Meanwhile "strong" hit 65.3%
+# on 72 picks and "small" hit 56.2% on 274. The label was not wrong about which
+# picks were good, it simply never landed on them.
+#
+# The cause is the same scale-transfer failure found a week earlier in
+# find_confidence_signal and shipped into the tiers anyway: the cuts are
+# absolute numbers taken from the backtest's gap distribution (recs elite at
+# 0.344, pass_td at 0.525) applied to a live board whose gaps sit lower. Fitted
+# on one population, applied to another, selecting almost nothing.
+#
+# Separating the two questions fixes it permanently. Whether the gap RANKS
+# accuracy is a claim about the world, and it was validated out of sample:
+# recs +6.6%, pass_td +13.0%, both holding on a live season the cuts never saw.
+# Where to CUT is a presentation choice about how many picks to call elite, and
+# a share of the board answers it without any assumption that two seasons share
+# a scale.
+#
+# So a market that earned a tiering gets its top ELITE_SHARE of today's board
+# called elite, the next STRONG_SHARE strong, and so on. Elite is always the
+# picks we disagree with the book about most, out of the ones actually on the
+# board tonight.
+
+ELITE_SHARE = float(os.getenv("ELITE_SHARE", "0.10"))
+STRONG_SHARE = float(os.getenv("STRONG_SHARE", "0.20"))
+MEDIUM_SHARE = float(os.getenv("MEDIUM_SHARE", "0.30"))
+# A market needs this many rows on the board before a rank means anything. Ten
+# picks split four ways is one pick a tier, which is a label, not a ranking.
+MIN_RANKABLE = int(os.getenv("MIN_RANKABLE", "20"))
+
+
+def tiers_by_rank(gaps, market_code: str) -> list:
+    """Tier a whole market's board at once, by rank. Returns a list of labels.
+
+    `gaps` is this market's share-of-line gaps for every row being published.
+    Rows with no gap, and markets that never earned a tiering, come back
+    "small": the honest word for "nothing here ranks these".
+    """
+    n = len(gaps)
+    if n == 0:
+        return []
+    if v2_thresholds().get(market_code) is None or n < MIN_RANKABLE:
+        return ["small"] * n
+
+    vals = [(-1.0 if (g is None or not math.isfinite(g)) else float(g))
+            for g in gaps]
+    # Rank descending, so position 0 is the widest disagreement. Ties keep
+    # their input order, which is arbitrary but stable.
+    order = sorted(range(n), key=lambda i: -vals[i])
+    out = ["small"] * n
+    n_elite = int(round(n * ELITE_SHARE))
+    n_strong = int(round(n * STRONG_SHARE))
+    n_medium = int(round(n * MEDIUM_SHARE))
+    for pos, i in enumerate(order):
+        if vals[i] < 0:
+            continue
+        if pos < n_elite:
+            out[i] = "elite"
+        elif pos < n_elite + n_strong:
+            out[i] = "strong"
+        elif pos < n_elite + n_strong + n_medium:
+            out[i] = "medium"
+    return out
