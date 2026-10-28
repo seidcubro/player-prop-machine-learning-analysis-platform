@@ -842,8 +842,11 @@ if [ "$FAST" = "0" ]; then
     # Said out loud, because the file is committed and a scheduled run has just
     # changed a tracked file on the server.
     if ! git -C . diff --quiet -- apps/web/src/lib/published-record.json 2>/dev/null; then
-      log "published-record.json changed; commit it so the site rebuilds with it"
+      log "published-record.json changed; the site shows these on its next build"
       git -C . --no-pager diff --stat -- apps/web/src/lib/published-record.json || true
+      # Said plainly, because this is the one file a scheduled run leaves dirty
+      # and `git pull` then refuses to move until somebody deals with it.
+      log "note: use 'sh scripts/pull.sh' instead of 'git pull' on this machine"
     fi
   fi
 
