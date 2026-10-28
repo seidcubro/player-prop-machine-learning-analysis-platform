@@ -455,9 +455,19 @@ def tier_v2(gap: float | None, market_code: str) -> str | None:
 ELITE_SHARE = float(os.getenv("ELITE_SHARE", "0.10"))
 STRONG_SHARE = float(os.getenv("STRONG_SHARE", "0.20"))
 MEDIUM_SHARE = float(os.getenv("MEDIUM_SHARE", "0.30"))
-# A market needs this many rows on the board before a rank means anything. Ten
-# picks split four ways is one pick a tier, which is a label, not a ranking.
-MIN_RANKABLE = int(os.getenv("MIN_RANKABLE", "20"))
+# A market needs this many rows on the board before a rank means anything.
+#
+# Twenty was too strict and produced the failure it was meant to prevent. A
+# Wednesday board carries one priced game, 41 rows across every market, so no
+# single market cleared twenty and the whole board published as small: "elite
+# 0, strong 0, medium 0, small 41", where the absolute cuts would at least have
+# given strong 15. Refusing to rank is only better than ranking badly when the
+# board is genuinely too thin to order, and ten rows can be ordered.
+#
+# Ten also keeps the arithmetic honest at the bottom: ten rows at a 10% elite
+# share is one elite pick, which is a ranking with one winner rather than a
+# grade handed out because the slate was small.
+MIN_RANKABLE = int(os.getenv("MIN_RANKABLE", "10"))
 
 
 def tiers_by_rank(gaps, market_code: str) -> list:

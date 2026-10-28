@@ -821,14 +821,21 @@ if [ "$FAST" = "0" ]; then
 
   # Regenerate the figures the site states as fact, from the week just graded.
   #
-  # Weekly only, because it is a season statistic and nothing an hourly run does
-  # can move it. This was the last hand-copied number in the project: a person
+  # Every run that grades, not the weekly alone.
+  #
+  # Weekly-only left the figure up to a week stale, and the audit fails on a
+  # stale figure, so a Wednesday refresh hit "published tier return is out of
+  # date: strong stated -7.0%, actual -5.7%" with no way to clear it. It reads
+  # prop_edge_results and writes one file, so running it on the daily costs
+  # seconds and keeps what the site states as fact within a day of the truth.
+  #
+  # This was the last hand-copied number in the project: a person
   # had to read eval_strategy's printout and edit the JSON, so it drifted, the
   # site claimed an elite return of +4.0% against an actual +0.7%, and the audit
   # check written to catch that then failed every board run for days because the
   # only fix was manual. Automated here, and the audit now only fails the run
   # that can do this.
-  if [ "$MODE" = "--weekly" ]; then
+  if [ "$MODE" != "--board" ]; then
     log "regenerate the published record"
     $COMPOSE run --rm -e WRITE_RECORD=1 training python eval_strategy.py \
       | tail -20

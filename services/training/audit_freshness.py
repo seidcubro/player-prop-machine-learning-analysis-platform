@@ -59,7 +59,13 @@ DATABASE_URL = os.getenv(
 # everywhere else. A finding that means the board being served right now is
 # wrong still fails every run, because that one is actionable immediately.
 AUDIT_MODE = os.getenv("AUDIT_MODE", "").strip().lstrip("-").lower()
-RETRAIN_MODES = {"weekly", "migrate", "refresh"}
+# --refresh is NOT in here. It rebuilds features for named markets and
+# republishes; it does not retrain a model, does not grade, and does not
+# regenerate the published record. Including it meant a Wednesday refresh
+# FAILED on "published tier return is out of date" and on pass_yds naming a
+# retired column, neither of which that run can do anything about. Same
+# alert-fatigue pattern, one mode further along.
+RETRAIN_MODES = {"weekly", "migrate"}
 # The modes that rebuild player_market_features, and so are the only ones that
 # can change what a stored feature value is. --board and --refresh are FAST=1
 # and reproject from the rows already there. See NEED_FEATURES in
