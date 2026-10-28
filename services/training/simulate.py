@@ -131,7 +131,15 @@ def load_slate(engine, as_of=None) -> pd.DataFrame:
     if as_of is not None:
         return pd.read_sql(
             text("""
-                SELECT f.player_id, m.code AS market_code, f.extra_features,
+                -- Whatever lookback that date actually has, largest first.
+                --
+                -- This filtered on lookback = 5 and came back empty for every
+                -- date from 2026-10-08 on, because the markets moved to
+                -- lookback 8 and nothing writes lb5 rows for them any more. A
+                -- hardcoded lookback is the same mistake the freshness audit
+                -- made: asking about a population nothing serves.
+                SELECT DISTINCT ON (f.player_id, m.code)
+                       f.player_id, m.code AS market_code, f.extra_features,
                        f.weighted_mean, p.name, p.position, p.team, p.id AS pid,
                        g.game_id, g.game_date, g.home_team, g.away_team,
                        g.spread_line, g.total_line
@@ -141,12 +149,12 @@ def load_slate(engine, as_of=None) -> pd.DataFrame:
                 JOIN nfl_games g
                   ON (g.home_team = p.team OR g.away_team = p.team)
                  AND g.game_date = f.as_of_game_date
-                WHERE f.lookback = :lb
-                  AND f.as_of_game_date = :as_of
+                WHERE f.as_of_game_date = :as_of
                   AND m.code IN ('rec_yds', 'recs', 'rush_yds', 'rush_att',
                                  'pass_yds', 'pass_completions', 'pass_att')
+                ORDER BY f.player_id, m.code, f.lookback DESC
             """),
-            engine, params={"as_of": as_of, "lb": int(os.getenv("SIM_LOOKBACK", "5"))},
+            engine, params={"as_of": as_of},
         )
     return pd.read_sql(
         text("""
