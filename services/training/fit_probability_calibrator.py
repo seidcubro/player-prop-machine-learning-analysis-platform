@@ -127,11 +127,47 @@ def brier(p, y):
 # before it and scored on that date, which is the only honest way to ask whether
 # using it would have helped rather than whether it describes what happened.
 SEASON_OFFSET_PRIOR = float(os.getenv("SEASON_OFFSET_PRIOR", "300"))
+# How fast a week stops counting toward the level, as candidates rather than a
+# choice. fit_season_offset runs each through the walk-forward and keeps the
+# one with the lowest out-of-sample error, including "no offset" and "flat".
+#
+# It has to be chosen rather than fixed because the level is a property of the
+# model as it stands, not of the season, and the model moves: the spread
+# calibrator accepted two markets in October and none in November, and the
+# median bias it corrects went from -9.3 yards on rec_yds in week 1 to +1.3 in
+# week 8. A number fitted flat across all of that is the average of two
+# different models, which is what put the board at 63% overs in week 7 against
+# 48% landing.
+OFFSET_HALF_LIVES = os.getenv("OFFSET_HALF_LIVES", "7,10,14,21,28,9999")
 CURRENT_SEASON = int(os.getenv("CURRENT_SEASON", "2026"))
 
 
+
+def _decay(dates, as_of, half_life_days):
+    """Weight each row by how recent it is, halving every half_life_days."""
+    age = (pd.Timestamp(as_of) - pd.to_datetime(dates)).dt.days.clip(lower=0)
+    return np.power(0.5, age.to_numpy(dtype=float) / float(half_life_days))
+
+
+def _wmean(values, weights):
+    w = np.asarray(weights, dtype=float)
+    tot = w.sum()
+    if tot <= 0:
+        return float(np.mean(values))
+    return float(np.sum(np.asarray(values, dtype=float) * w) / tot)
+
+
 def fit_season_offset(d, models):
-    """One scalar for this season's level, with a walk-forward verdict."""
+    """One scalar for this season's level, with a walk-forward verdict.
+
+    The half-life is chosen here rather than asserted. A synthetic season shaped
+    like this one -- five weeks needing +0.10 and three needing +0.01 -- wants
+    +0.0662 flat, +0.0466 at 21 days and +0.0100 from the recent weeks alone, so
+    any single number I pick is a guess about how fast the model is moving. The
+    walk-forward already measures exactly that, week by week, so the candidates
+    are run through it and the one with the lowest out-of-sample level error
+    wins. Every candidate is printed, including flat and including none.
+    """
     live = d[d["season"] == CURRENT_SEASON]
     if "source" in live.columns:
         live = live[live["source"] == "live"]
@@ -148,36 +184,56 @@ def fit_season_offset(d, models):
 
     live = live.sort_values("game_date")
     dates = sorted(live["game_date"].unique())
-    before = []
-    after = []
-    for dt in dates:
-        past, now = live[live["game_date"] < dt], live[live["game_date"] == dt]
-        if len(now) == 0:
-            continue
-        cal_now = calibrated(now)
-        before.append(np.abs(cal_now.mean() - now["over_hit"].mean()) * len(now))
-        if len(past) < 100:
-            after.append(before[-1])
-            continue
-        cal_past = calibrated(past)
-        off = ((past["over_hit"].mean() - cal_past.mean())
-               * len(past) / (len(past) + SEASON_OFFSET_PRIOR))
-        after.append(np.abs((cal_now + off).mean() - now["over_hit"].mean()) * len(now))
-
     n = len(live)
-    err_before, err_after = sum(before) / n, sum(after) / n
-    cal_all = calibrated(live)
-    offset = float((live["over_hit"].mean() - cal_all.mean())
-                   * n / (n + SEASON_OFFSET_PRIOR))
+
+    def walk_forward(half_life):
+        """Mean absolute level error, fitting only on what came before."""
+        err = 0.0
+        for dt in dates:
+            past, now = live[live["game_date"] < dt], live[live["game_date"] == dt]
+            if len(now) == 0:
+                continue
+            cal_now = calibrated(now)
+            off = 0.0
+            if half_life is not None and len(past) >= 100:
+                cal_past = calibrated(past)
+                w = _decay(past["game_date"], dt, half_life)
+                eff = float(w.sum())
+                off = ((_wmean(past["over_hit"], w) - _wmean(cal_past, w))
+                       * eff / (eff + SEASON_OFFSET_PRIOR))
+            err += abs((cal_now + off).mean() - now["over_hit"].mean()) * len(now)
+        return err / n
+
+    # None is "ship no offset at all", and a very long half-life is flat.
+    candidates = [None] + [float(x) for x in
+                           os.getenv("OFFSET_HALF_LIVES", "7,10,14,21,28,9999")
+                           .split(",")]
     print(f"season offset: {n} live {CURRENT_SEASON} rows, "
-          f"calibrated {cal_all.mean():.4f} against actual "
-          f"{live['over_hit'].mean():.4f}")
-    print(f"  walk-forward mean absolute level error "
-          f"{err_before:.4f} -> {err_after:.4f}")
-    if err_after >= err_before:
-        print("  it does not help week to week, so nothing is written")
+          f"{len(dates)} game dates")
+    print(f"  {'half-life':<14}{'effective rows':>16}{'walk-forward error':>22}")
+    scored = []
+    for hl in candidates:
+        err = walk_forward(hl)
+        if hl is None:
+            label, eff = "no offset", float(n)
+        else:
+            w = _decay(live["game_date"], live["game_date"].max(), hl)
+            eff = float(w.sum())
+            label = "flat" if hl >= 9999 else f"{hl:g} days"
+        scored.append((err, hl, label))
+        print(f"  {label:<14}{eff:>16.0f}{err:>22.4f}")
+
+    scored.sort(key=lambda t: t[0])
+    best_err, best_hl, best_label = scored[0]
+    if best_hl is None:
+        print("  no offset wins; nothing is written")
         return None
-    print(f"  shipping offset {offset:+.4f}")
+
+    w_all = _decay(live["game_date"], live["game_date"].max(), best_hl)
+    eff_all = float(w_all.sum())
+    offset = float((_wmean(live["over_hit"], w_all) - _wmean(calibrated(live), w_all))
+                   * eff_all / (eff_all + SEASON_OFFSET_PRIOR))
+    print(f"  winner: {best_label}, offset {offset:+.4f}")
     return offset
 
 
