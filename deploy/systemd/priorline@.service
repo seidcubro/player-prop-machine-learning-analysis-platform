@@ -43,10 +43,24 @@ EnvironmentFile=-/etc/priorline/%i.env
 # two rebuilds by hand did exactly that during development and left the board
 # empty.
 #
-# flock takes a lock shared by every mode. -w 3600 waits rather than failing,
-# because a closing capture that skips is a price gone for good, while one that
-# starts a few minutes late is usually still inside its window.
-ExecStart=/usr/bin/flock -w 3600 /var/lock/priorline.lock /bin/sh scripts/scheduled_update.sh --%i
+# deploy/run_mode.sh takes that lock and, crucially, tells a timeout apart from
+# a failure.
+#
+# This was `flock -w 3600` directly, and the hour-long wait was the bug. The
+# weekly starts at 01:00 on a Tuesday and runs most of an hour; the closing
+# capture fires at :05 every hour and wants the same lock. So the 01:05 run
+# waited the full hour, gave up at 02:05, exited 1, and systemd paged:
+#
+#   PriorLine closing failed at 2026-11-03 02:05 EST
+#   ...last log line: [2026-11-03 00:07:06] ==> done
+#
+# No output from the failing run, because the script never started. Two jobs
+# correctly declining to run at once, at one in the morning on a Tuesday, with
+# no game within a day of kickoff, reported as a failure every week.
+#
+# run_mode.sh waits, then skips cleanly and says so. A real failure inside the
+# script still exits non-zero and still pages.
+ExecStart=/bin/sh deploy/run_mode.sh %i
 # The weekly retrain is the long one, about an hour. This is a ceiling, not a
 # target, and it exists so a wedged run cannot block the next timer forever.
 TimeoutStartSec=4h
