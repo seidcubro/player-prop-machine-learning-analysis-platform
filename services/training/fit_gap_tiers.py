@@ -1,49 +1,40 @@
-"""Tier on the gap, per market, so elite is the band that hits most.
+"""Which markets earn a tiering, and which end of the gap is the confident end.
 
-The tiers the site advertises today carry no information. Live 2026, one row
-per distinct prop:
+The board tiers by RANK within each market's own board (gap_tier.tiers_by_rank),
+so this no longer decides where to cut. It decides two things: whether a market
+is ranked by the gap at all, and if so which way round.
 
-    elite    242   50.0%
-    strong   213   49.8%
-    medium   265   46.8%
-    small    576   51.6%
+Both matter, and assuming the second cost a season. Measured on 2,495 live
+props, cut in half by date and asked twice:
 
-Small beats elite. That is not a threshold being slightly off, it is the tier
-meaning nothing, and it happens because edge_tier() in build_prop_edges cuts on
-the probability edge in percentage points rather than on the disagreement
-between the projection and the line.
+    recs      top of the gap     +17.6%  then  +9.9%   -> ranked, high end
+    rush_yds  BOTTOM of the gap  +12.5%  then +23.7%   -> ranked, LOW end
+    rush_att  top of the gap     +19.5%  then  -0.5%   -> not ranked
+    rec_yds   top of the gap      +4.0%  then  +5.9%   -> too small to call
 
-The gap does carry information, measured on the same picks:
+rush_yds runs backwards. Its narrowest disagreements hit 60.0% and 67.4% in the
+two halves against 49.1% for the market as a whole, so the widest ones, which
+the board was calling its most confident, are its worst. Pooled across markets
+this is invisible: rush_yds pointing one way and recs the other cancel to a rank
+correlation of +0.002, which is how the first version of this file came to fit
+every market in the same direction.
 
-    gap / line   0.00-0.10   260   48.8%
-                 0.10-0.19   259   47.1%
-                 0.19-0.31   259   48.3%
-                 0.31-0.43   259   49.0%
-                 0.43+       259   56.8%
-    top minus bottom +7.9% [+1.7%, +21.2%]
+TWO WAYS IN, and a market needs one of them.
 
-As a share of the line, not in raw units: the same table on raw units is -0.2%
-[-10.9%, +10.7%], flat. A two yard gap means something different on a 4.5 yard
-line than on a 70 yard one, and only the ratio knows that.
+  Split-half replication on the live season, at either end. This is the
+  stronger test because it is the population the board actually serves, and
+  because a signal that survives being asked twice is not a decile someone
+  noticed. The size bar is simulated rather than assumed: at these counts two
+  halves of pure noise agree in sign with both sides above 3 points in 28% of
+  trials, so the bar is 8 points, where noise passes about one time in
+  fourteen.
 
-Per market the top band is where the picks are:
+  The backtest gate, for markets with too few live rows to split. Elite minus
+  the rest on the fitting rows, with a bootstrap interval that must clear zero.
+  High end only, since there is not enough live evidence to justify inverting a
+  market on backtest alone.
 
-    recs      0.40+   67.1%   top minus bottom +19.2% [+11.7%, +26.3%]
-    rush_att  0.31+   66.7%                    +33.3% [ +5.6%, +59.4%]
-    rec_yds   0.57+   52.2%                    +10.4% [ -6.2%, +31.2%]
-    rush_yds  0.03-0.20 61.3%                  -16.1% [-36.3%,  +2.5%]
-
-Two of those clear zero outright. rush_yds runs BACKWARDS, its smallest gaps
-being its most accurate, which is a real finding and is handled rather than
-averaged away: a market whose ordering does not hold on the fitting data is
-reported and left on flat tiers rather than being given a confident label.
-
-An earlier attempt ordered fine bands by their own accuracy and let a tier own
-scattered ranges. On live rows that returned elite 52.9%, strong 48.9%, medium
-48.2%, small 49.1% -- it had fitted the backtest's noise. So this does the
-simple thing instead: quintiles of the gap, in order, elite at the top. The
-thresholds come from the backtest and the accuracy is read on the live season,
-which is the only number quoted.
+Everything else stays flat, and flat means every pick in it publishes as small.
 
 Writes artifacts/gap_tiers.json with WRITE=1.
 
@@ -64,17 +55,17 @@ import build_prop_edges as bp
 ARTIFACTS = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 OUT = ARTIFACTS / "gap_tiers.json"
 
+SHARE = float(os.getenv("SHARE", "0.20"))
+MIN_EFFECT = float(os.getenv("MIN_EFFECT", "0.08"))
+MIN_SIDE = int(os.getenv("MIN_SIDE", "20"))
 MIN_FIT = int(os.getenv("MIN_FIT", "300"))
-MIN_TEST_CELL = int(os.getenv("MIN_TEST_CELL", "20"))
-# elite, strong, medium, then everything below is small.
-CUTS = (0.80, 0.60, 0.40)
-NAMES = ("elite", "strong", "medium", "small")
+SEASON = int(os.getenv("SEASON", "2026"))
 
 
 def load(eng, source):
     d = pd.read_sql(text("""
-        SELECT market_code, game_date, player_name, line, recommended_side,
-               hit, projection_median AS p50
+        SELECT market_code, game_date, player_name, line, hit,
+               projection_median AS p50
         FROM prop_edge_results
         WHERE source = :s AND hit IS NOT NULL AND line IS NOT NULL
           AND projection_median IS NOT NULL
@@ -82,124 +73,115 @@ def load(eng, source):
     if d.empty:
         return d
     d = d.drop_duplicates(subset=["game_date", "player_name", "market_code",
-                                  "line", "recommended_side"]).reset_index(drop=True)
+                                  "line"]).reset_index(drop=True)
     d["hit"] = d["hit"].astype(float)
     d["gap"] = (d["p50"] - d["line"]).abs() / d["line"].abs().clip(lower=0.5)
     d["cluster"] = d["game_date"].astype(str)
     return d
 
 
-def tier_of(gap, thresholds):
-    for name, t in zip(NAMES, thresholds):
-        if gap >= t:
-            return name
-    return NAMES[-1]
+def band_vs_rest(g, high):
+    """Top (or bottom) SHARE of this slice against the rest of it."""
+    v = g["gap"]
+    thr = v.quantile(1.0 - SHARE if high else SHARE)
+    sel = (v >= thr) if high else (v <= thr)
+    a, b = g.loc[sel, "hit"].to_numpy(), g.loc[~sel, "hit"].to_numpy()
+    if len(a) < MIN_SIDE or len(b) < MIN_SIDE:
+        return None
+    vals = np.concatenate([a, b])
+    flags = np.concatenate([np.ones(len(a)), np.zeros(len(b))])
+    cl = np.concatenate([g.loc[sel, "cluster"].to_numpy(),
+                         g.loc[~sel, "cluster"].to_numpy()])
+    r, lo, hi = S.clustered_bootstrap(
+        lambda i: (float(np.mean(vals[i][flags[i] == 1]))
+                   - float(np.mean(vals[i][flags[i] == 0]))
+                   if (flags[i] == 1).any() and (flags[i] == 0).any() else 0.0),
+        cl, n_boot=1500)
+    return {"n": int(sel.sum()), "acc": float(a.mean()), "d": r, "lo": lo, "hi": hi}
+
+
+def replicates(g1, g2, high):
+    """Same sign in both halves, both above the simulated size bar."""
+    r1, r2 = band_vs_rest(g1, high), band_vs_rest(g2, high)
+    if r1 is None or r2 is None:
+        return None
+    ok = ((r1["d"] > 0) == (r2["d"] > 0)
+          and abs(r1["d"]) > MIN_EFFECT and abs(r2["d"]) > MIN_EFFECT
+          and r1["d"] > 0)
+    return {"ok": bool(ok), "first": r1["d"], "second": r2["d"],
+            "acc_first": r1["acc"], "acc_second": r2["acc"]}
+
+
+def backtest_gate(g):
+    """elite minus the rest on the fitting rows, interval must clear zero."""
+    if len(g) < MIN_FIT:
+        return None
+    r = band_vs_rest(g, True)
+    if r is None:
+        return None
+    return {"ok": bool(r["lo"] > 0), "d": r["d"], "lo": r["lo"]}
 
 
 def main():
     eng = create_engine(bp.DATABASE_URL, future=True)
-    fit, test = load(eng, "backtest"), load(eng, "live")
-    if fit.empty or test.empty:
-        raise SystemExit("need both backtest and live graded rows")
+    back, live = load(eng, "backtest"), load(eng, "live")
+    if live.empty:
+        raise SystemExit("no live graded rows")
+    live = live[live["game_date"] >= pd.Timestamp(f"{SEASON}-08-01").date()] \
+        if live["game_date"].dtype == object else live
+    cut = live["game_date"].quantile(0.5)
+    h1, h2 = live[live["game_date"] <= cut], live[live["game_date"] > cut]
 
-    print(f"thresholds from {len(fit):,} backtest props, "
-          f"accuracy read on {len(test):,} live props")
-    print(f"  {'market':<18}{'elite at':>10}{'strong':>9}{'medium':>9}"
-          f"{'elite beats the rest':>21}")
+    print(f"{len(back):,} backtest props, {len(live):,} live "
+          f"({len(h1):,} / {len(h2):,} either side of {cut})")
+    print(f"top/bottom {SHARE:.0%}, replication bar {MIN_EFFECT:.0%} in each half")
+    print()
+    print(f"  {'market':<12}{'live n':>7}{'high end':>22}{'low end':>22}  verdict")
 
     out = {}
-    for m in sorted(set(fit["market_code"]) & set(test["market_code"])):
-        gf = fit[fit["market_code"] == m]
-        if len(gf) < MIN_FIT:
-            print(f"  {m:<18}{'-':>10}{'-':>9}{'-':>9}"
-                  f"{f'only {len(gf)} fit rows':>21}")
-            continue
-        thr = [float(gf["gap"].quantile(q)) for q in CUTS] + [-np.inf]
-        gf = gf.assign(tier=[tier_of(g, thr) for g in gf["gap"]])
-        acc = {t: gf.loc[gf["tier"] == t, "hit"].mean() for t in NAMES
-               if (gf["tier"] == t).sum() >= 25}
+    for m in sorted(set(live["market_code"]) | set(back["market_code"])):
+        gl = live[live["market_code"] == m]
+        g1, g2 = h1[h1["market_code"] == m], h2[h2["market_code"] == m]
+        hi = replicates(g1, g2, True) if len(g1) and len(g2) else None
+        lo = replicates(g1, g2, False) if len(g1) and len(g2) else None
 
-        # Does elite beat the market's own average by more than luck?
-        #
-        # "elite > small" was the first version of this test and it is useless:
-        # rehearsed on pure noise with 4,000 rows it passed, because one of two
-        # numbers is larger about half the time. The gate is now the bootstrap
-        # interval on elite minus the rest, and it has to clear zero. A market
-        # whose gap does not rank it keeps flat tiers, which is an honest
-        # "we do not know" rather than a confident label on a coin flip.
-        el = gf.loc[gf["tier"] == "elite", "hit"].to_numpy()
-        rest = gf.loc[gf["tier"] != "elite", "hit"].to_numpy()
-        ordered = False
-        margin = float("nan")
-        if len(el) >= 25 and len(rest) >= 25:
-            vals = np.concatenate([el, rest])
-            flag = np.concatenate([np.ones(len(el)), np.zeros(len(rest))])
-            cl = np.concatenate([
-                gf.loc[gf["tier"] == "elite", "cluster"].to_numpy(),
-                gf.loc[gf["tier"] != "elite", "cluster"].to_numpy()])
-            margin, mlo, _ = S.clustered_bootstrap(
-                lambda i: (float(np.mean(vals[i][flag[i] == 1]))
-                           - float(np.mean(vals[i][flag[i] == 0]))
-                           if (flag[i] == 1).any() and (flag[i] == 0).any()
-                           else 0.0),
-                cl, n_boot=1500)
-            ordered = mlo > 0
-        print(f"  {m:<18}{thr[0]:>10.3f}{thr[1]:>9.3f}{thr[2]:>9.3f}"
-              f"{(f'yes, +{margin:.1%}' if ordered else 'NO, left flat'):>21}")
-        if ordered:
-            out[m] = {"elite": thr[0], "strong": thr[1], "medium": thr[2],
-                      "fit_rows": int(len(gf)),
-                      "fit_accuracy": {t: float(v) for t, v in acc.items()}}
+        def fmt(r):
+            return (f"{'-':>22}" if r is None
+                    else f"{r['first']:>+10.1%}{r['second']:>+10.1%}  ")
+
+        if hi and hi["ok"]:
+            out[m] = {"direction": "high", "evidence": "live split-half",
+                      "first_half": hi["first"], "second_half": hi["second"],
+                      "elite_accuracy": [hi["acc_first"], hi["acc_second"]]}
+            verdict = "RANKED, high end"
+        elif lo and lo["ok"]:
+            out[m] = {"direction": "low", "evidence": "live split-half",
+                      "first_half": lo["first"], "second_half": lo["second"],
+                      "elite_accuracy": [lo["acc_first"], lo["acc_second"]]}
+            verdict = "RANKED, LOW end (inverted)"
+        else:
+            bt = backtest_gate(back[back["market_code"] == m])
+            if bt and bt["ok"] and (hi is None or hi["first"] > 0):
+                out[m] = {"direction": "high", "evidence": "backtest gate",
+                          "backtest_margin": bt["d"], "backtest_lower": bt["lo"]}
+                verdict = "ranked on the backtest, too thin live"
+            else:
+                verdict = "flat, publishes as small"
+        print(f"  {m:<12}{len(gl):>7}{fmt(hi)}{fmt(lo)}  {verdict}")
 
     print()
-    print("accuracy on the live season, which is the number that counts")
-    print(f"  {'market':<18}{'tier':<9}{'picks':>7}{'correct':>9}  95% CI")
-    for m in sorted(out):
-        g = test[test["market_code"] == m]
-        if g.empty:
-            continue
-        thr = [out[m]["elite"], out[m]["strong"], out[m]["medium"], -np.inf]
-        g = g.assign(tier=[tier_of(x, thr) for x in g["gap"]])
-        for t in NAMES:
-            cell = g[g["tier"] == t]
-            if len(cell) < MIN_TEST_CELL:
-                print(f"  {m if t == NAMES[0] else '':<18}{t:<9}{len(cell):>7}"
-                      f"{'-':>9}")
-                continue
-            w = cell["hit"].to_numpy()
-            r, lo, hi = S.clustered_bootstrap(
-                lambda i: float(np.mean(w[i])), cell["cluster"].to_numpy(),
-                n_boot=2000)
-            print(f"  {m if t == NAMES[0] else '':<18}{t:<9}{len(cell):>7}"
-                  f"{r:>9.1%}  [{lo:>5.1%},{hi:>5.1%}]")
-        print()
-
-    # Pooled, since the site shows one elite list across markets.
-    keep = test[test["market_code"].isin(out)].copy()
-    if not keep.empty:
-        keep["tier"] = [
-            tier_of(r.gap, [out[r.market_code]["elite"],
-                            out[r.market_code]["strong"],
-                            out[r.market_code]["medium"], -np.inf])
-            for r in keep.itertuples(index=False)]
-        print("all markets that kept a tiering, pooled:")
-        print(f"  {'tier':<9}{'picks':>7}{'share':>8}{'correct':>9}  95% CI")
-        for t in NAMES:
-            cell = keep[keep["tier"] == t]
-            if len(cell) < MIN_TEST_CELL:
-                continue
-            w = cell["hit"].to_numpy()
-            r, lo, hi = S.clustered_bootstrap(
-                lambda i: float(np.mean(w[i])), cell["cluster"].to_numpy(),
-                n_boot=2000)
-            print(f"  {t:<9}{len(cell):>7}{len(cell)/len(keep):>8.0%}"
-                  f"{r:>9.1%}  [{lo:>5.1%},{hi:>5.1%}]")
+    print(f"{len(out)} market(s) earn a tiering: "
+          + ", ".join(f"{k} ({v['direction']})" for k, v in sorted(out.items())))
+    inverted = [k for k, v in out.items() if v["direction"] == "low"]
+    if inverted:
+        print(f"  inverted: {', '.join(inverted)} -- for these the NARROWEST")
+        print("  disagreements are graded elite, because that is where they hit.")
 
     if os.getenv("WRITE") == "1":
         OUT.write_text(json.dumps(out, indent=2), encoding="utf-8")
-        print(f"\nwrote {OUT.name} for {len(out)} market(s): {sorted(out)}")
+        print(f"\nwrote {OUT.name}")
     else:
-        print("\nnothing written. WRITE=1 to save the thresholds.")
+        print("\nnothing written. WRITE=1 to save.")
 
 
 if __name__ == "__main__":

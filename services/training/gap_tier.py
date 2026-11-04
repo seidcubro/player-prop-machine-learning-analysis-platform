@@ -483,18 +483,38 @@ def tiers_by_rank(gaps, market_code: str) -> list:
     if v2_thresholds().get(market_code) is None or n < MIN_RANKABLE:
         return ["small"] * n
 
-    vals = [(-1.0 if (g is None or not math.isfinite(g)) else float(g))
+    vals = [(None if (g is None or not math.isfinite(g)) else float(g))
             for g in gaps]
-    # Rank descending, so position 0 is the widest disagreement. Ties keep
-    # their input order, which is arbitrary but stable.
-    order = sorted(range(n), key=lambda i: -vals[i])
+    known = [i for i, v in enumerate(vals) if v is not None]
+    if len(known) < MIN_RANKABLE:
+        return ["small"] * n
+
+    # Which end of the gap is the confident end, per market.
+    #
+    # Not every market is ranked the same way round, and assuming they were
+    # cost a season. Measured on 2,495 live props, split in half by date and
+    # asked twice:
+    #
+    #     recs      top of the gap     +17.6%  then  +9.9%
+    #     rush_yds  BOTTOM of the gap  +12.5%  then +23.7%
+    #
+    # rush_yds is ranked BACKWARDS: its narrowest disagreements hit 60.0% and
+    # 67.4% in the two halves against 49.1% for the market as a whole, so the
+    # board has been publishing its worst picks as its most confident. Pooling
+    # hid it, because rush_yds pointing one way and recs the other cancel to a
+    # rank correlation of +0.002.
+    #
+    # Absent direction means "high", which is what every market written before
+    # this was fitted as.
+    direction = (v2_thresholds().get(market_code) or {}).get("direction", "high")
+    reverse = direction == "low"
+    order = sorted(known, key=lambda i: (vals[i] if reverse else -vals[i]))
     out = ["small"] * n
-    n_elite = int(round(n * ELITE_SHARE))
-    n_strong = int(round(n * STRONG_SHARE))
-    n_medium = int(round(n * MEDIUM_SHARE))
+    m = len(order)
+    n_elite = int(round(m * ELITE_SHARE))
+    n_strong = int(round(m * STRONG_SHARE))
+    n_medium = int(round(m * MEDIUM_SHARE))
     for pos, i in enumerate(order):
-        if vals[i] < 0:
-            continue
         if pos < n_elite:
             out[i] = "elite"
         elif pos < n_elite + n_strong:
