@@ -2318,11 +2318,18 @@ def main():
         # A market with no validated ranking returns None and its picks are
         # published as small. That is the honest word for "we cannot tell which
         # of these beats a coin flip", and it is what their hit rate says.
-        v2 = (gap_tier.tier_v2(gap_tier.share_gap(gap_centre, line_value),
-                               market_code)
-              if gap_tier.V2_ENABLED else None)
         if gap_tier.V2_ENABLED and gap_tier.v2_thresholds():
-            tier = v2 or "small"
+            # Assigned by RANK over the whole board once this loop finishes,
+            # in gap_tier.tiers_by_rank, because a tier is a position among
+            # tonight's picks rather than a number a row can know on its own.
+            #
+            # This called the old per-row tier_v2 and threw the answer away a
+            # hundred lines later. That was merely wasteful until the artifact
+            # changed shape -- it now records a direction per market instead of
+            # three thresholds -- and then it was fatal: KeyError 'elite', the
+            # board build dead, on a Saturday with games the next day. Dead
+            # code does not stay harmless just because its output is ignored.
+            tier = "small"
         else:
             tier = (gap_tier.tier_for(z, market_code)
                     if gap_tier.ENABLED else ev_tier)

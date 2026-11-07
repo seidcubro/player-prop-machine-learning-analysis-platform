@@ -415,6 +415,13 @@ def tier_v2(gap: float | None, market_code: str) -> str | None:
     t = v2_thresholds().get(market_code)
     if t is None or gap is None:
         return None
+    # The artifact records a direction per market now, not three thresholds,
+    # so an entry written by the current fitter has no cut to compare against.
+    # Returning None means "no per-row answer", which is the truth: the board
+    # tiers by rank. Left callable rather than deleted so an old artifact still
+    # works, and guarded so a new one cannot take the build down.
+    if not all(k in t for k in ("elite", "strong", "medium")):
+        return None
     if gap >= t["elite"]:
         return "elite"
     if gap >= t["strong"]:
