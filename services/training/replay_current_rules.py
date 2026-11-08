@@ -209,6 +209,47 @@ def main():
     report("WALK FORWARD -- what the board would actually have published",
            live, "tier_wf")
 
+    # Where does the edge actually stop?
+    #
+    # Walk-forward, elite (the top 10%) came back 61.1% and strong (the next
+    # 20%) came back 62.0%. Those are the same number, so the elite label is
+    # drawn narrower than the thing it is labelling, and medium at 51.5% and
+    # small at 50.1% are coin flips. That puts the boundary somewhere around
+    # 30% of the board rather than 10%, but reading it off two rows is how
+    # thresholds get chosen badly, so it is swept.
+    #
+    # Each share is applied with the SAME walk-forward configuration already
+    # computed per week, so this is only moving the cut, not refitting the
+    # direction. The volume column matters as much as the accuracy: a share
+    # that hits well on nine picks is not a product.
+    print("where the edge stops: top N% of each ranked market, walk forward")
+    print(f"  {'share':<8}{'picks':>7}{'correct':>9}  95% CI{'':<8}"
+          f"{'vs 52.4%':>10}")
+    for share in (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50):
+        old_e, old_s, old_m = (gap_tier.ELITE_SHARE, gap_tier.STRONG_SHARE,
+                               gap_tier.MEDIUM_SHARE)
+        gap_tier.ELITE_SHARE, gap_tier.STRONG_SHARE, gap_tier.MEDIUM_SHARE =             share, 0.0, 0.0
+        picks = []
+        for w in weeks:
+            prior = live[live["week"] < w]
+            cfg = decide(prior, back)
+            idx = live.index[live["week"] == w]
+            t = tier_week(live.loc[idx], cfg)
+            picks.append(live.loc[idx][t.values == "elite"])
+        gap_tier.ELITE_SHARE, gap_tier.STRONG_SHARE, gap_tier.MEDIUM_SHARE =             old_e, old_s, old_m
+        sel = pd.concat(picks) if picks else live.iloc[:0]
+        if len(sel) < 30:
+            print(f"  {share:<8.0%}{len(sel):>7}{'too few':>9}")
+            continue
+        w_ = sel["hit"].to_numpy()
+        r, lo, hi = S.clustered_bootstrap(
+            lambda i: float(np.mean(w_[i])), sel["cluster"].to_numpy(),
+            n_boot=2000)
+        flag = "clears" if lo > 0.524 else ""
+        print(f"  {share:<8.0%}{len(sel):>7}{r:>9.1%}  [{lo:>5.1%},{hi:>5.1%}]"
+              f"{flag:>10}")
+    print()
+
     base = live["hit"].mean()
     el = live[live["tier_wf"] == "elite"]
     if len(el) >= 30:
