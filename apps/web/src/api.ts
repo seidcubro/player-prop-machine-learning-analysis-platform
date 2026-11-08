@@ -604,6 +604,10 @@ export type SeasonRecord = {
   picks: number;
   players: number;
   hit_rate: number | null;
+  /** What the hit rate had to beat: the share of picks that must win at the
+   *  prices actually offered before a bet returns anything. Above it is
+   *  profit, below it is not. */
+  breakeven: number | null;
   model_predicted: number | null;
   avg_ev: number | null;
   units: number | null;
@@ -614,6 +618,10 @@ export type MarketRecord = {
   market_code: string;
   picks: number;
   hit_rate: number | null;
+  /** What the hit rate had to beat: the share of picks that must win at the
+   *  prices actually offered before a bet returns anything. Above it is
+   *  profit, below it is not. */
+  breakeven: number | null;
   model_predicted: number | null;
   units: number | null;
   roi: number | null;
@@ -623,6 +631,10 @@ export type TierRecord = {
   edge_tier: string;
   picks: number;
   hit_rate: number | null;
+  /** What the hit rate had to beat: the share of picks that must win at the
+   *  prices actually offered before a bet returns anything. Above it is
+   *  profit, below it is not. */
+  breakeven: number | null;
   model_predicted: number | null;
   units: number | null;
   roi: number | null;

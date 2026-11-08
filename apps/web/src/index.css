@@ -3323,3 +3323,137 @@ a.ps-link:hover {
 
 /* The landing's pointer to it sits under the three cards, not above them. */
 .ps-landing .how .sub { margin: var(--s4) 0 0; }
+
+/* ------------------------------------------------------------------ *
+ * The track record's headline: one number, at the size of the answer.
+ *
+ * It was four equal cards, which made "were the picks right" and "what did
+ * they return" look like equally important questions. They are not. A person
+ * landing on a prediction site wants the first one, so the hit rate gets the
+ * display face and everything else gets subordinated to it.
+ *
+ * The break-even rate sits immediately to its right at a deliberately smaller
+ * size, because a hit rate alone is not a verdict and the comparison has to be
+ * impossible to miss. Return and units go in the third column in body type.
+ * Smaller, not hidden: the accounting stays on the page.
+ *
+ * Three tracks on desktop, stacking to one on a phone. The lead number keeps
+ * its size when it stacks, so the hierarchy survives the reflow.
+ * ------------------------------------------------------------------ */
+.ps-leadstat {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: var(--s4);
+  align-items: stretch;
+  margin-bottom: var(--s5);
+}
+@media (max-width: 860px) {
+  .ps-leadstat { grid-template-columns: minmax(0, 1fr); }
+}
+
+.ps-leadstat-main,
+.ps-leadstat-against,
+.ps-leadstat-side {
+  padding: clamp(14px, 1.6vw, 22px) clamp(16px, 2vw, 26px);
+  background-color: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+.ps-leadstat .label {
+  font-size: clamp(0.62rem, 0.78vw, 0.7rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: var(--s2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ps-leadstat .value {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.ps-leadstat .sub {
+  font-size: clamp(0.68rem, 0.86vw, 0.78rem);
+  color: var(--text-faint);
+  margin-top: var(--s2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The answer. Roughly twice the old card, which is the point. */
+.ps-leadstat-main .value { font-size: clamp(2.6rem, 5.2vw, 4rem); }
+.ps-leadstat-main .value.pos { color: var(--green); }
+.ps-leadstat-main .value.neg { color: var(--red); }
+
+/* The bar it had to clear. Plainly smaller than the hit rate and never
+   coloured: it is the reference, not the result, and a red break-even would
+   read as though break-even itself were bad news. */
+.ps-leadstat-against .value {
+  font-size: clamp(1.6rem, 2.6vw, 2.2rem);
+  color: var(--text-dim);
+}
+
+/* Return, units and what the model claimed. Body type in a label/value/note
+   row, so they are legible and unmistakably secondary. */
+.ps-leadstat-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--s3);
+}
+.ps-leadstat-item {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  grid-template-areas: "k v" "n n";
+  align-items: baseline;
+  column-gap: var(--s3);
+}
+.ps-leadstat-item + .ps-leadstat-item {
+  border-top: 1px solid var(--border);
+  padding-top: var(--s3);
+}
+.ps-leadstat-item .k {
+  grid-area: k;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.ps-leadstat-item .v {
+  grid-area: v;
+  justify-self: end;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ps-leadstat-item .v.pos { color: var(--green); }
+.ps-leadstat-item .v.neg { color: var(--red); }
+.ps-leadstat-item .n {
+  grid-area: n;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+.ps-leadstat-item .n a { color: inherit; text-decoration: underline; }
+.ps-leadstat-item .n a:hover { color: var(--text); }
+
+/* A column that is present and checkable but not competing for the eye. The
+   same reasoning as the headline, applied inside the tables: Hit leads,
+   Needed explains it, ROI is the accounting. */
+/* :not() so this cannot outrank `.pos` / `.neg`, which are single-class
+   selectors and would otherwise lose to `.ps-table td.is-quiet` and leave the
+   ROI column grey. Quiet means smaller, not colourless. */
+.ps-table th.is-quiet,
+.ps-table td.is-quiet:not(.pos):not(.neg) { color: var(--text-dim); }
+.ps-table td.is-quiet { font-size: 0.92em; }
+
+/* An answer linked from another page has to land below the header rather than
+   underneath it. Only matters for the FAQ entries that carry an id. */
+.ps-qa[id] { scroll-margin-top: 90px; }

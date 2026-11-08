@@ -5,10 +5,11 @@
  * afternoon in December 2023 and still printed a hit rate next to them. The
  * backfill now reconstructs every season we hold closing lines for, using models
  * refit on strictly earlier data, which is thousands of graded picks instead of
- * 283. The exact count moves every time the record is rebuilt, so it is read
- * from the record rather than written here; apps/web/src/lib/published-record.json
- * holds the figures the pages state as fact and audit check [16] fails the
- * pipeline when they drift from the database.
+ * 283. Every figure here is fetched from the API and computed from the graded
+ * picks on each request, so none of it can go stale the way a typed-in number
+ * does. (apps/web/src/lib/published-record.json is NOT read by this page or
+ * any other; it is only the snapshot audit check [16] compares the database
+ * against. Nothing on the site is served from it.)
  *
  * The page is built to be checkable rather than flattering:
  *
@@ -46,11 +47,40 @@ import {
   type TierRecord,
 } from "../api";
 
+/**
+ * When the tier rule last changed, for the caveat under the tier table.
+ *
+ * A date in a sentence is a fact that goes stale silently, so it lives here as
+ * one constant rather than being typed into the paragraph. Update it in the
+ * same commit that changes how tiers are assigned, which currently means
+ * `gap_tier.py`.
+ */
+const TIER_RULE_CHANGED = "8 November 2026";
+
 const pct = (v: number | null | undefined, dp = 1) =>
   v === null || v === undefined ? "-" : `${(v * 100).toFixed(dp)}%`;
 
 const signed = (v: number | null | undefined, dp = 1) =>
   v === null || v === undefined ? "-" : `${v > 0 ? "+" : ""}${(v * 100).toFixed(dp)}%`;
+
+/**
+ * Did this row's hit rate beat the rate it needed?
+ *
+ * Colouring the hit rate against break-even rather than against 50% is the
+ * whole point of putting the two side by side. 52% looks like a win and is a
+ * loss at -130; 49% looks like a loss and is a win at +120. The colour says
+ * which, and the Needed column next to it says why, so neither number has to
+ * be taken on trust.
+ *
+ * No colour when either side is missing. A grey number is a quieter failure
+ * than a green one that was guessed.
+ */
+const beat = (r: { hit_rate: number | null; breakeven: number | null }) =>
+  r.hit_rate === null || r.breakeven === null
+    ? ""
+    : r.hit_rate > r.breakeven
+      ? "pos"
+      : "neg";
 
 /**
  * Predicted against actual, as a reliability curve.
@@ -209,11 +239,13 @@ export default function TrackRecord() {
     const units = rows.reduce((a, r) => a + (r.units ?? 0), 0);
     const hits = rows.reduce((a, r) => a + (r.hit_rate ?? 0) * r.picks, 0);
     const claimed = rows.reduce((a, r) => a + (r.model_predicted ?? 0) * r.picks, 0);
+    const needed = rows.reduce((a, r) => a + (r.breakeven ?? 0) * r.picks, 0);
     return {
       picks,
       units,
       hit_rate: picks ? hits / picks : null,
       predicted: picks ? claimed / picks : null,
+      breakeven: picks ? needed / picks : null,
       roi: picks ? units / picks : null,
     };
   }, [seasons, season]);
@@ -269,33 +301,76 @@ export default function TrackRecord() {
 
       {err && <div className="ps-empty">Could not load the record: {err}</div>}
 
-      <section className="ps-statgrid ps-balance" aria-label="Headline record">
-        <div className="ps-stat">
-          <div className="label">Graded Picks</div>
-          <div className="value">{loading ? "..." : totals.picks.toLocaleString()}</div>
-          <div className="sub">{season ? `${season} season` : "all seasons"}</div>
-        </div>
-        <div className="ps-stat">
+      {/* Hit rate leads, and everything else is subordinate to it.
+        *
+        * This used to be four equal cards and Return sat level with Hit Rate,
+        * which made the page answer a question nobody starts with. The thing a
+        * person wants to know about a prediction site is whether the
+        * predictions were right. That is the hit rate, so it gets the size.
+        *
+        * It cannot stand completely alone, because a hit rate with no
+        * reference is not a verdict: 55% at -200 loses money and 48% at +150
+        * makes it. So the number it had to beat sits immediately beside it, in
+        * the same unit, measured on the prices we were actually offered rather
+        * than an assumed -110. Two percentages, one above the other, and which
+        * one is larger is the whole result.
+        *
+        * Return and units are still here and still unrounded, one line down in
+        * smaller type, because they are the honest accounting and burying them
+        * would be the same sin as leading with them. The FAQ explains what a
+        * unit is, since "+1.9%" means nothing without it. */}
+      <section className="ps-leadstat" aria-label="Headline record">
+        <div className="ps-leadstat-main">
           <div className="label">Hit Rate</div>
-          <div className="value">{loading ? "..." : pct(totals.hit_rate)}</div>
-          <div className="sub">model claimed {pct(totals.predicted)}</div>
-        </div>
-        <div className="ps-stat">
-          <div className="label">Return</div>
-          {/* ROI is a result, so green and red are earned here. The Elite
-              count on the edges page is a category count, which is why that
-              one is deliberately not green. */}
-          <div className={`value ${(totals.roi ?? 0) > 0 ? "pos" : "neg"}`}>
-            {loading ? "..." : signed(totals.roi)}
+          <div
+            className={`value ${
+              totals.hit_rate !== null && totals.breakeven !== null
+                ? totals.hit_rate > totals.breakeven
+                  ? "pos"
+                  : "neg"
+                : ""
+            }`}
+          >
+            {loading ? "..." : pct(totals.hit_rate)}
           </div>
-          <div className="sub">per unit staked, at the offered price</div>
-        </div>
-        <div className="ps-stat">
-          <div className="label">Units</div>
-          <div className="value">
-            {loading ? "..." : `${totals.units > 0 ? "+" : ""}${totals.units.toFixed(1)}`}
+          <div className="sub">
+            {loading
+              ? " "
+              : `${totals.picks.toLocaleString()} graded picks, ${
+                  season ? `${season} season` : "all seasons"
+                }`}
           </div>
-          <div className="sub">flat 1u stakes</div>
+        </div>
+        <div className="ps-leadstat-against">
+          <div className="label">Needed To Break Even</div>
+          <div className="value">{loading ? "..." : pct(totals.breakeven)}</div>
+          <div className="sub">at the prices we were offered</div>
+        </div>
+        <div className="ps-leadstat-side">
+          <div className="ps-leadstat-item">
+            <span className="k">Model claimed</span>
+            <span className="v">{loading ? "..." : pct(totals.predicted)}</span>
+            <span className="n">what it said its own chances were</span>
+          </div>
+          <div className="ps-leadstat-item">
+            <span className="k">Return</span>
+            {/* ROI is a result, so green and red are earned here. The Elite
+                count on the edges page is a category count, which is why that
+                one is deliberately not green. */}
+            <span className={`v ${(totals.roi ?? 0) > 0 ? "pos" : "neg"}`}>
+              {loading ? "..." : signed(totals.roi)}
+            </span>
+            <span className="n">
+              per unit staked. <Link to="/faq#units">What is a unit?</Link>
+            </span>
+          </div>
+          <div className="ps-leadstat-item">
+            <span className="k">Units</span>
+            <span className="v">
+              {loading ? "..." : `${totals.units > 0 ? "+" : ""}${totals.units.toFixed(1)}`}
+            </span>
+            <span className="n">flat 1u stakes, no compounding</span>
+          </div>
         </div>
       </section>
 
@@ -312,7 +387,8 @@ export default function TrackRecord() {
                   <th className="num">Players</th>
                   <th>Claimed vs Actual</th>
                   <th className="num">Hit</th>
-                  <th className="num">ROI</th>
+                  <th className="num">Needed</th>
+                  <th className="num is-quiet">ROI</th>
                 </tr>
               </thead>
               <tbody>
@@ -329,8 +405,9 @@ export default function TrackRecord() {
                     <td data-label="Claimed vs Actual">
                       <ClaimVsReality predicted={s.model_predicted} actual={s.hit_rate} />
                     </td>
-                    <td data-label="Hit" className="num">{pct(s.hit_rate)}</td>
-                    <td data-label="ROI" className={`num ${(s.roi ?? 0) > 0 ? "pos" : "neg"}`}>
+                    <td data-label="Hit" className={`num ${beat(s)}`}>{pct(s.hit_rate)}</td>
+                    <td data-label="Needed" className="num is-quiet">{pct(s.breakeven)}</td>
+                    <td data-label="ROI" className={`num is-quiet ${(s.roi ?? 0) > 0 ? "pos" : "neg"}`}>
                       {signed(s.roi)}
                     </td>
                   </tr>
@@ -363,6 +440,28 @@ export default function TrackRecord() {
             If elite does not beat small, the labels are decoration. This is the
             check.
           </p>
+          {/* The one thing this table cannot say for itself.
+            *
+            * Every other number on this page is a fact about a pick: it won or
+            * it did not. A tier is a label, and the rule that assigns it has
+            * been changed more than once. Each row was labelled by whatever
+            * rule was live on the day it was published, so this table pools
+            * picks graded under rules we no longer use, and the "Elite" row is
+            * not a statement about the Elite badge on today's board.
+            *
+            * Saying so costs one sentence. Silently rewriting old labels under
+            * the current rule would cost more than that: it would claim a
+            * record for picks the board never actually recommended, which is
+            * the one thing a track record must not do. So the labels stay as
+            * published and the caveat goes on the page. */}
+          <p className="ps-note">
+            Each pick carries the tier it was published with. The tiering rule
+            has changed during the life of this record, most recently on{" "}
+            {TIER_RULE_CHANGED}, so these rows pool picks labelled by more than
+            one rule and do not describe the badge you see on today&rsquo;s
+            board. Old labels are never rewritten: doing that would claim a
+            record for picks we did not actually make.
+          </p>
           <div className="ps-tablewrap">
             <table className="ps-table is-stats">
               <thead>
@@ -371,7 +470,8 @@ export default function TrackRecord() {
                   <th className="num">Picks</th>
                   <th className="num">Claimed</th>
                   <th className="num">Hit</th>
-                  <th className="num">ROI</th>
+                  <th className="num">Needed</th>
+                  <th className="num is-quiet">ROI</th>
                 </tr>
               </thead>
               <tbody>
@@ -382,8 +482,9 @@ export default function TrackRecord() {
                     </td>
                     <td data-label="Picks" className="num">{t.picks.toLocaleString()}</td>
                     <td data-label="Claimed" className="num">{pct(t.model_predicted)}</td>
-                    <td data-label="Hit" className="num">{pct(t.hit_rate)}</td>
-                    <td data-label="ROI" className={`num ${(t.roi ?? 0) > 0 ? "pos" : "neg"}`}>
+                    <td data-label="Hit" className={`num ${beat(t)}`}>{pct(t.hit_rate)}</td>
+                    <td data-label="Needed" className="num is-quiet">{pct(t.breakeven)}</td>
+                    <td data-label="ROI" className={`num is-quiet ${(t.roi ?? 0) > 0 ? "pos" : "neg"}`}>
                       {signed(t.roi)}
                     </td>
                   </tr>
@@ -406,7 +507,8 @@ export default function TrackRecord() {
                   <th>Claimed vs Actual</th>
                   <th className="num">Claimed</th>
                   <th className="num">Hit</th>
-                  <th className="num">ROI</th>
+                  <th className="num">Needed</th>
+                  <th className="num is-quiet">ROI</th>
                 </tr>
               </thead>
               <tbody>
@@ -420,8 +522,9 @@ export default function TrackRecord() {
                       <ClaimVsReality predicted={m.model_predicted} actual={m.hit_rate} />
                     </td>
                     <td data-label="Claimed" className="num">{pct(m.model_predicted)}</td>
-                    <td data-label="Hit" className="num">{pct(m.hit_rate)}</td>
-                    <td data-label="ROI" className={`num ${(m.roi ?? 0) > 0 ? "pos" : "neg"}`}>
+                    <td data-label="Hit" className={`num ${beat(m)}`}>{pct(m.hit_rate)}</td>
+                    <td data-label="Needed" className="num is-quiet">{pct(m.breakeven)}</td>
+                    <td data-label="ROI" className={`num is-quiet ${(m.roi ?? 0) > 0 ? "pos" : "neg"}`}>
                       {signed(m.roi)}
                     </td>
                   </tr>

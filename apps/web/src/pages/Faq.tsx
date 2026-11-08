@@ -14,15 +14,28 @@
  * ones that make the model look bad.
  */
 
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import PageTitle from "../components/PageTitle";
 
 type Audience = "plain" | "technical" | "deep";
 
-function QA({ q, children }: { q: string; children: React.ReactNode }) {
+function QA({
+  q,
+  id,
+  children,
+}: {
+  q: string;
+  /** Anchor, so another page can link straight at this answer. The Track
+   *  Record page links at #units from under its Return figure, because a
+   *  percentage per unit staked is meaningless to anyone who has not been
+   *  told what a unit is, and the place to tell them is here rather than in
+   *  a footnote under the number. */
+  id?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="ps-qa">
+    <div className="ps-qa" id={id}>
       <h2>{q}</h2>
       {children}
     </div>
@@ -31,6 +44,18 @@ function QA({ q, children }: { q: string; children: React.ReactNode }) {
 
 export default function Faq() {
   const [audience, setAudience] = useState<Audience>("plain");
+  // React Router does not scroll to a #hash on its own, so a link from another
+  // page landed at the top of the FAQ and left the reader to find the answer.
+  // Re-run on `audience` as well as `hash`: the three depths are conditionally
+  // rendered, so the target element does not exist until the right one is on
+  // screen. Plain is the default, which is where the linked answers live.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    document
+      .getElementById(hash.slice(1))
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [hash, audience]);
 
   return (
     <>
@@ -182,6 +207,51 @@ function Plain() {
           over stops being worth it. Across three seasons the over side lost
           money and the under side made it. We did not choose that, we measured
           it.
+        </p>
+      </QA>
+
+      <QA q="What is a unit, and what does a return per unit mean?" id="units">
+        <p>
+          A unit is one bet. Not a dollar amount: whatever you would normally
+          stake on one pick, that is a unit. We report everything in units so
+          the numbers mean the same thing whether you bet five dollars a pick
+          or five hundred.
+        </p>
+        <p>
+          A return per unit is the average result of one bet. If a row on the
+          Track Record page reads +1.9%, that means for every 100 bets of one
+          unit each you finished 1.9 units ahead of where you started. On five
+          dollar bets that is about nine dollars across a hundred picks. A
+          negative number means the opposite, and several rows on that page are
+          negative. Those margins are thin on purpose: a thin edge that is real
+          is the most anyone honestly measures in this market, and the figures
+          are read live from the graded picks rather than typed in here, so
+          they are whatever they currently are.
+        </p>
+        <p>
+          The reason it is not simply the hit rate is the price. Winning 55% of
+          your bets at &minus;200 loses money, because at that price you need
+          to win 67% before you are level. Winning 48% at +150 makes money,
+          because there you only need 40%. So the same hit rate can be a good
+          season or a bad one depending on what you paid, and the return is
+          what settles it.
+        </p>
+        <p>
+          That is why the{" "}
+          <Link to="/record">Track Record</Link> page shows the hit rate
+          against a second number called Needed. Needed is the share of picks
+          that had to win at the prices we were actually quoted, averaged over
+          the picks in that row. Above it is profit, below it is not. We lead
+          with the hit rate because &quot;were the picks right&quot; is the
+          question people are actually asking, and we put Needed beside it so
+          the hit rate cannot be read as better than it was.
+        </p>
+        <p>
+          One caution about every return figure on this site: they assume you
+          got the price we recorded. Prices move, and the difference between
+          the best and the worst book on the same prop is routinely worth more
+          than our entire measured edge. If you bet a worse number than the one
+          shown, your return is worse than the one shown.
         </p>
       </QA>
 

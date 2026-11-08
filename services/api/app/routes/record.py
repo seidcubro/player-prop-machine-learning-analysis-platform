@@ -26,6 +26,34 @@ router = APIRouter()
 # The market moves a few points a season; ten picks cannot resolve that.
 MIN_PICKS_LEADERBOARD = 20
 
+# What the hit rate had to beat.
+#
+# A hit rate on its own is not a verdict. 55% at -200 loses money and 48% at
+# +150 makes it, which is why this site has always carried ROI next to it. But
+# ROI answers the question in units, and the question most people are actually
+# asking is "were the picks right", so the page now leads with the hit rate and
+# needs the comparison in the SAME unit to stay honest.
+#
+# That comparison is the break-even rate: the share of picks you have to win at
+# the prices that were actually offered, before a bet returns anything. For
+# American odds it is the implied probability with the vig left in:
+#
+#     +150  ->  100 / 250      = 40.0%
+#     -110  ->  110 / 210      = 52.4%
+#     -200  ->  200 / 300      = 66.7%
+#
+# Averaged over the picks in a group, so it reflects our own prices rather than
+# an assumed -110. Hit rate above it is a profitable group, below it is not, and
+# the two numbers side by side say that without anyone having to understand
+# what a unit is.
+BREAKEVEN_SQL = """AVG(CASE
+                     WHEN price_american > 0
+                       THEN 100.0 / (price_american + 100.0)
+                     WHEN price_american < 0
+                       THEN (-price_american) / ((-price_american) + 100.0)
+                     ELSE 0.5238
+                   END) AS breakeven"""
+
 
 def _rows(sql: str, params: dict) -> list[dict]:
     with engine.connect() as conn:
@@ -61,6 +89,7 @@ def record_seasons(
                COUNT(*) AS picks,
                COUNT(DISTINCT player_id) AS players,
                AVG(CASE WHEN hit THEN 1.0 ELSE 0 END) AS hit_rate,
+               {BREAKEVEN_SQL},
                AVG(win_prob) AS model_predicted,
                AVG(expected_value) AS avg_ev,
                SUM(CASE
@@ -97,6 +126,7 @@ def record_by_market(
         SELECT market_code,
                COUNT(*) AS picks,
                AVG(CASE WHEN hit THEN 1.0 ELSE 0 END) AS hit_rate,
+               {BREAKEVEN_SQL},
                AVG(win_prob) AS model_predicted,
                SUM(CASE
                      WHEN hit AND price_american > 0 THEN price_american / 100.0
@@ -137,6 +167,7 @@ def record_by_tier(
         SELECT edge_tier,
                COUNT(*) AS picks,
                AVG(CASE WHEN hit THEN 1.0 ELSE 0 END) AS hit_rate,
+               {BREAKEVEN_SQL},
                AVG(win_prob) AS model_predicted,
                SUM(CASE
                      WHEN hit AND price_american > 0 THEN price_american / 100.0
