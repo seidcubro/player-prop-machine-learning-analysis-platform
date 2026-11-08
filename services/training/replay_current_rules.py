@@ -19,6 +19,21 @@ the one to read.
 Both are printed, because the gap between them is itself the measurement: if
 in-sample looks strong and walk-forward does not, the rule is fitted noise.
 
+HIT RATE IS NOT THE SCORE, AND THE FIRST VERSION OF THIS FILE TREATED IT AS
+ONE. It reported elite at 66.2% against 51.8% for the whole board and called
+that a lift of fourteen points. That compares our picks to a different set of
+picks and proves nothing, which the live board then demonstrated: break-even
+on the published tiers runs 54.0% at small and 68.0% at elite, because
+gap_share divides by the line and the ranked markets are pass_td, recs and
+rush_yds, where a 0.5 or 1.5 line carries a heavily skewed price. The rule is
+partly selecting props that were going to land anyway.
+
+So every table here now prints what the book needed next to what we hit, and
+puts the interval on the difference. A prop priced at -212 lands 68% of the
+time on its own; hitting 66% of those means the book read them better than we
+did. Only hit minus needed, with an interval clear of zero, says we know
+something the market does not.
+
 WHAT THIS DOES NOT REPLAY. The side of each pick, and the projection behind it,
 are taken as they were published at the time. Today's median would differ --
 different calibrators, a different season offset, a spread calibrator that
@@ -55,6 +70,7 @@ def load(eng):
     d = pd.read_sql(text("""
         SELECT r.market_code, r.game_date, r.player_name, r.source,
                r.line, r.hit, r.projection_median AS p50,
+               r.price_american,
                g.week
         FROM prop_edge_results r
         LEFT JOIN LATERAL (
@@ -70,6 +86,29 @@ def load(eng):
     d["gap"] = (d["p50"] - d["line"]).abs() / d["line"].abs().clip(lower=0.5)
     d["cluster"] = d["game_date"].astype(str)
     d["week"] = d["week"].fillna(-1).astype(int)
+
+    # What the book thought, in the same unit as our hit rate.
+    #
+    # Added after the first run of this file reported elite at 66.2% against
+    # 51.8% for the whole board and called it a lift of +14.4 points. That
+    # compares our picks against a DIFFERENT set of picks, which answers
+    # nothing: the board average includes markets we do not rank and props at
+    # prices nothing like these.
+    #
+    # The live board gave the game away. Break-even climbs with every tier,
+    # 54.0% at small to 68.0% at elite, because gap_share divides by the line
+    # and the ranked markets are pass_td, recs and rush_yds, where a 0.5 or
+    # 1.5 line carries a heavily skewed price. So the rule is partly selecting
+    # props that were likely to land anyway, and a hit rate measured against
+    # the board average cannot tell that apart from skill.
+    #
+    # The honest comparison is per pick: the implied probability with the vig
+    # in, which is the share the book says has to win. hit minus needed is the
+    # only number here that says we know something the market does not.
+    p = pd.to_numeric(d["price_american"], errors="coerce")
+    d["needed"] = np.where(
+        p > 0, 100.0 / (p + 100.0),
+        np.where(p < 0, (-p) / ((-p) + 100.0), np.nan))
     return d
 
 
@@ -127,6 +166,29 @@ def tier_week(week_rows, cfg):
     return out
 
 
+def edge_line(label, s):
+    """picks, hit, what the book needed, and the difference with an interval.
+
+    hit on its own cannot distinguish a good pick from a likely one. A prop
+    priced at -212 lands 68% of the time because it was going to; hitting 66%
+    on it means the book read it better than we did. So the difference is the
+    number with the interval on it, and it is bootstrapped over game-days
+    because picks on one Sunday share weather and game script.
+    """
+    ok = s["needed"].notna()
+    if ok.sum() < 30:
+        return (f"{label:<8}{len(s):>6}{s['hit'].mean():>9.1%}"
+                f"{'no prices':>12}")
+    g = s[ok]
+    diff = (g["hit"] - g["needed"]).to_numpy()
+    r, lo, hi = S.clustered_bootstrap(
+        lambda i: float(np.mean(diff[i])), g["cluster"].to_numpy(), n_boot=2000)
+    flag = "  BEATS THE BOOK" if lo > 0 else ("  loses to it" if hi < 0 else "")
+    return (f"{label:<8}{len(g):>6}{g['hit'].mean():>9.1%}"
+            f"{g['needed'].mean():>9.1%}"
+            f"{r:>+9.1%}  [{lo:>+5.1%},{hi:>+5.1%}]{flag}")
+
+
 def report(title, d, col):
     print(title)
     print(f"  {'week':<6}" + "".join(f"{t:>18}" for t in TIERS)
@@ -155,14 +217,12 @@ def report(title, d, col):
             lambda i: float(np.mean(w_[i])), s["cluster"].to_numpy(), n_boot=2000)
         print(f"{f'{r:.1%} (n={len(s)})':>18}", end="")
     print()
+    print(f"    {'tier':<8}{'picks':>6}{'hit':>9}{'needed':>9}{'hit - needed':>22}")
     for t in TIERS:
         s = d[d[col] == t]
         if len(s) < 30:
             continue
-        w_ = s["hit"].to_numpy()
-        r, lo, hi = S.clustered_bootstrap(
-            lambda i: float(np.mean(w_[i])), s["cluster"].to_numpy(), n_boot=2000)
-        print(f"    {t:<8}{len(s):>6}{r:>9.1%}  [{lo:>5.1%},{hi:>5.1%}]")
+        print("    " + edge_line(t, s))
     print()
 
 
@@ -223,8 +283,8 @@ def main():
     # direction. The volume column matters as much as the accuracy: a share
     # that hits well on nine picks is not a product.
     print("where the edge stops: top N% of each ranked market, walk forward")
-    print(f"  {'share':<8}{'picks':>7}{'correct':>9}  95% CI{'':<8}"
-          f"{'vs 52.4%':>10}")
+    print(f"  {'share':<8}{'picks':>6}{'hit':>9}{'needed':>9}"
+          f"{'hit - needed':>22}")
     for share in (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50):
         old_e, old_s, old_m = (gap_tier.ELITE_SHARE, gap_tier.STRONG_SHARE,
                                gap_tier.MEDIUM_SHARE)
@@ -243,13 +303,7 @@ def main():
         if len(sel) < 30:
             print(f"  {share:<8.0%}{len(sel):>7}{'too few':>9}")
             continue
-        w_ = sel["hit"].to_numpy()
-        r, lo, hi = S.clustered_bootstrap(
-            lambda i: float(np.mean(w_[i])), sel["cluster"].to_numpy(),
-            n_boot=2000)
-        flag = "clears" if lo > 0.524 else ""
-        print(f"  {share:<8.0%}{len(sel):>7}{r:>9.1%}  [{lo:>5.1%},{hi:>5.1%}]"
-              f"{flag:>10}")
+        print("  " + edge_line(f"{share:.0%}", sel))
     print()
 
     # The cumulative column above hides where the edge actually stops, because
@@ -260,8 +314,8 @@ def main():
     # is printed every run so the boundary gets re-checked rather than
     # inherited.
     print("disjoint bands of the walk-forward rank, within each ranked market")
-    print(f"  {'band':<12}{'picks':>7}{'correct':>9}  95% CI{'':<8}"
-          f"{'vs 52.4%':>10}")
+    print(f"  {'band':<12}{'picks':>6}{'hit':>9}{'needed':>9}"
+          f"{'hit - needed':>22}")
     pct = pd.Series(np.nan, index=live.index, dtype=float)
     for w in weeks:
         prior = live[live["week"] < w]
@@ -284,15 +338,9 @@ def main():
         sel = live[(live["rank_pct"] > lo_e) & (live["rank_pct"] <= hi_e)]
         label = f"{lo_e:.0%}-{hi_e:.0%}"
         if len(sel) < 30:
-            print(f"  {label:<12}{len(sel):>7}{'too few':>9}")
+            print(f"  {label:<12}{len(sel):>6}{'too few':>9}")
             continue
-        w_ = sel["hit"].to_numpy()
-        r, lo, hi = S.clustered_bootstrap(
-            lambda i: float(np.mean(w_[i])), sel["cluster"].to_numpy(),
-            n_boot=2000)
-        flag = "clears" if lo > 0.524 else ""
-        print(f"  {label:<12}{len(sel):>7}{r:>9.1%}  [{lo:>5.1%},{hi:>5.1%}]"
-              f"{flag:>10}")
+        print("  " + edge_line(label, sel))
     unranked = live["rank_pct"].isna()
     if unranked.sum() >= 30:
         print(f"  {'unranked':<12}{int(unranked.sum()):>7}"
@@ -300,15 +348,20 @@ def main():
               f"   markets with no validated direction, all published small")
     print()
 
-    base = live["hit"].mean()
-    el = live[live["tier_wf"] == "elite"]
+    el = live[(live["tier_wf"] == "elite") & live["needed"].notna()]
     if len(el) >= 30:
-        w_ = el["hit"].to_numpy()
+        diff = (el["hit"] - el["needed"]).to_numpy()
         r, lo, hi = S.clustered_bootstrap(
-            lambda i: float(np.mean(w_[i])), el["cluster"].to_numpy(), n_boot=2000)
-        print(f"elite, walk forward: {len(el)} picks at {r:.1%} "
-              f"[{lo:.1%}, {hi:.1%}] against {base:.1%} for the whole board, "
-              f"a lift of {r - base:+.1%}")
+            lambda i: float(np.mean(diff[i])), el["cluster"].to_numpy(),
+            n_boot=2000)
+        print(f"elite, walk forward: {len(el)} picks hitting "
+              f"{el['hit'].mean():.1%} where the book needed "
+              f"{el['needed'].mean():.1%}, a margin of {r:+.1%} "
+              f"[{lo:+.1%}, {hi:+.1%}]")
+        if lo <= 0:
+            print("  That interval contains zero, so on these picks we have")
+            print("  NOT shown we know better than the book. A high hit rate")
+            print("  on heavily priced props is mostly the price, not us.")
 
 
 if __name__ == "__main__":
