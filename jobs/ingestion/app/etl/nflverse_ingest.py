@@ -19,6 +19,8 @@ Sources:
 import ctypes
 import gc
 import os
+import random
+import time
 from typing import Iterable
 
 import nflreadpy
@@ -186,6 +188,59 @@ def _shrink(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+
+# nflverse is hosted on GitHub releases, and GitHub has bad minutes.
+#
+#   ConnectionError: Failed to download .../players/players.parquet:
+#   504 Server Error: Gateway Time-out
+#
+# That killed a closing run at 04:07 on a Sunday. Nothing was wrong with the
+# data, the pipeline or the code; one request out of thousands timed out at the
+# other end, the ingest raised, and the board was never rebuilt. A transient
+# upstream failure should cost seconds, not a run.
+#
+# Retries are only for failures that might go away. A 404 will not: nflverse
+# publishes one file per season and a season that has not started yet is
+# genuinely absent, which the per-season loader already handles by falling back
+# to the published file or skipping. Retrying those would add half a minute per
+# missing season to every full ingest for nothing.
+RETRIES = int(os.getenv("NFLVERSE_RETRIES", "4"))
+RETRY_BASE = float(os.getenv("NFLVERSE_RETRY_BASE", "2.0"))
+
+# Substrings that mean "ask again later". Matched on the exception text because
+# nflreadpy wraps everything in its own ConnectionError and the status code only
+# survives as part of the message.
+_TRANSIENT = ("500", "502", "503", "504", "408", "429",
+              "gateway", "time-out", "timeout", "timed out",
+              "temporarily", "connection reset", "connection aborted",
+              "connection error", "remote end closed", "ssl",
+              "name resolution", "try again")
+_PERMANENT = ("404", "not found")
+
+
+def _is_transient(exc: Exception) -> bool:
+    msg = f"{type(exc).__name__}: {exc}".lower()
+    if any(p in msg for p in _PERMANENT):
+        return False
+    return any(t in msg for t in _TRANSIENT)
+
+
+def _retrying(fn, label: str):
+    """Call fn(), retrying transient upstream failures with backoff."""
+    for attempt in range(1, RETRIES + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if attempt >= RETRIES or not _is_transient(exc):
+                raise
+            # Jitter, so a whole ingest does not line its retries up and hit a
+            # struggling host in lockstep.
+            wait = RETRY_BASE ** attempt + random.uniform(0, 1)
+            print(f"    {label}: {type(exc).__name__} {str(exc)[:90]} "
+                  f"-- retry {attempt}/{RETRIES - 1} in {wait:.1f}s")
+            time.sleep(wait)
+
+
 def _load_by_season(loader, seasons: Iterable[int], **kwargs) -> pd.DataFrame:
     """Load an nflverse dataset one season at a time, skipping unavailable seasons.
 
@@ -199,7 +254,8 @@ def _load_by_season(loader, seasons: Iterable[int], **kwargs) -> pd.DataFrame:
     frames = []
     for season in seasons:
         try:
-            df = _as_pandas(loader([season], **kwargs))
+            df = _as_pandas(_retrying(
+                lambda: loader([season], **kwargs), f"{name} {season}"))
         except Exception as exc:
             df = _load_season_parquet(name, season)
             if df is None or len(df) == 0:
@@ -782,7 +838,7 @@ def ensure_tables():
 
 
 def ingest_players():
-    df = _as_pandas(nflreadpy.load_players())
+    df = _as_pandas(_retrying(nflreadpy.load_players, "load_players"))
     # `team` is not a column in this feed -- it is `latest_team`. Selecting the
     # missing name produced an all-null team for every player, which is why the
     # UI showed "-" for everyone.
@@ -1839,7 +1895,9 @@ def ingest_depth_charts(seasons: Iterable[int]):
     with _engine().begin() as conn:
         for season in seasons:
             try:
-                raw = _as_pandas(nflreadpy.load_depth_charts([season]))
+                raw = _as_pandas(_retrying(
+                    lambda: nflreadpy.load_depth_charts([season]),
+                    f"load_depth_charts {season}"))
             except Exception as exc:
                 print(f"    skip load_depth_charts {season}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
