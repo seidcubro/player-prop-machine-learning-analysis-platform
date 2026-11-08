@@ -459,9 +459,46 @@ def tier_v2(gap: float | None, market_code: str) -> str | None:
 # picks we disagree with the book about most, out of the ones actually on the
 # board tonight.
 
-ELITE_SHARE = float(os.getenv("ELITE_SHARE", "0.10"))
+# How much of each ranked market's board gets each label.
+#
+# These were 10/20/30 and the top one was drawn too narrow. Replayed over weeks
+# 1 to 9 of 2026 with the direction refitted before every week on only what was
+# known by then (replay_current_rules.py), the top 10% and the next 20% came
+# back at the same number, 61.1% and 62.0%, with overlapping intervals. So the
+# elite label was cutting a single block of good picks in half and calling one
+# half something weaker.
+#
+# Sweeping the cut rather than reading it off those two rows, same walk-forward
+# configuration each week, moving only the share:
+#
+#     top N%    picks    hit      95% CI
+#       5%         53   60.4%   [48.9%, 69.2%]
+#      10%        108   61.1%   [54.3%, 68.8%]
+#      15%        162   64.8%   [59.8%, 71.6%]
+#      20%        213   66.2%   [62.2%, 70.6%]
+#      30%        324   61.4%   [58.5%, 64.6%]
+#      40%        432   59.3%   [56.6%, 62.8%]
+#      50%        539   57.0%   [54.8%, 60.2%]
+#
+# As disjoint bands of about 53 picks each, which is what the cumulative column
+# is hiding: 60.4%, 61.8%, 72.2%, 70.6%, then 52.2%, 53.0%, 47.7%. The first
+# four are the edge and the last three are coin flips. The cliff is at 20%, not
+# at 10% and not at 30%.
+#
+# The run-up inside the top 20% (60.4 to 72.2) is NOT read as "the second decile
+# is better than the first". Those bands hold about 53 picks; the simulation in
+# replicate_gap_signal puts a 10 point swing well inside noise at that count.
+# The top 20% is treated as one block at 66.2%, which is also why the cut is 20
+# and not 15: same accuracy, a third more picks, and no reason from the data to
+# prefer either boundary.
+#
+# Below 20% nothing separates. Strong, medium and small are three names for a
+# coin flip, and their ordering against each other will shuffle week to week.
+# Arranging the lower shares until that ordering looks monotonic on these 2,539
+# rows would be fitting noise, so they are left as equal blocks.
+ELITE_SHARE = float(os.getenv("ELITE_SHARE", "0.20"))
 STRONG_SHARE = float(os.getenv("STRONG_SHARE", "0.20"))
-MEDIUM_SHARE = float(os.getenv("MEDIUM_SHARE", "0.30"))
+MEDIUM_SHARE = float(os.getenv("MEDIUM_SHARE", "0.20"))
 # A market needs this many rows on the board before a rank means anything.
 #
 # Twenty was too strict and produced the failure it was meant to prevent. A

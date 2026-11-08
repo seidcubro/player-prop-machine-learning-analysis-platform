@@ -228,7 +228,8 @@ def main():
     for share in (0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50):
         old_e, old_s, old_m = (gap_tier.ELITE_SHARE, gap_tier.STRONG_SHARE,
                                gap_tier.MEDIUM_SHARE)
-        gap_tier.ELITE_SHARE, gap_tier.STRONG_SHARE, gap_tier.MEDIUM_SHARE =             share, 0.0, 0.0
+        gap_tier.ELITE_SHARE = share
+        gap_tier.STRONG_SHARE = gap_tier.MEDIUM_SHARE = 0.0
         picks = []
         for w in weeks:
             prior = live[live["week"] < w]
@@ -236,7 +237,8 @@ def main():
             idx = live.index[live["week"] == w]
             t = tier_week(live.loc[idx], cfg)
             picks.append(live.loc[idx][t.values == "elite"])
-        gap_tier.ELITE_SHARE, gap_tier.STRONG_SHARE, gap_tier.MEDIUM_SHARE =             old_e, old_s, old_m
+        gap_tier.ELITE_SHARE, gap_tier.STRONG_SHARE, gap_tier.MEDIUM_SHARE = (
+            old_e, old_s, old_m)
         sel = pd.concat(picks) if picks else live.iloc[:0]
         if len(sel) < 30:
             print(f"  {share:<8.0%}{len(sel):>7}{'too few':>9}")
@@ -248,6 +250,54 @@ def main():
         flag = "clears" if lo > 0.524 else ""
         print(f"  {share:<8.0%}{len(sel):>7}{r:>9.1%}  [{lo:>5.1%},{hi:>5.1%}]"
               f"{flag:>10}")
+    print()
+
+    # The cumulative column above hides where the edge actually stops, because
+    # every row of it contains every row above it: top 50% reads 57.0% only
+    # because the top 20% is inside it carrying the whole thing. So the same
+    # walk-forward ranks are cut into DISJOINT bands and each one is asked on
+    # its own. This is the measurement the tier boundaries are set from, and it
+    # is printed every run so the boundary gets re-checked rather than
+    # inherited.
+    print("disjoint bands of the walk-forward rank, within each ranked market")
+    print(f"  {'band':<12}{'picks':>7}{'correct':>9}  95% CI{'':<8}"
+          f"{'vs 52.4%':>10}")
+    pct = pd.Series(np.nan, index=live.index, dtype=float)
+    for w in weeks:
+        prior = live[live["week"] < w]
+        cfg = decide(prior, back)
+        wk = live[live["week"] == w]
+        for m, idx in wk.groupby("market_code").groups.items():
+            if m not in cfg or len(idx) < gap_tier.MIN_RANKABLE:
+                continue
+            g = wk.loc[idx, "gap"]
+            if g.notna().sum() < gap_tier.MIN_RANKABLE:
+                continue
+            # Rank so that 0 is the confident end, whichever end that is for
+            # this market. An inverted market's narrowest gaps rank first.
+            asc = cfg[m]["direction"] == "low"
+            r = g.rank(ascending=asc, method="first", pct=True)
+            pct.loc[idx] = r.values
+    live["rank_pct"] = pct
+    edges = [0.0, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.75, 1.0]
+    for lo_e, hi_e in zip(edges, edges[1:]):
+        sel = live[(live["rank_pct"] > lo_e) & (live["rank_pct"] <= hi_e)]
+        label = f"{lo_e:.0%}-{hi_e:.0%}"
+        if len(sel) < 30:
+            print(f"  {label:<12}{len(sel):>7}{'too few':>9}")
+            continue
+        w_ = sel["hit"].to_numpy()
+        r, lo, hi = S.clustered_bootstrap(
+            lambda i: float(np.mean(w_[i])), sel["cluster"].to_numpy(),
+            n_boot=2000)
+        flag = "clears" if lo > 0.524 else ""
+        print(f"  {label:<12}{len(sel):>7}{r:>9.1%}  [{lo:>5.1%},{hi:>5.1%}]"
+              f"{flag:>10}")
+    unranked = live["rank_pct"].isna()
+    if unranked.sum() >= 30:
+        print(f"  {'unranked':<12}{int(unranked.sum()):>7}"
+              f"{live.loc[unranked, 'hit'].mean():>9.1%}"
+              f"   markets with no validated direction, all published small")
     print()
 
     base = live["hit"].mean()
