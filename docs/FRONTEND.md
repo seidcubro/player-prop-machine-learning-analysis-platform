@@ -74,9 +74,12 @@ borrow a semantic colour.
 
 `scripts/build_brand.py` generates the whole asset pack from that one outline:
 the logo set, favicons, app icons, profile pictures, banners, the link preview
-and every post template in `marketing/`. It also copies the icons and the link
-preview into `apps/web/public`, so the site and the social accounts cannot drift
-apart. `marketing/README.md` lists what is in the pack and how to use it.
+and every post template. It writes them to `marketing/`, which is ignored by
+git: the pack, the plan for using it and the font files the script reads all
+live on my own machine and not in the repository. The script also copies the
+icons and the link preview into `apps/web/public`, which is tracked, so the
+site and the social accounts cannot drift apart. Running it on a fresh clone
+needs Besley and Archivo static files in `marketing/fonts` first.
 
 ## Things that will break if you are not careful
 
