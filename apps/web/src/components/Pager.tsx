@@ -41,7 +41,7 @@ export default function Pager({
         {total === 1 ? noun : `${noun}s`}
         {pages > 1 && (
           <span className="ps-pager-stamp">
-            showing {from.toLocaleString()} to {to.toLocaleString()} · page{" "}
+            showing {from.toLocaleString()} to {to.toLocaleString()}, page{" "}
             {page + 1} of {pages}
           </span>
         )}
@@ -50,13 +50,13 @@ export default function Pager({
 
       <span className="ps-pager-controls">
         <button onClick={() => onPage(Math.max(0, page - 1))} disabled={page === 0}>
-          ← Prev
+          Previous
         </button>
         <button
           onClick={() => onPage(Math.min(pages - 1, page + 1))}
           disabled={page >= pages - 1}
         >
-          Next →
+          Next
         </button>
       </span>
     </div>

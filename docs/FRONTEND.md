@@ -12,16 +12,19 @@ not scale past four items.
 
 | route | file | what it is |
 |---|---|---|
-| `/` | `EdgesDashboard.tsx` | Today's Signals. Sportsbook line against the model's number, ranked by expected value. |
+| `/` | `Landing.tsx` | What the product is, with the tier ledger read live from the record. |
+| `/signals` | `EdgesDashboard.tsx` | This week's board. Sportsbook line against the model's number, tiered by rank within each market. |
 | `/projections` | `Projections.tsx` | Every eligible player with a game this week, priced or not. This is the model's actual output. |
 | `/record` | `TrackRecord.tsx` | How the picks have done, by season, with a calibration curve and leaderboards. |
 | `/faq` | `Faq.tsx` | How it works, in plain English and for data scientists. |
+| `/model` | `Model.tsx` | The full method, for a reader who wants the detail. |
 | `/players`, `/players/:id` | `PlayersSearch.tsx`, `PlayerDetail.tsx` | Browse and profile. |
+| `/terms`, `/privacy`, `/responsible-gambling`, `/accessibility` | `Legal.tsx` | The four legal pages. Edited together, dated together. |
 
 ## Shared components
 
 `Select` replaces every native `<select>`. The OS widget renders with its own
-chrome, which on a dark panel is a white popup in the system font, and no CSS on
+chrome, which on ledger paper is a grey popup in the system font, and no CSS on
 the element reaches the list it opens. This keeps the keyboard handling and ARIA
 roles a native select gives for free.
 
@@ -50,17 +53,30 @@ different ways. Times carry the zone, because a kickoff without one is ambiguous
 
 Tokens live in `:root` in `src/index.css`. One rule matters more than the rest:
 
-**Colour carries meaning, or it is not used.** Green means over or won. Red means
-under or lost. Amber means the value pattern. Everything structural is blue,
-violet or slate. An earlier pass painted surfaces, borders, brand, logo and tiers
-all green, which meant green stopped saying anything and a winning row did not
-register.
+**The site is a ledger, and everything follows from that.** Pages are ruled
+paper (`--bg`), the masthead and footer are dark bookcloth (`--cloth`) stamped in
+gold, type is ink (`--text`), and the accent is ledger blue (`--accent`). Corners
+are square. Headings are Besley, a Clarendon, and everything else is Archivo,
+both self-hosted through `@fontsource-variable`.
 
-The brand ramp is cyan → blue → violet, matching the mark. There is no green in
-the logo for the same reason: a logo should not borrow a semantic colour.
+**Colour carries meaning, or it is not used.** Red means a loss, and a loss is
+also written in brackets (`components/Acct.tsx`), so the meaning never rests on
+colour alone. Green means won or over. Amber marks the value pattern. Tier
+labels are rubber stamps (`.pl-stamp`), each in its own ink.
 
-`scripts/build_brand.py` generates the whole asset pack (icons, favicon,
-avatars, banners, lockups) from one definition, so they cannot drift apart.
+**A total gets a double rule.** The heavy rule over a hairline is what a
+bookkeeper strikes under a final figure. It sits under totals, under the second
+half of the tagline, and under the P in the mark.
+
+The mark is a Besley Black capital P standing on that double rule
+(`components/Logo.tsx`). There is no green and no red in it: a logo should not
+borrow a semantic colour.
+
+`scripts/build_brand.py` generates the whole asset pack from that one outline:
+the logo set, favicons, app icons, profile pictures, banners, the link preview
+and every post template in `marketing/`. It also copies the icons and the link
+preview into `apps/web/public`, so the site and the social accounts cannot drift
+apart. `marketing/README.md` lists what is in the pack and how to use it.
 
 ## Things that will break if you are not careful
 

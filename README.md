@@ -98,12 +98,15 @@ rush attempts +5.4%, rushing yards +2.2%, receiving yards +1.3%, and passing
 yards **-10.0%**, which is why that market is excluded. People bet their star to
 catch passes, not to fall short.
 
-That finding is what the board is built on now. Picks are tiered on how far the
-projection sits from the line in standard deviations, overs have to clear roughly
-half again the bar of unders, and only the top tier is offered as a bet. That tier has returned +4.1% over 3,952 graded
-picks and finished positive in all four seasons it has run. It's still a small
-edge rather than a proven one, which is why closing line value is tracked
-alongside it.
+That finding is what the board is built on now. Within each market, picks are
+ranked by how far the projection sits from the line as a share of the line. The
+top fifth is elite, and elite is the only tier put forward as a pick. On the full
+graded record on 9 November 2026, elite has won 52.7% of 3,094 picks against the
+51.6% its prices needed. Every other tier has fallen short of its price, and the
+board as a whole has won 52.0% against 53.3%. It's a small edge rather than a
+proven one, which is why closing line value is tracked alongside it, and why the
+whole record is published at [priorline.io/record](https://priorline.io/record)
+rather than only the tier that works.
 
 The general lesson cost me four failed experiments to learn: I couldn't
 out-predict the market, and neither could a residual model given the market's

@@ -39,9 +39,9 @@ const TERMS: Term[] = [
     short: "A grade for the price",
     body: (
       <>
-        <strong>A</strong> is priced better than the long-run return of our top
-        tier. <strong>B</strong> is solidly worth it. <strong>C</strong> is
-        thin. <strong>D</strong> means the price already covers whatever edge we
+        <strong>A</strong> means our numbers put the bet six cents or more
+        ahead per dollar staked. <strong>B</strong> is three cents or more.{" "}
+        <strong>C</strong> is anything above zero. <strong>D</strong> means the price already covers whatever edge we
         think we have, and the bet is not worth making however likely it looks.
         Hover the grade for what 100 dollars returns on average.
       </>
@@ -111,27 +111,29 @@ const TERMS: Term[] = [
     short: "Elite, Strong, Medium, Small",
     body: (
       <>
-        Bands of expected value. On graded out-of-sample picks they rank in
-        order, elite returning the most and small the least, which is the check
-        that they mean anything at all. Overs are held to roughly double the bar
-        because the over side has not been profitable in any season tested.
+        A ranking, not a score. Inside each market the board is ordered by how
+        far our number sits from the line, as a share of the line. The top
+        fifth is Elite, then Strong, then Medium, and the rest is Small. Only
+        Elite is put forward. A market where that distance has not been shown
+        to separate winners from losers is not ranked, and everything in it is
+        Small.
       </>
     ),
   },
   {
     term: "Best Bet",
-    short: "The verified selection",
+    short: "Elite or Strong unders, one per game",
     body: (
       <>
-        The strongest disagreements with the book, on the under side, one pick
-        per player per game, at the best price available. The over side has
-        lost money in every test this project has run, so it is shown and not
-        offered. The rest of the board is research.
+        An Elite or Strong pick on the under side, one per player per game, at
+        the best price on offer. Unders only, because the over side is where
+        this project has lost the most in every period tested. Graded like
+        everything else, on the Track Record.
       </>
     ),
   },
   {
-    term: "Value",
+    term: "Value flag",
     short: "The structural over-shade",
     body: (
       <>

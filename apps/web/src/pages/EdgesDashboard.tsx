@@ -64,9 +64,10 @@ function offConsensus(e: PropEdge): { line: number; books: string[] }[] {
  * whatever it is. The grade says the same thing in the units people already
  * use, and the exact figure stays in the tooltip for anyone who wants it.
  *
- * Cut where the graded record cuts. Elite unders have returned about +4% per
- * unit, so an A is a pick priced better than that, and anything at or below
- * zero is a bet the price already covers.
+ * Fixed cuts on the expected return per unit staked: six cents on the dollar
+ * or better is an A, three is a B, anything above zero is a C, and anything at
+ * or below zero is a bet the price already covers. The Faq and the glossary
+ * state the same cuts in words, so change all three together.
  */
 function grade(ev: number | null): { letter: string; cls: string } | null {
   if (ev === null || !Number.isFinite(ev)) return null;
@@ -84,12 +85,10 @@ function breakEven(price: number | null | undefined): number | null {
 
 // Tiers the board publishes, matching PUBLISHED_TIERS in routes/edges.py.
 //
-// Medium and small are still computed, stored and graded, and the tier table on
-// the track record page needs them there to show why they are not published:
-// across 7,125 graded picks medium returned -5.1% and small -4.3%, against
-// elite's +4.0%, and on live Week 1 picks strong returned -16.2% against
-// elite's +1.1%. Offering them as filters here would just be options that
-// always come back empty.
+// The tier filter offers Elite only, because Elite is the one tier put forward.
+// Strong and Medium are on the board as context and reachable through the view
+// control. Small is computed, stored and graded, and stays off the board; the
+// record page shows it so the tier table does not hide its weakest row.
 const TIERS: EdgeTier[] = ["elite"];
 const PAGE_SIZE = 50;
 
@@ -148,6 +147,14 @@ function statValue(n: number | null | undefined, loading: boolean) {
   return loading ? "…" : 0;
 }
 
+/**
+ * How far to trust the board, in four short paragraphs and no figures.
+ *
+ * The earlier version carried a dozen typed percentages from a rule that has
+ * since been replaced, and every one of them had gone stale. The numbers live
+ * in the tier table at the top of this page and on the Track Record, both read
+ * from the graded record, so this panel only has to say what they mean.
+ */
 function CalibrationNotice() {
   const [open, setOpen] = useState(false);
   return (
@@ -163,47 +170,29 @@ function CalibrationNotice() {
       {open && (
         <div className="ps-notice-body">
           <p>
-            The projections are solid. Measured against Week 1 lines they land
-            within a few percent of the market on receptions, receiving yards
-            and passing touchdowns.
+            <strong>The projections are the solid part.</strong> They land close
+            to the market in most markets. They do not beat it: the sportsbook
+            line is the better predictor, and the model page shows that
+            measurement.
           </p>
           <p>
-            The probabilities were the weak part and they have been fixed. The
-            model ranks bets correctly, it was just claiming numbers it had not
-            earned: 65% where reality was 52%. That mattered more than a wrong
-            number on screen, because expected value is the probability minus
-            the price&rsquo;s break-even, so an inflated probability meant the
-            &ldquo;highest EV&rdquo; filter was quietly selecting losing bets.
-            They now run through a calibration fitted on 7,125 graded results.
+            <strong>The Chance column is corrected against the record.</strong>{" "}
+            The raw model claimed far more than it won, so the probability shown
+            here is refitted on graded picks. It still runs a little high, and
+            the gap is published on the model page.
           </p>
           <p>
-            <strong>Only the top tier is recommended.</strong> On out-of-sample
-            graded picks elite returns +4.0% per unit, and it is the only tier
-            that does: strong sits within a tenth of a point of break-even,
-            medium at &minus;5.2% and small at &minus;4.3%. Strong and medium
-            are on the board as context, marked as such and never as picks. Week 1 said the same thing on live picks,
-            elite at +1.1% against strong at &minus;16.2%. The lower tiers are
-            still graded and still on the track record, because a tier table
-            that hid its losers would not be worth reading, but they are not
-            offered here as bets.
+            <strong>Only Elite is put forward.</strong> A tier is a rank on
+            tonight&rsquo;s board inside each market. The tier table at the top
+            of this page shows how often each one has won against what its
+            prices needed. Strong and Medium are here as context and are marked
+            that way.
           </p>
           <p>
-            <strong>The under side is where the money is.</strong> Choosing on
-            2023&ndash;24 and verifying on a 2025 season never used to choose,
-            unders returned +2.0% per unit with a slate-clustered 95% interval
-            of [&minus;0.6%, +4.2%], which does not clear zero on its own.
-            Narrowing to elite and strong unders returns +3.0% with an interval
-            of [+0.4%, +5.5%], and elite unders one per player-game returns
-            +4.4% at [+0.3%, +8.2%]. Those two clear zero; the broad under side
-            does not. The over side lost in both periods and no slice of it
-            survived, so overs are held to roughly double the bar before they
-            can reach a top tier. Books shade props toward the over because that
-            is what the public buys, which is exactly where the price is worst.
-          </p>
-          <p>
-            None of this is a guarantee. A three-point edge on a few thousand
-            picks a season takes years to separate from luck, and the effect has
-            been shrinking as the market sharpens.
+            <strong>None of this is a guarantee.</strong> Any advantage in this
+            market is a point or two at best, and it takes thousands of picks to
+            tell that apart from luck. The full record, losing rows included, is
+            on the <Link to="/record">Track Record</Link>.
           </p>
         </div>
       )}
@@ -509,7 +498,7 @@ export default function EdgesDashboard() {
         >
           <div className="label">Best Bets</div>
           <div className="value amber">{statValue(bestCount, summary === null)}</div>
-          <div className="sub">the verified selection</div>
+          <div className="sub">elite or strong unders, one a game</div>
         </button>
       </section>
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  The seven pages worth finding. Player pages are deliberately not listed:
+  The pages worth finding. Player pages are deliberately not listed:
   there are hundreds, they change every week, and a sitemap that goes stale is
   worse than one that is short. They are reachable from /players, which is
   listed, and that is how a crawler is meant to find them.
@@ -44,5 +44,25 @@
     <loc>https://priorline.io/players</loc>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://priorline.io/responsible-gambling</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://priorline.io/terms</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://priorline.io/privacy</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://priorline.io/accessibility</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
   </url>
 </urlset>

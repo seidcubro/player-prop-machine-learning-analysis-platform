@@ -34,9 +34,12 @@ the rare cases where the gap is big enough to beat the sportsbook's margin.
 A book posts a line like "over or under 3.5 receptions". The model estimates the
 full range of outcomes for that player, turns it into a probability for each
 side, and subtracts the probability the price needs just to break even. What's
-left is expected value. Four tiers are cut on it, every pick is graded against
-the real box score, and only the tier that has made money in every season is
-offered as a bet.
+left is expected value, and it is published beside every pick. The tiers are not
+cut on it. Within each market the board is ranked by how far the projection sits
+from the line as a share of the line: the top fifth is elite, the next fifth
+strong, the next medium and the rest small. Every pick is graded against the
+real box score and against the price it was offered at, and elite is the only
+tier put forward as a pick.
 
 **The main finding: the edge is structural, not predictive.** The sportsbook's
 line predicts player outcomes slightly better than my model does. The money
@@ -408,6 +411,60 @@ whichever of them turns out to be right.
 edge = model median − book line       (the sign picks the side)
 EV   = calibrated P(side) − break-even for the price
 ```
+
+### What is live now
+
+This section has been rewritten more than any other, and the history below it is
+kept because each reversal was earned. This is the rule the board runs today
+(`services/training/gap_tier.py`, `tiers_by_rank`), checked against the code on
+9 November 2026:
+
+```
+gap = |median projection - line| / max(|line|, 0.5)
+```
+
+The gap is a share of the line, not a count of standard deviations. Within each
+market, every row on the board is ranked by it and cut by position:
+
+| Tier | Share of the market's board | On the site |
+|---|---|---|
+| Elite | top 20% | put forward as a pick |
+| Strong | next 20% | shown, not put forward |
+| Medium | next 20% | shown, not put forward |
+| Small | the rest | graded, not shown |
+
+Three details matter.
+
+- **Rank, not a fixed bar.** A fixed threshold publishes nothing on a quiet week
+  and everything on a loud one. A rank always produces a top fifth.
+- **Direction is fitted per market** by `fit_gap_tiers.py`. In most markets the
+  widest gaps are the confident end. In rushing yards it is the narrowest, and
+  ranking that market the usual way round published its worst picks as its best.
+- **A market needs ten rows to be ranked** (`MIN_RANKABLE`). Below that, and in
+  any market that has not earned a fitted tiering, every row is small.
+
+The best-bet flag is an under in elite or strong. Value grades are separate and
+still come from expected value: A at 6% or more, B at 3%, C above zero, D below.
+
+Tiers are scored against the price, not against 50%. Won is the hit rate, needed
+is the break-even implied by the prices offered, and the difference is the
+verdict. On the full graded record on 9 November 2026 (11,480 picks, 8,548 of
+them backtest and 2,932 live):
+
+| Tier | Picks | Won | Needed | Difference |
+|---|---:|---:|---:|---:|
+| Elite | 3,094 | 52.7% | 51.6% | +1.1 |
+| Strong | 1,299 | 51.8% | 53.8% | (1.9) |
+| Medium | 1,350 | 50.7% | 53.4% | (2.7) |
+| Small | 2,895 | 51.8% | 53.5% | (1.7) |
+| Everything | 11,480 | 52.0% | 53.3% | (1.3) |
+
+Elite is the only tier that has cleared its price, and by about a point. The
+board as a whole has not. Those figures move every week; the site reads them
+from the record rather than from this page, and `/record` is the current copy.
+
+Everything below this line is how the rule got here. Where it says "is", read
+"was" unless the paragraph above agrees with it.
 
 ### Tiers are cut on the size of the disagreement, not on the price
 
@@ -785,24 +842,28 @@ isn't used for pricing because it hasn't beaten the quantile models on P(over).
 
 ## The record
 
-As of September 2026. The current numbers are on the
-[Track Record](https://priorline.io/record).
+As of 9 November 2026, across 11,480 graded picks: 8,548 reconstructed by
+backtest and 2,932 published live. The current numbers are on the
+[Track Record](https://priorline.io/record), which reads them from the database
+rather than from this page.
 
-| Tier | Picks | Hit | Claimed | ROI |
-|---|---:|---:|---:|---:|
-| Elite | 3,952 | 53.6% | 66.4% | +4.1% |
-| Strong | 933 | 52.8% | 59.6% | −0.2% |
-| Medium | 1,033 | 50.4% | 58.0% | −5.2% |
-| Small | 1,227 | 51.3% | 56.2% | −4.3% |
+| Tier | Picks | Won | Needed | Difference | Units |
+|---|---:|---:|---:|---:|---:|
+| Elite | 3,094 | 52.7% | 51.6% | +1.1 | +61.2 |
+| Strong | 1,299 | 51.8% | 53.8% | (1.9) | |
+| Medium | 1,350 | 50.7% | 53.4% | (2.7) | |
+| Small | 2,895 | 51.8% | 53.5% | (1.7) | |
+| Untiered | 2,842 | 52.3% | 54.8% | (2.5) | |
+| Everything | 11,480 | 52.0% | 53.3% | (1.3) | (270.9) |
 
-| Elite by season | Source | Picks | Hit | ROI |
-|---|---|---:|---:|---:|
-| 2023 | reconstructed | 445 | 53.5% | +3.5% |
-| 2024 | reconstructed | 354 | 55.4% | +7.7% |
-| 2025 | reconstructed | 3,051 | 53.5% | +3.9% |
-| 2026 | published live | 102 | 52.0% | +1.1% |
+Won is how often the pick was right. Needed is how often it had to be right at
+the prices offered. A figure in brackets is a shortfall.
 
-Elite averaged about 90 picks per game day in 2025, so it's not a thin tier.
+Read plainly: elite has cleared its price by about a point, nothing else has,
+and the live picks on their own (52.4% against 54.2%) are short. An earlier
+version of this page claimed +4.1% for elite under the previous tier rule. That
+figure belonged to that rule and is not carried forward.
+
 For context, betting every disagreement across the whole 2025 season lost 4.3%,
 51.5% against a 53.9% break-even. Unders beat break-even in four of six markets
 and overs lost everywhere. The published tier is the fix for that imbalance, not

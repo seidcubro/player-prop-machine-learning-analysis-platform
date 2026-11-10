@@ -15,6 +15,10 @@ import Model from './pages/Model'
 import PlayersSearch from './pages/PlayersSearch'
 import PlayerDetail from './pages/PlayerDetail'
 import NotFound from './pages/NotFound'
+import { Accessibility, Privacy, ResponsibleGambling, Terms } from './pages/Legal'
+import '@fontsource-variable/archivo/wdth.css'
+import '@fontsource-variable/besley/wght.css'
+import '@fontsource-variable/besley/wght-italic.css'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -30,6 +34,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/model" element={<Model />} />
           <Route path="/players" element={<PlayersSearch />} />
           <Route path="/players/:id" element={<PlayerDetail />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/responsible-gambling" element={<ResponsibleGambling />} />
+          <Route path="/accessibility" element={<Accessibility />} />
           {/* Anything else. Without this an unknown path rendered the nav and
               an empty page, which reads as a broken site rather than a wrong
               address. */}

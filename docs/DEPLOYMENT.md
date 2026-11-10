@@ -61,6 +61,10 @@ Frontend only. In the Vercel project settings:
 - Environment variables:
   - `VITE_API_BASE=https://api.priorline.io/api/v1`
   - `VITE_SITE_URL=https://priorline.io` (the site's own origin, no trailing slash)
+  - `VITE_CONTACT_EMAIL` (optional). The address printed on the legal pages. It
+    is set here and nowhere in the repo, so no address is ever committed. Until
+    it is set those pages say plainly that there is no contact address yet,
+    which is not a state to leave them in.
 
 Both are read at build time, not runtime, so changing either needs a redeploy.
 The build refuses to run without them rather than shipping a broken version
@@ -131,8 +135,9 @@ probabilities read about ten points high on the under side and no calibration
 can anticipate a season nobody has played yet. That gap is still there and still
 visible: the live 2026 picks claim 58% and have hit 48%.
 
-What changed is what the site does about it. Only the elite tier is published,
-which is the one tier that has made money in every season it has run, and the
+What changed is what the site does about it. Elite is the only tier put forward
+as a pick, because it is the only tier that has cleared its price over the graded
+record. Strong and medium are shown beside it and labelled as not put forward, and the
 claimed figure sits beside the actual one on the track record and on the landing
 page rather than being quietly omitted. A reader is told the model is wrong
 often, by how much, and which tiers lost money.

@@ -1,319 +1,608 @@
 /**
- * The front door.
+ * The front page is the book, open.
  *
- * The board used to be the landing page, which meant a stranger's first screen
- * was 186 words of prose explaining expected value, with the first actual
- * number 715 pixels down a 900 pixel fold. The tool was doing the job of the
- * pitch, and doing it defensively, because it had to explain itself before it
- * could show anything.
+ * A sportsbook keeps a book and does not show it to you. This site keeps its
+ * own and the front page is that book lying open: the posted account on the
+ * left leaf, every tier, won against needed, losses in red; and on the right
+ * leaf whatever is open for the coming slate.
  *
- * So this leads with the only thing that earns anyone's attention: the record.
- * Every figure on this page is read from the API at load, not typed in, because
- * a landing page that states a performance number it cannot back is the exact
- * thing this project has spent its life avoiding. If the numbers move, the page
- * moves with them.
+ * Nothing on this page is a typed figure. Every number is read from the record
+ * or the board when the page loads, and a number that fails to load is left
+ * blank rather than replaced with a remembered one. The site once advertised a
+ * return the record contradicted, and that is how it happened.
+ *
+ * The page leads with whether the picks were right. Won and needed sit side by
+ * side, the difference is the verdict, and units are the small column at the
+ * end, because a pick is judged on being correct against the price it was
+ * offered at before it is judged on anything else.
  */
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import Avatar from "../components/Avatar";
-import { asPct, countWord, useHeadlineRecord } from "../lib/headline-record";
-import { kickoff, price as fmtOdds } from "../lib/format";
-import { marketLabel, sideLabel } from "../lib/markets";
 import {
   fetchEdges,
   fetchEdgesSummary,
+  fetchProjections,
   fetchSeasonRecord,
   fetchTierRecord,
   type EdgesSummary,
+  type Projection,
   type PropEdge,
   type SeasonRecord,
   type TierRecord,
 } from "../api";
+import { Acct, Arrow } from "../components/Acct";
+import { kickoff, pct, price } from "../lib/format";
+import {
+  displayProjection,
+  marketLabel,
+  marketLabelShort,
+  sideLabel,
+} from "../lib/markets";
 
-function pct(v: number | null | undefined, digits = 1): string {
-  if (v === null || v === undefined) return "···";
-  return `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(digits)}%`;
+const TIER_ORDER = ["elite", "strong", "medium", "small"];
+const TIER_NAME: Record<string, string> = {
+  elite: "Elite",
+  strong: "Strong",
+  medium: "Medium",
+  small: "Small",
+};
+
+type Totals = {
+  picks: number;
+  hit: number | null;
+  needed: number | null;
+  units: number | null;
+};
+
+/** Picks-weighted, so a tier of fifty picks cannot move the total like one of
+ *  three thousand. */
+function total(rows: TierRecord[]): Totals {
+  const graded = rows.filter((r) => r.picks > 0);
+  const picks = graded.reduce((a, r) => a + r.picks, 0);
+  if (!picks) return { picks: 0, hit: null, needed: null, units: null };
+  const w = (f: (r: TierRecord) => number | null) =>
+    graded.reduce((a, r) => a + (f(r) ?? 0) * r.picks, 0) / picks;
+  return {
+    picks,
+    hit: w((r) => r.hit_rate),
+    needed: w((r) => r.breakeven),
+    units: graded.reduce((a, r) => a + (r.units ?? 0), 0),
+  };
 }
+
+function diff(hit: number | null, needed: number | null): number | null {
+  return hit === null || needed === null ? null : hit - needed;
+}
+
+function sortTiers(rows: TierRecord[]): TierRecord[] {
+  const rank = (t: string) => {
+    const i = TIER_ORDER.indexOf(t);
+    return i === -1 ? TIER_ORDER.length : i;
+  };
+  return [...rows]
+    .filter((r) => r.picks > 0)
+    .sort((a, b) => rank(a.edge_tier) - rank(b.edge_tier));
+}
+
+function Stamp({ tier }: { tier: string }) {
+  const known = TIER_NAME[tier];
+  if (!known) return <span className="ld-untiered">No tier recorded</span>;
+  return <span className={`pl-stamp is-${tier}`}>{known}</span>;
+}
+
+function listWords(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function projNumber(p: Projection): string {
+  const v = displayProjection(p);
+  return p.market_code.endsWith("_yds") ? v.toFixed(0) : v.toFixed(1);
+}
+
+/** The stagger index, as a custom property the stylesheet reads. */
+function at(i: number): React.CSSProperties {
+  return { "--i": i } as React.CSSProperties;
+}
+
+/* ------------------------------------------------------------ left leaf */
+
+function PostedAccount({
+  tiers,
+  live,
+  failed,
+}: {
+  tiers: TierRecord[] | null;
+  live: Totals | null;
+  failed: boolean;
+}) {
+  const rows = tiers ? sortTiers(tiers) : [];
+  const sum = total(rows);
+  return (
+    <div className="ld-leaf ld-leaf-left">
+      <header className="ld-leaf-head">
+        <h2>Posted account</h2>
+        <p>Every graded pick, by confidence tier</p>
+      </header>
+      {failed ? (
+        <p className="ld-leaf-note">
+          The record did not load. Nothing is shown in its place, because a
+          remembered figure is how a site ends up quoting a number its own
+          record contradicts. The full account is on the{" "}
+          <Link to="/record">record page</Link>.
+        </p>
+      ) : (
+        <div className="ld-scroll">
+          <table className="ld-ledger" aria-busy={tiers === null}>
+            <caption className="sr-only">
+              Graded picks by tier: how many, the share that won, the share
+              that had to win at the prices offered, the difference in
+              percentage points, and units won or lost.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Tier</th>
+                <th scope="col" className="num">Picks</th>
+                <th scope="col" className="num">Won</th>
+                <th scope="col" className="num">Needed</th>
+                <th scope="col" className="num">Difference</th>
+                <th scope="col" className="num ld-minor">Units</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tiers === null &&
+                TIER_ORDER.map((t) => (
+                  <tr key={t} className="is-pending">
+                    <th scope="row"><Stamp tier={t} /></th>
+                    <td className="num" colSpan={5}>
+                      <span className="acct is-blank">reading the record</span>
+                    </td>
+                  </tr>
+                ))}
+              {rows.map((r, i) => (
+                <tr key={r.edge_tier} className="ld-row" style={at(i)}>
+                  <th scope="row"><Stamp tier={r.edge_tier} /></th>
+                  <td className="num">{r.picks.toLocaleString()}</td>
+                  <td className="num ld-won">{pct(r.hit_rate)}</td>
+                  <td className="num">{pct(r.breakeven)}</td>
+                  <td className="num">
+                    <Acct value={diff(r.hit_rate, r.breakeven)} scale={100} plus />
+                  </td>
+                  <td className="num ld-minor">
+                    <Acct value={r.units} plus />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr className="ld-row ld-total" style={at(rows.length)}>
+                  <th scope="row">All picks</th>
+                  <td className="num">{sum.picks.toLocaleString()}</td>
+                  <td className="num ld-won">{pct(sum.hit)}</td>
+                  <td className="num">{pct(sum.needed)}</td>
+                  <td className="num">
+                    <Acct value={diff(sum.hit, sum.needed)} scale={100} plus />
+                  </td>
+                  <td className="num ld-minor">
+                    <Acct value={sum.units} plus />
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+      {!failed && (
+        <dl className="ld-key">
+          <div>
+            <dt>Won</dt>
+            <dd>The share of picks that were correct.</dd>
+          </div>
+          <div>
+            <dt>Needed</dt>
+            <dd>
+              The share that had to be correct, at the prices offered, just to
+              finish level.
+            </dd>
+          </div>
+          <div>
+            <dt>Difference</dt>
+            <dd>Won minus needed, in points. Brackets mean a loss.</dd>
+          </div>
+        </dl>
+      )}
+      {live && live.picks > 0 && (
+        <p className="ld-leaf-note">
+          The account above includes seasons rebuilt after the fact, using
+          models that had only seen earlier games. Counting only picks
+          published before kickoff: <b>{live.picks.toLocaleString()}</b> picks,{" "}
+          <b>{pct(live.hit)}</b> won against <b>{pct(live.needed)}</b> needed,
+          a difference of{" "}
+          <Acct value={diff(live.hit, live.needed)} scale={100} plus /> points.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------- right leaf */
+
+function OpenEntries({
+  edges,
+  pencil,
+  summary,
+}: {
+  edges: PropEdge[] | null;
+  pencil: Projection[];
+  summary: EdgesSummary | null;
+}) {
+  const cov = summary?.coverage ?? null;
+  const priced = edges !== null && edges.length > 0;
+  const next = summary?.next_update ?? null;
+
+  let status = "Reading the board";
+  if (edges !== null) {
+    if (priced) {
+      status = cov
+        ? `${cov.games_priced} of ${cov.games_upcoming} upcoming games priced`
+        : "Priced and open";
+    } else if (cov && cov.games_in_progress > 0) {
+      status = "A game is in progress, so its entries have closed";
+    } else {
+      status = "No lines posted yet for the next slate";
+    }
+  }
+
+  return (
+    <div className="ld-leaf ld-leaf-right">
+      <header className="ld-leaf-head">
+        <h2>{priced || edges === null ? "Open entries" : "Pencilled in"}</h2>
+        <p>{status}</p>
+      </header>
+
+      {priced && (
+        <ol className="ld-entries">
+          {edges!.map((e, i) => (
+            <li key={e.id} className="ld-entry" style={at(i)}>
+              <span className="ld-entry-who">
+                {e.player_id ? (
+                  <Link to={`/players/${e.player_id}`}>{e.player_name}</Link>
+                ) : (
+                  e.player_name
+                )}
+                <small>{marketLabel(e.market_code)}</small>
+              </span>
+              <span className="ld-entry-call">
+                {sideLabel(e.market_code, e.recommended_side)}
+                {e.line !== null ? ` ${e.line}` : ""}
+                <small>{price(e.price_american)}</small>
+              </span>
+              <Stamp tier={e.edge_tier} />
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {edges !== null && !priced && pencil.length > 0 && (
+        <>
+          <ol className="ld-entries is-pencil">
+            {pencil.map((p, i) => (
+              <li
+                key={`${p.player_id}-${p.market_code}`}
+                className="ld-entry"
+                style={at(i)}
+              >
+                <span className="ld-entry-who">
+                  {p.app_player_id ? (
+                    <Link to={`/players/${p.app_player_id}`}>{p.player_name}</Link>
+                  ) : (
+                    p.player_name
+                  )}
+                  <small>{[p.team, p.opponent].filter(Boolean).join(" v ")}</small>
+                </span>
+                <span className="ld-entry-call">
+                  {projNumber(p)}
+                  <small>{marketLabelShort(p.market_code)}</small>
+                </span>
+              </li>
+            ))}
+          </ol>
+          <p className="ld-leaf-note">
+            These are projections, not picks. A pick needs a line to disagree
+            with, and no book has posted one yet. They stay in pencil until one
+            does.
+          </p>
+        </>
+      )}
+
+      {edges !== null && !priced && pencil.length === 0 && (
+        <p className="ld-leaf-note">
+          Nothing is open and no projections are published for the next slate
+          yet. This leaf fills in when the next build runs.
+        </p>
+      )}
+
+      <p className="ld-leaf-foot">
+        {next?.at ? <span>Next build {kickoff(next.at)}</span> : <span />}
+        <Link to={priced ? "/signals" : "/projections"}>
+          {priced ? "The whole board" : "Every projection"} <Arrow />
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- page */
+
+/** Each of these is in the method page's own list of what was thrown out. */
+const STRUCK: Array<[string, string]> = [
+  [
+    "Predict the line's error instead of the stat",
+    "No better than a coin flip in any market.",
+  ],
+  [
+    "Trust the bigger names in the lower tiers",
+    "Ran backwards. The biggest names did worst.",
+  ],
+  [
+    "Lean on primetime games",
+    "Worse than the rest of the slate, not better.",
+  ],
+  [
+    "Use a heavier gradient-boosting library",
+    "Caught memorising its training data and lost every market.",
+  ],
+  [
+    "Recommend anytime touchdown bets",
+    "The book's own prices rank likely scorers better than the model does. Projected, never recommended.",
+  ],
+  [
+    "Price every market from one game simulator",
+    "It reproduces how teammates move together and still has not beaten the simpler models on probability.",
+  ],
+];
 
 export default function Landing() {
   const [tiers, setTiers] = useState<TierRecord[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [live, setLive] = useState<Totals | null>(null);
   const [seasons, setSeasons] = useState<SeasonRecord[] | null>(null);
   const [summary, setSummary] = useState<EdgesSummary | null>(null);
-  const [top, setTop] = useState<PropEdge[] | null>(null);
-  const rec = useHeadlineRecord();
+  const [edges, setEdges] = useState<PropEdge[] | null>(null);
+  const [pencil, setPencil] = useState<Projection[]>([]);
 
   useEffect(() => {
     let dead = false;
-    Promise.allSettled([
-      fetchTierRecord(),
-      // Elite only, matching the number quoted at the top of the page.
-      fetchSeasonRecord("all", "elite"),
-      fetchEdgesSummary(),
-      // The strongest few on the board, so the front page shows the product
-      // instead of describing it.
-      fetchEdges({ tier: "elite", sort: "ev_per_unit", order: "desc", limit: 4 }),
-    ]).then(([t, s, e, b]) => {
-      if (dead) return;
-      if (t.status === "fulfilled") setTiers(t.value.tiers);
-      if (s.status === "fulfilled") setSeasons(s.value.seasons);
-      if (e.status === "fulfilled") setSummary(e.value);
-      setTop(b.status === "fulfilled" ? b.value.edges : []);
-    });
+    fetchTierRecord()
+      .then((r) => !dead && setTiers(r.tiers))
+      .catch(() => !dead && setFailed(true));
+    fetchTierRecord(undefined, "live")
+      .then((r) => !dead && setLive(total(r.tiers)))
+      .catch(() => undefined);
+    fetchSeasonRecord("all", "elite")
+      .then((r) => !dead && setSeasons(r.seasons))
+      .catch(() => !dead && setSeasons([]));
+    fetchEdgesSummary()
+      .then((r) => !dead && setSummary(r))
+      .catch(() => undefined);
+    fetchEdges({ limit: 8 })
+      .then((r) => {
+        if (dead) return;
+        setEdges(r.edges);
+        if (r.edges.length > 0) return;
+        // Nothing priced: fall back to what the model thinks of the next
+        // slate, one market at a time so the list is not eight receivers.
+        Promise.all(
+          ["rec_yds", "rush_yds", "pass_yds"].map((m) =>
+            fetchProjections({
+              market_code: m,
+              starters_only: true,
+              sort: "projection",
+              order: "desc",
+              limit: 3,
+            })
+              .then((p) => p.projections)
+              .catch(() => [] as Projection[]),
+          ),
+        ).then((lists) => {
+          if (dead) return;
+          const out: Projection[] = [];
+          for (let i = 0; i < 3; i++) {
+            for (const l of lists) if (l[i]) out.push(l[i]);
+          }
+          setPencil(out.slice(0, 8));
+        });
+      })
+      .catch(() => !dead && setEdges([]));
     return () => {
       dead = true;
     };
   }, []);
 
-  const elite = tiers?.find((t) => t.edge_tier === "elite") ?? null;
-  const live = summary?.by_tier?.elite ?? 0;
-  const cov = summary?.coverage ?? null;
-
-  // Seasons the top tier finished in profit, which is the claim being made.
-  const eliteSeasons = (seasons ?? []).filter((s) => (s.picks ?? 0) > 0);
+  const published = summary?.published_tiers ?? [];
+  const bet = summary?.bet_tiers ?? [];
+  const seasonRows = (seasons ?? [])
+    .filter((s) => s.picks > 0)
+    .sort((a, b) => b.season - a.season);
 
   return (
-    <div className="ps-landing">
-      {/* Two columns: the pitch, and the board it is pitching.
-
-          The hero used to be one column of text in a page twice its width, so
-          the right half of the first screen was empty and the whole page read
-          as pushed to one side. Filling it with the live top of the board
-          fixes the balance and puts the actual product above the fold, which
-          prose about the product never managed.
-
-          The logo lockup that sat above the headline is gone: the masthead
-          directly above it already carries the same mark. */}
-      <section className="hero">
-        <div className="hero-copy">
-        <h1>
-          Our prior.<span className="accent"> Their line.</span>
+    <div className="ld">
+      <section className="ld-top">
+        <h1 className="ld-head">
+          Our prior. <span className="ld-head-line">Their line.</span>
         </h1>
-
-        <p className="lede">
-          A model projects every skill player in the NFL, then prices those
-          projections against what the sportsbooks are offering. When the two
-          disagree by enough to beat the price, that is a signal. When they do
-          not, this page says so.
-        </p>
-
-        <div className="cta">
-          <Link className="primary" to="/signals">
-            {live > 0
-              ? `See today's ${live} signal${live === 1 ? "" : "s"}`
-              : "See today's board"}
-          </Link>
-          <Link className="secondary" to="/record">
-            Read the track record
-          </Link>
-        </div>
-
-        {/* The live state, stated plainly. A quiet day is not hidden. */}
-        <p className="status">
-          {live > 0 ? (
-            <>
-              <span className="dot live" aria-hidden="true" />
-              {live} elite signal{live === 1 ? "" : "s"} on the board right now
-            </>
-          ) : cov && cov.games_priced > 0 ? (
-            <>
-              <span className="dot idle" aria-hidden="true" />
-              Nothing clears the bar today, across {cov.games_priced} priced
-              game{cov.games_priced === 1 ? "" : "s"}
-            </>
-          ) : (
-            <>
-              <span className="dot idle" aria-hidden="true" />
-              No games priced yet. The board fills as kickoff approaches
-            </>
-          )}
-        </p>
-        </div>
-
-        <aside className="hero-board" aria-label="Top of today's board">
-          <div className="hero-board-head">
-            <span className="hero-board-title">Top of the board</span>
-            <span className="hero-board-sub">elite, by expected return</span>
+        <div className="ld-intro">
+          <p className="ld-lede">
+            I project every NFL player prop the sportsbooks post, pick a side,
+            and grade every pick against the price it was offered at. A
+            sportsbook keeps its book closed. This one is open, including the
+            parts written in red.
+          </p>
+          <div className="ld-cta">
+            <Link className="ld-btn" to="/signals">
+              Open today&rsquo;s page <Arrow />
+            </Link>
+            <Link className="ld-link" to="/record">
+              Audit the record <Arrow />
+            </Link>
           </div>
-          {top === null ? (
-            <div className="hero-board-empty">Loading the board…</div>
-          ) : top.length === 0 ? (
-            <div className="hero-board-empty">
-              No elite signals right now. The board fills as kickoff approaches.
-            </div>
-          ) : (
-            <ol className="hero-board-list">
-              {top.map((e) => (
-                <li key={e.id}>
-                  <Link
-                    className="hero-pick"
-                    to={e.player_id ? `/players/${e.player_id}` : "/signals"}
-                  >
-                    <Avatar name={e.player_name} src={e.headshot} />
-                    <span className="hero-pick-who">
-                      <span className="hero-pick-name">{e.player_name}</span>
-                      <span className="hero-pick-meta">
-                        {marketLabel(e.market_code)}
-                        {e.commence_time ? ` · ${kickoff(e.commence_time)}` : ""}
-                      </span>
-                    </span>
-                    <span className="hero-pick-bet">
-                      <span className={`side-${e.recommended_side}`}>
-                        {sideLabel(e.market_code, e.recommended_side)}{" "}
-                        {e.line ?? ""}
-                      </span>
-                      <span className="hero-pick-price">
-                        {fmtOdds(e.price_american)}
-                      </span>
-                    </span>
-                    <span className="hero-pick-ev">
-                      {e.ev_per_unit != null
-                        ? `${e.ev_per_unit >= 0 ? "+" : "−"}${Math.abs(e.ev_per_unit * 100).toFixed(1)}%`
-                        : ""}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ol>
-          )}
-          <Link className="hero-board-more" to="/signals">
-            Full board →
-          </Link>
-        </aside>
-      </section>
-
-      {/* The record, which is the only reason to trust any of it. */}
-      <section className="proof ps-balance" aria-label="Published record">
-        <div className="stat">
-          <div className="value">{elite ? pct(elite.roi, 1) : "···"}</div>
-          <div className="label">return per unit</div>
-          <div className="note">top tier, at the price offered</div>
-        </div>
-        <div className="stat">
-          <div className="value">
-            {elite ? elite.picks.toLocaleString() : "···"}
-          </div>
-          <div className="label">graded picks</div>
-          <div className="note">every one scored against the box score</div>
-        </div>
-        <div className="stat">
-          <div className="value">
-            {elite?.units != null
-              ? `${elite.units >= 0 ? "+" : "−"}${Math.abs(
-                  elite.units,
-                ).toFixed(0)}`
-              : "···"}
-          </div>
-          <div className="label">units</div>
-          <div className="note">flat one unit a bet</div>
         </div>
       </section>
 
-      <section className="how" aria-label="How it works">
-        <h2>Three things, in order</h2>
-        <ol className="ps-balance is-prose">
+      <section className="ld-book" aria-label="The book, open">
+        <PostedAccount tiers={tiers} live={live} failed={failed} />
+        <OpenEntries edges={edges} pencil={pencil} summary={summary} />
+      </section>
+
+      <section className="ld-sec" aria-labelledby="ld-how">
+        <h2 id="ld-how">How an entry gets written</h2>
+        <ol className="ld-steps">
           <li>
-            <h3>Project the player</h3>
+            <h3>Project</h3>
             <p>
-              Not last week&rsquo;s box score. Usage, role, snap share, the
-              defence being faced, the venue, the weather, the number Vegas has
-              on the game. Opponent strength alone is about a third of the
-              weight in the rushing model.
+              Every eligible player gets a predicted range in each of eleven
+              markets, built from play-by-play, usage, depth charts, the
+              opponent, the venue and the Vegas total and spread. A range and
+              not a single number, because sixty yards give or take ten is a
+              different claim from sixty give or take forty.
             </p>
           </li>
           <li>
-            <h3>Price it against the book</h3>
+            <h3>Compare</h3>
             <p>
-              A projection is worthless until it meets a price. The model turns
-              its own distribution into a probability, then subtracts the
-              break-even the odds demand. What is left is the edge, and most of
-              the time it is negative.
+              When a book posts a line, the middle of that range is set against
+              it. Above the line is an over, below it is an under. The middle
+              and not the average, because yardage is skewed and the average
+              sits above what a player typically does.
             </p>
           </li>
           <li>
-            <h3>Recommend almost none of it</h3>
+            <h3>Rank</h3>
             <p>
-              Four tiers are graded, three reach the board and one is offered
-              as a bet. Elite is the only tier that has made money; the others
-              are shown with their real return printed beside them, because
-              what the model thinks and what is worth staking are two different
-              questions. Every tier stays on the track record, losses and all.
+              Inside each market, the picks on the board are ranked by how far
+              the projection sits from the line, as a share of the line. The
+              top fifth is stamped elite, the next fifth strong, the next
+              medium, and the rest small. A market whose ranking has not held
+              up on games it was not fitted to is published unranked, with
+              every pick marked small.
+              {published.length > 0 && bet.length > 0 && (
+                <>
+                  {" "}The board shows {listWords(published)}, and only{" "}
+                  {listWords(bet)} is put forward as a pick.
+                </>
+              )}
+            </p>
+          </li>
+          <li>
+            <h3>Grade</h3>
+            <p>
+              After the games every pick is marked right or wrong, then scored
+              against the share that had to win at the odds on offer. Both
+              numbers go in the book, whichever way they came out.
             </p>
           </li>
         </ol>
-        <p className="sub">
-          The full method, including every idea that was tested and thrown out,
-          is in <Link to="/model">Inside the Model</Link>.
+        <p className="ld-more">
+          <Link to="/model">The full method, with what failed</Link>
+          <Link to="/faq">The same thing in plain English</Link>
         </p>
       </section>
 
-      {eliteSeasons.length > 0 && (
-        <section className="seasons" aria-label="Record by season">
-          <h2>The top tier, every season it has run</h2>
-          <p className="sub">
-            Elite picks only, which is the tier this site publishes and the
-            number quoted above. Seasons before this one are reconstructed with
-            models refit on earlier data only, so nothing here has seen the
-            season it is being judged on. The current season is live and is the
-            thinnest sample of the four.
+      {seasonRows.length > 0 && (
+        <section className="ld-sec" aria-labelledby="ld-seasons">
+          <h2 id="ld-seasons">The elite tier, season by season</h2>
+          <p className="ld-sec-lede">
+            A pooled total can hide a bad year. These are the same picks split
+            by the season they were made in, and by whether they were published
+            before kickoff or rebuilt afterwards.
           </p>
-          <div className="grid ps-balance">
-            {eliteSeasons.map((s) => (
-              <div className="season" key={`${s.season}-${s.source}`}>
-                <div className="yr">{s.season}</div>
-                <div
-                  className={`roi ${(s.roi ?? 0) >= 0 ? "up" : "down"}`}
-                >
-                  {pct(s.roi, 1)}
-                </div>
-                <div className="meta">
-                  {s.picks.toLocaleString()} picks &middot;{" "}
-                  {s.source === "live" ? "published live" : "reconstructed"}
-                </div>
-              </div>
-            ))}
+          <div className="ld-scroll">
+            <table className="ld-ledger ld-ledger-wide">
+              <thead>
+                <tr>
+                  <th scope="col">Season</th>
+                  <th scope="col">How it was recorded</th>
+                  <th scope="col" className="num">Picks</th>
+                  <th scope="col" className="num">Won</th>
+                  <th scope="col" className="num">Needed</th>
+                  <th scope="col" className="num">Difference</th>
+                  <th scope="col" className="num ld-minor">Units</th>
+                </tr>
+              </thead>
+              <tbody>
+                {seasonRows.map((s) => (
+                  <tr key={`${s.season}-${s.source}`}>
+                    <th scope="row">{s.season}</th>
+                    <td>
+                      {s.source === "live"
+                        ? "Published before kickoff"
+                        : "Rebuilt from earlier seasons"}
+                    </td>
+                    <td className="num">{s.picks.toLocaleString()}</td>
+                    <td className="num ld-won">{pct(s.hit_rate)}</td>
+                    <td className="num">{pct(s.breakeven)}</td>
+                    <td className="num">
+                      <Acct value={diff(s.hit_rate, s.breakeven)} scale={100} plus />
+                    </td>
+                    <td className="num ld-minor">
+                      <Acct value={s.units} plus />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       )}
 
-      <section className="honest" aria-label="What this is not">
-        <h2>What it is not</h2>
-        <p>
-          It is not a tip sheet and it does not promise anything. The model is
-          wrong often.{" "}
-          {/* Fetched, like every other number on this page. These two were
-              typed in, which made them correct until the next grading run and
-              a false claim after it. */}
-          {rec ? (
-            <>
-              Across every graded pick it has hit <b>{asPct(rec.hit)}</b> while
-              claiming {asPct(rec.claimed)}, and {countWord(rec.losing)} of its{" "}
-              {countWord(rec.tiers)} tiers have lost money.{" "}
-            </>
-          ) : (
-            <>Whole tiers of it have lost money. </>
-          )}
-          All of that is on the <Link to="/record">track record</Link>, because
-          a record that only showed the good weeks would not be a record.
+      <section className="ld-sec" aria-labelledby="ld-struck">
+        <h2 id="ld-struck">Struck from the book</h2>
+        <p className="ld-sec-lede">
+          Ideas I tested, wanted to work, and crossed out. They stay on the
+          page, because a method that only lists what worked is an
+          advertisement.
         </p>
-        {/* Deliberately not the "use your own judgment" paragraph. The
-            site-wide disclaimer renders immediately under this section and
-            says exactly that, so writing it here too put the same three
-            sentences on screen twice inside one fold. This says the other
-            half: what the bar costs you on a normal day. */}
-        <p>
-          Most days it has nothing to say. Thirteen games can be priced and not
-          one of them clear the bar, and on those days the board says so rather
-          than finding you something to bet. That is the whole discipline of
-          it. The filtering is the tool&rsquo;s job; knowing the football is
-          still yours.
+        <ul className="ld-struck">
+          {STRUCK.map(([idea, why]) => (
+            <li key={idea}>
+              <s>{idea}</s>
+              <span>{why}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="ld-more">
+          <Link to="/model#findings">All of them, with the numbers</Link>
         </p>
-        <div className="cta">
-          <Link className="primary" to="/signals">
-            Go to the board
+      </section>
+
+      <section className="ld-sec ld-not" aria-labelledby="ld-not">
+        <h2 id="ld-not">What this is not</h2>
+        <div className="ld-not-grid">
+          <p>
+            It is not a tipping service. Nothing here is sold, there is no
+            account to open, and no link on this site goes to a sportsbook. I
+            earn nothing if you bet and nothing if you do not.
+          </p>
+          <p>
+            It is not a promise. The model is wrong often, the book is usually
+            closer to the result than I am, and most of what it publishes has
+            not beaten the price. The account above says exactly how much.
+          </p>
+          <p>
+            It is not advice. It is one person&rsquo;s research, published with
+            its losses. If you bet, that decision and its cost are yours. If
+            betting has stopped being fun,{" "}
+            <Link to="/responsible-gambling">help is free and private</Link>.
+          </p>
+        </div>
+        <div className="ld-cta">
+          <Link className="ld-btn" to="/signals">
+            Open today&rsquo;s page <Arrow />
           </Link>
-          <Link className="secondary" to="/projections">
-            Or just browse the projections
+          <Link className="ld-link" to="/record">
+            Audit the record <Arrow />
           </Link>
         </div>
       </section>

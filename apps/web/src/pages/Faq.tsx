@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import PageTitle from "../components/PageTitle";
+import { fetchTierRecord, type TierRecord } from "../api";
 
 type Audience = "plain" | "technical" | "deep";
 
@@ -100,6 +101,61 @@ export default function Faq() {
   );
 }
 
+/**
+ * "How often is it right", answered from the record instead of from memory.
+ *
+ * This used to be two typed sentences, one of which had stopped being true.
+ * A verdict on the record is the one thing on this page that changes every
+ * week, so it is worked out from the same rows the Track Record shows.
+ */
+function RecordAnswer() {
+  const [tiers, setTiers] = useState<TierRecord[] | null>(null);
+
+  useEffect(() => {
+    let dead = false;
+    fetchTierRecord()
+      .then((r) => !dead && setTiers(r.tiers))
+      .catch(() => !dead && setTiers([]));
+    return () => {
+      dead = true;
+    };
+  }, []);
+
+  if (tiers === null) return <p>Reading the record.</p>;
+
+  const pc = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const rows = tiers.filter(
+    (r) => r.picks > 0 && r.hit_rate !== null && r.breakeven !== null,
+  );
+  const picks = rows.reduce((a, r) => a + r.picks, 0);
+  if (picks === 0) {
+    return (
+      <p>
+        The record could not be read just now. It is on the Track Record page.
+      </p>
+    );
+  }
+  const won = rows.reduce((a, r) => a + (r.hit_rate ?? 0) * r.picks, 0) / picks;
+  const needed =
+    rows.reduce((a, r) => a + (r.breakeven ?? 0) * r.picks, 0) / picks;
+  const elite = rows.find((r) => r.edge_tier === "elite");
+
+  return (
+    <p>
+      Across all {picks.toLocaleString()} graded picks, {pc(won)} won. At the
+      prices they were offered at they needed {pc(needed)}, so the whole board
+      has {won > needed ? "cleared" : "fallen short of"} its prices.{" "}
+      {elite && elite.hit_rate !== null && elite.breakeven !== null && (
+        <>
+          The Elite tier, which is the one put forward, won{" "}
+          {pc(elite.hit_rate)} of {elite.picks.toLocaleString()} picks against{" "}
+          {pc(elite.breakeven)} needed.
+        </>
+      )}
+    </p>
+  );
+}
+
 function Plain() {
   return (
     <div className="ps-faq">
@@ -149,11 +205,16 @@ function Plain() {
             number you have to beat to make money at that price.
           </li>
           <li>
-            <strong>Value</strong> is a grade for the price. <strong>A</strong>{" "}
-            is priced better than our top tier&rsquo;s long-run return,{" "}
-            <strong>B</strong> is solidly worth it, <strong>C</strong> is thin,
-            and <strong>D</strong> means the price already covers whatever edge
-            we think we have. Hover it for the dollar version.
+            <strong>Value</strong> is a grade for the price, worked out from
+            our chance and what the price pays. <strong>A</strong> means our
+            numbers put the bet six cents or more ahead per dollar staked,{" "}
+            <strong>B</strong> three cents or more, <strong>C</strong> anything
+            above zero, and <strong>D</strong> means the price already covers
+            whatever edge we think we have. Hover it for the dollar version.
+          </li>
+          <li>
+            <strong>Tier</strong> is where the pick ranks on tonight&rsquo;s
+            board. See the next answer.
           </li>
         </ul>
         <p>
@@ -172,41 +233,55 @@ function Plain() {
         </p>
       </QA>
 
-      <QA q="What is a Best Bet?">
+      <QA q="What do the tiers mean?" id="tiers">
         <p>
-          It is the selection that has been tested on seasons the model had
-          never seen and still made money: the strongest picks, one per player
-          per game, at the best price available. Over that test it returned
-          about 4.4% per unit bet, with a 95% interval of [+0.2%, +8.2%].
+          A tier is a ranking, not a score. Inside each market, every prop on
+          the board is lined up by how far our number sits from the
+          sportsbook&rsquo;s line, measured as a share of the line. The top
+          fifth is <strong>Elite</strong>, the next fifth is{" "}
+          <strong>Strong</strong>, the next is <strong>Medium</strong>, and the
+          rest is <strong>Small</strong>.
         </p>
         <p>
-          Unders only. The over side has lost money in every test this project
-          has run: across 3,643 graded over picks it returns -5.3%, with an
-          interval of [-9.6%, -0.9%] that does not contain zero. That is the
-          only figure on the whole board certain enough to act on, and what it
-          says is which half of the board not to bet.
+          Elite is the only tier put forward as a pick. Strong and Medium are
+          on the board so you can see what the model thinks, and they are
+          marked as not put forward. Small is graded and kept off the board.
         </p>
         <p>
-          That number used to read 6.6%, on a sample that quietly excluded night
-          games. Sunday and Monday night kickoffs fall after midnight UTC, and a
-          date conversion elsewhere in the pipeline dropped them from the test
-          set. Putting them back added about a thousand picks and cut the
-          measured return by a third. Night games are not a random sample of
-          football, and the edge is smaller once they count.
+          Not every market gets ranked. If the size of the disagreement has not
+          been shown to separate winning picks from losing ones in a market,
+          everything in that market is Small. A confident label on a coin flip
+          is worse than no label.
         </p>
         <p>
-          The rest of the board is research. Best Bets are the part that has
-          actually been checked.
+          The price does not decide the tier. It decides how often the pick has
+          to win, which is what the Value grade is for.
         </p>
       </QA>
 
-      <QA q="Why are almost all of them unders?">
+      <QA q="What is a Best Bet?">
         <p>
-          Because that is where the mistake is. Most people betting player props
-          are betting overs, so sportsbooks nudge those numbers up until the
-          over stops being worth it. Across three seasons the over side lost
-          money and the under side made it. We did not choose that, we measured
-          it.
+          A narrower cut of the board: an Elite or Strong pick, on the under
+          side, one per player per game, at the best price on offer. One per
+          game because a player&rsquo;s receptions and receiving yards win and
+          lose together, so two picks on him are closer to one bet than two.
+        </p>
+        <p>
+          It is a label for a rule, not a promise. Best Bets are graded exactly
+          like everything else, and the{" "}
+          <Link to="/record">Track Record</Link> is where to check whether the
+          rule has been earning its name.
+        </p>
+      </QA>
+
+      <QA q="Why are Best Bets only unders?">
+        <p>
+          Because the over side is where this project has lost the most. Most
+          people betting player props bet overs, so sportsbooks nudge those
+          numbers up until the over stops being worth it. In every period I
+          have tested, overs did worse than unders. I did not choose that, I
+          measured it. Overs still appear on the board, and an over can still
+          be Elite.
         </p>
       </QA>
 
@@ -256,22 +331,21 @@ function Plain() {
       </QA>
 
       <QA q="How often is it right?">
+        <RecordAnswer />
         <p>
-          The full board is close to break-even. The Best Bets selection is
-          ahead. Every number on the{" "}
-          <Link to="/record">Track Record</Link> page is graded against what
-          really happened, including the losing seasons, and you can filter it
-          by season and by market.
+          Every number on the <Link to="/record">Track Record</Link> page is
+          graded against what really happened, including the losing seasons,
+          and you can filter it by season and by market.
         </p>
       </QA>
 
       <QA q="Should I bet my rent on this?">
         <p>
-          No. The measured advantage is a few percent. That is real, and it is
-          also small enough that a bad month proves nothing and a good month
-          proves nothing either. It takes thousands of bets before the edge
-          separates from luck, and the effect has been getting smaller each
-          season as the market gets sharper.
+          No. Any advantage in this market is a point or two at best, and the
+          record shows the stretches where there was none. A margin that thin
+          means a bad month proves nothing and a good month proves nothing
+          either. It takes thousands of picks before skill separates from luck,
+          and the market gets sharper every season.
         </p>
         <p>
           This is a research tool that shows its own record honestly. It is not
@@ -345,6 +419,25 @@ function Technical() {
         </p>
       </QA>
 
+      <QA q="Tiers">
+        <p>
+          Ranked, not thresholded. Per market, each priced prop gets a gap of
+          |median &minus; line| / line, the board is sorted on it, and the
+          sorted list is cut 20/20/20/40 into elite, strong, medium and small.
+          A share of the board rather than a fixed gap, because cuts fitted on
+          one season&rsquo;s gap distribution did not transfer to the next.
+        </p>
+        <p>
+          A market is ranked only if the gap replicates on split halves of the
+          live record, at either end, against a simulated noise bar. The
+          direction is fitted per market: rushing yards has run backwards, its
+          narrowest gaps winning most. Unranked markets, and any market with
+          fewer than ten rows on the board, publish as small. Expected value
+          is still computed and shown as the Value grade, and no longer sets
+          the tier, because its top quintile won less often than its middle.
+        </p>
+      </QA>
+
       <QA q="Does the model actually rank?">
         <p>
           AUC of the win probability against realised outcomes is 0.547 overall
@@ -381,7 +474,11 @@ function Technical() {
 
       <QA q="Results">
         <p>
-          Verified on the 2025 holdout, slate-clustered 95% intervals.
+          Measured once, on the 2025 holdout, with slate-clustered 95%
+          intervals, under the expected-value tiers that have since been
+          replaced by the ranking described above. It is kept as the research
+          record that shaped the project. It is not the current record, which
+          is read live on the <Link to="/record">Track Record</Link>.
         </p>
         <div className="ps-tablewrap">
           <table className="ps-table is-matrix">

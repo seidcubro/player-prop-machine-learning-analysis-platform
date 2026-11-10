@@ -1,24 +1,25 @@
 /**
- * What each tier on this board has actually returned.
+ * How each tier on this board has actually done.
  *
- * The board shows three tiers and recommends one. That distinction is the
- * whole point of showing the other two, and it is only worth anything if it is
- * impossible to miss, so this sits directly above the table and states each
- * tier's real record: picks graded, hit rate, return per unit.
+ * The board shows several tiers and puts one forward. That distinction is the
+ * whole point of showing the others, and it is only worth anything if it is
+ * impossible to miss, so this sits directly above the table and posts each
+ * tier's real account: picks graded, the share that won, and the share that
+ * had to win at the prices offered.
  *
- * Every figure is read from the record. None of it is typed in, for the same
- * reason the disclaimer's numbers are not: a performance claim that cannot
- * update is a claim that will eventually be false.
+ * It leads with whether the picks were right. Won sits beside needed and the
+ * difference is the verdict. Units are the small column at the end, because a
+ * tier is a promise about accuracy before it is anything else.
  *
- * The honest summary of what it prints, as of writing: elite returns a little
- * over four percent across four seasons and is positive in every one of them.
- * Strong sits on the waterline, half a tenth of a point below break-even.
- * Medium loses. Those are not three grades of good bet, they are one bet and
- * two things the model happens to think, which is what the labels say.
+ * Every figure is read from the record. None of it is typed in, and neither
+ * is the sentence about which tiers cleared their price: it is worked out
+ * from the rows, so it cannot go on claiming something the record has stopped
+ * supporting.
  */
 
 import { useEffect, useState } from "react";
 import { fetchTierRecord, type TierRecord } from "../api";
+import { Acct } from "./Acct";
 
 const LABEL: Record<string, string> = {
   elite: "Elite",
@@ -27,14 +28,23 @@ const LABEL: Record<string, string> = {
   small: "Small",
 };
 
-function pct(v: number | null | undefined, digits = 1): string {
-  if (v === null || v === undefined) return "···";
-  return `${(v * 100).toFixed(digits)}%`;
+const COUNT = ["No", "One", "Two", "Three", "Four"];
+
+function pct(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "";
+  return `${(v * 100).toFixed(1)}%`;
 }
 
-function signed(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "···";
-  return `${v >= 0 ? "+" : "\u2212"}${Math.abs(v * 100).toFixed(1)}%`;
+function diff(r: TierRecord): number | null {
+  return r.hit_rate === null || r.breakeven === null
+    ? null
+    : r.hit_rate - r.breakeven;
+}
+
+function names(rows: TierRecord[]): string {
+  const n = rows.map((r) => LABEL[r.edge_tier] ?? r.edge_tier);
+  if (n.length <= 1) return n.join("");
+  return `${n.slice(0, -1).join(", ")} and ${n[n.length - 1]}`;
 }
 
 export default function TierLedger({
@@ -65,78 +75,99 @@ export default function TierLedger({
 
   const betting = rows.filter((r) => bet.includes(r.edge_tier));
   const context = rows.filter((r) => !bet.includes(r.edge_tier));
+  const cleared = rows.filter((r) => (diff(r) ?? -1) > 0);
+  const short = rows.filter((r) => (diff(r) ?? 0) <= 0);
 
   return (
-    <section className="ps-ledger" aria-label="What each tier has returned">
-      <h2>Three tiers on this board. One of them is a bet.</h2>
+    <section className="ps-ledger" aria-labelledby="ps-ledger-h">
+      <h2 id="ps-ledger-h">
+        {COUNT[rows.length] ?? rows.length} {rows.length === 1 ? "tier" : "tiers"}{" "}
+        on this board.{" "}
+        {betting.length > 0 && (
+          <>
+            {names(betting)} {betting.length === 1 ? "is" : "are"} the{" "}
+            {betting.length === 1 ? "one" : "ones"} put forward.
+          </>
+        )}
+      </h2>
       <p>
-        {betting.map((r) => LABEL[r.edge_tier] ?? r.edge_tier).join(" and ")} is
-        the only tier that has made money, so it is the only one offered as
-        something to stake.{" "}
-        {context.map((r) => LABEL[r.edge_tier] ?? r.edge_tier).join(" and ")}{" "}
-        {context.length === 1 ? "is" : "are"} shown because{" "}
-        {context.length === 1 ? "it is" : "they are"} what the model thinks, not
-        because {context.length === 1 ? "it is" : "they are"} worth backing.
-        Every figure below is the graded record, wins and losses included.
+        A tier is judged on one thing: whether its picks won more often than
+        the prices required.{" "}
+        {cleared.length > 0
+          ? `${names(cleared)} ${cleared.length === 1 ? "has" : "have"} cleared that mark over the graded record.`
+          : "No tier on this board has cleared that mark over the graded record."}{" "}
+        {short.length > 0 &&
+          `${names(short)} ${short.length === 1 ? "has" : "have"} not.`}{" "}
+        {context.length > 0 && (
+          <>
+            {names(context)} {context.length === 1 ? "is" : "are"} shown
+            because {context.length === 1 ? "it is" : "they are"} what the
+            model thinks, not because{" "}
+            {context.length === 1 ? "it is" : "they are"} put forward as picks.
+          </>
+        )}
       </p>
+
+      <div className="ld-scroll">
+        <table className="ld-ledger ps-ledger-table">
+          <caption className="sr-only">
+            The graded record of each tier shown on this board.
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Tier</th>
+              <th scope="col">On this board</th>
+              <th scope="col" className="num">Picks</th>
+              <th scope="col" className="num">Won</th>
+              <th scope="col" className="num">Needed</th>
+              <th scope="col" className="num">Difference</th>
+              <th scope="col" className="num ld-minor">Units</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const isBet = bet.includes(r.edge_tier);
+              return (
+                <tr key={r.edge_tier} className={isBet ? "is-bet" : undefined}>
+                  <th scope="row">
+                    <span className={`pl-stamp is-${r.edge_tier}`}>
+                      {LABEL[r.edge_tier] ?? r.edge_tier}
+                    </span>
+                  </th>
+                  <td>{isBet ? "Put forward as a pick" : "Shown, not put forward"}</td>
+                  <td className="num">{r.picks.toLocaleString()}</td>
+                  <td className="num ld-won">{pct(r.hit_rate)}</td>
+                  <td className="num">{pct(r.breakeven)}</td>
+                  <td className="num">
+                    <Acct value={diff(r)} scale={100} plus />
+                  </td>
+                  <td className="num ld-minor">
+                    <Acct value={r.units} plus />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
       {/*
-        The terms get defined here rather than in the glossary.
-        "+4.1% per unit" is unreadable to anyone who has not priced a bet
-        before, and this table is the one place on the site where a number
-        being misread costs somebody money. The glossary is for looking
-        something up; this is for not needing to.
-      */}
-      {/*
-        Folded, not removed. Every visitor needed this once and nobody needs
-        it twice, and open it pushed the first pick on the board below the fold
-        on a laptop: the box was 497px of prose between the title and the data.
+        Folded, not removed. Every visitor needs this once and nobody needs it
+        twice, and left open it pushed the first pick on the board below the
+        fold on a laptop.
       */}
       <details className="ps-ledger-more">
         <summary>How to read these numbers</summary>
-      <p className="ps-ledger-key">
-        <b>Return per unit</b> is profit on every 1 unit staked, so elite&rsquo;s
-        figure means a 100 dollar bet came back as 104 on average, across
-        thousands of them. <b>Won</b> is how often the pick actually landed.{" "}
-        <b>Model said</b> is how often it predicted it would. The distance
-        between those last two is the whole reason only one tier here is
-        offered as a bet: roughly 52 to 53% is break even once the
-        sportsbook&rsquo;s cut is paid, so a tier winning half its picks is
-        losing money.
-      </p>
+        <p className="ps-ledger-key">
+          <b>Won</b> is how often the pick was correct. <b>Needed</b> is how
+          often it had to be correct, at the prices it was offered at, just to
+          finish level. The sportsbook&rsquo;s cut is inside every price, which
+          is why needed sits above 50%. <b>Difference</b> is won minus needed,
+          in points, and a figure in brackets is a shortfall. <b>Units</b> is
+          the running total if every pick had been staked at one unit, where a
+          unit is whatever a single flat stake is to you.
+        </p>
       </details>
-
-      <div className="ps-ledger-rows">
-        {rows.map((r) => {
-          const isBet = bet.includes(r.edge_tier);
-          return (
-            <div
-              className={`ps-ledger-row${isBet ? " is-bet" : ""}`}
-              key={r.edge_tier}
-            >
-              <span className={`tier tier-${r.edge_tier}`}>
-                {LABEL[r.edge_tier] ?? r.edge_tier}
-              </span>
-              <span className="verdict">
-                {isBet ? "offered as a bet" : "shown, not offered"}
-              </span>
-              <span className="fig">
-                <b className={(r.roi ?? 0) >= 0 ? "pos" : "neg"}>
-                  {signed(r.roi)}
-                </b>
-                <small>per unit staked</small>
-              </span>
-              <span className="fig">
-                <b>{pct(r.hit_rate)}</b>
-                <small>won, model said {pct(r.model_predicted)}</small>
-              </span>
-              <span className="fig">
-                <b>{r.picks.toLocaleString()}</b>
-                <small>picks settled</small>
-              </span>
-            </div>
-          );
-        })}
-      </div>
     </section>
   );
 }

@@ -3,7 +3,7 @@
  *
  * This is a single-page app, so index.html is served for every route and every
  * page inherited the home page's head. That is not a cosmetic problem. The
- * canonical tag said `https://priorline.io/` on all eight routes, which is a
+ * canonical tag said `https://priorline.io/` on every route, which is a
  * direct instruction to a search engine that the projections, the track record
  * and the model write-up are duplicates of the home page and should not be
  * indexed separately. Seven pages of the site were asking not to be found.
@@ -32,18 +32,18 @@ export type PageMeta = { title: string; description: string; noindex?: boolean }
  *  oversells is a bounce, and a bounce is worse than a lower ranking. */
 export const PAGES: Record<string, PageMeta> = {
   "/": {
-    title: "PriorLine | NFL player prop projections vs sportsbook lines",
+    title: "PriorLine | NFL player prop projections, graded against the price",
     description:
-      "A machine-learning model projects every NFL skill player and quarterback, "
-      + "then prices those projections against real sportsbook lines to show where "
-      + "the two disagree. Free, with the full track record published.",
+      "Every NFL player prop the sportsbooks post, projected, picked and graded "
+      + "against the price it was offered at. Free, no sportsbook links, and the "
+      + "full record is published, losses included.",
   },
   "/signals": {
     title: "Today's NFL prop signals | PriorLine",
     description:
-      "Where the model and the sportsbook disagree most on today's NFL player "
-      + "props, with the model's chance of each side hitting and the price it "
-      + "needs to be worth taking.",
+      "Where the model and the sportsbook disagree on this slate's NFL player "
+      + "props: the side the model lands on, how far it sits from the line, and "
+      + "the confidence tier that gap has earned.",
   },
   "/projections": {
     title: "NFL player prop projections this week | PriorLine",
@@ -55,9 +55,9 @@ export const PAGES: Record<string, PageMeta> = {
   "/record": {
     title: "Track record: how often PriorLine is right | PriorLine",
     description:
-      "Every published pick, graded against what actually happened. Hit rate, "
-      + "return and calibration by confidence tier, including the weeks the model "
-      + "lost money.",
+      "Every published pick, graded against what actually happened. Hit rate "
+      + "beside the rate the prices required, by tier, market and season, "
+      + "including the tiers and weeks that lost.",
   },
   "/faq": {
     title: "How PriorLine works | PriorLine",
@@ -69,15 +69,39 @@ export const PAGES: Record<string, PageMeta> = {
   "/model": {
     title: "The model behind PriorLine | PriorLine",
     description:
-      "The machine-learning stack behind the projections: features, model "
-      + "families per market, calibration, and the validation rule a change has "
-      + "to clear before it ships.",
+      "The method behind the projections: features, model families per market, "
+      + "how a gap from the line becomes a confidence tier, and the ideas that "
+      + "were tested and thrown out.",
   },
   "/players": {
     title: "NFL player search | PriorLine",
     description:
       "Search any NFL skill player or quarterback for their projections, recent "
       + "usage and how the model has scored them this season.",
+  },
+  "/terms": {
+    title: "Terms of use | PriorLine",
+    description:
+      "PriorLine is a free research site, not a sportsbook and not betting "
+      + "advice. The terms for using it, in plain language.",
+  },
+  "/privacy": {
+    title: "Privacy | PriorLine",
+    description:
+      "No accounts, no cookies, no analytics, no trackers. What the servers "
+      + "behind PriorLine do and do not record.",
+  },
+  "/responsible-gambling": {
+    title: "Responsible gambling | PriorLine",
+    description:
+      "Most people who bet on sports lose money. Rules that help, signs of a "
+      + "problem, and free, confidential helplines including 1-800-522-4700.",
+  },
+  "/accessibility": {
+    title: "Accessibility | PriorLine",
+    description:
+      "PriorLine targets WCAG 2.2 AA. What has been done, the known limits, "
+      + "and how to report something that does not work for you.",
   },
 };
 

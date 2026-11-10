@@ -478,7 +478,7 @@ export default function TrackRecord() {
                 {tiers.map((t) => (
                   <tr key={t.edge_tier}>
                     <td data-label="Tier">
-                      <span className={`tier tier-${t.edge_tier}`}>{t.edge_tier}</span>
+                      <span className={`tier tier-${t.edge_tier}`}>{t.edge_tier === "none" ? "no tier" : t.edge_tier}</span>
                     </td>
                     <td data-label="Picks" className="num">{t.picks.toLocaleString()}</td>
                     <td data-label="Claimed" className="num">{pct(t.model_predicted)}</td>

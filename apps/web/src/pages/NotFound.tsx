@@ -27,11 +27,14 @@ export default function NotFound() {
         <p>
           The link may be out of date, or the address may have a typo in it.
         </p>
-        <p style={{ marginTop: "0.75rem" }}>
-          <Link to="/">Home</Link> · <Link to="/signals">Signals</Link> · <Link to="/projections">Projections</Link>{" "}
-          · <Link to="/record">Track Record</Link> ·{" "}
-          <Link to="/players">Players</Link> · <Link to="/faq">How It Works</Link>
-        </p>
+        <ul className="pl-inline-links">
+          <li><Link to="/">Home</Link></li>
+          <li><Link to="/signals">Signals</Link></li>
+          <li><Link to="/projections">Projections</Link></li>
+          <li><Link to="/record">Track Record</Link></li>
+          <li><Link to="/players">Players</Link></li>
+          <li><Link to="/faq">How It Works</Link></li>
+        </ul>
       </div>
     </>
   );

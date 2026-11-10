@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import PageTitle from "../components/PageTitle";
+import { Acct } from "../components/Acct";
 import {
   fetchSeasonRecord,
   fetchTierRecord,
@@ -28,22 +29,29 @@ const TIER_LABEL: Record<string, string> = {
   strong: "Strong",
   medium: "Medium",
   small: "Small",
+  none: "No tier",
 };
 
 const TIER_STATUS: Record<string, string> = {
-  elite: "offered as a bet",
-  strong: "shown, not offered",
-  medium: "shown, not offered",
+  elite: "put forward as a pick",
+  strong: "shown, not put forward",
+  medium: "shown, not put forward",
   small: "graded, not shown",
+  none: "graded, not shown",
 };
-
-function signed(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "···";
-  return `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(1)}%`;
-}
 
 function pct(v: number | null | undefined): string {
   return v === null || v === undefined ? "···" : asPct(v);
+}
+
+/** Won minus needed. Null when either side is missing, never a guessed zero. */
+function gap(
+  won: number | null | undefined,
+  needed: number | null | undefined,
+): number | null {
+  if (won === null || won === undefined) return null;
+  if (needed === null || needed === undefined) return null;
+  return won - needed;
 }
 
 const CONTENTS: [string, string][] = [
@@ -55,7 +63,7 @@ const CONTENTS: [string, string][] = [
   ["models", "Models"],
   ["probability", "From projection to probability"],
   ["calibration", "Calibration"],
-  ["tiers", "Edge, EV and tiers"],
+  ["tiers", "Edge, gap and tiers"],
   ["example", "A worked example"],
   ["validation", "How it is validated"],
   ["findings", "What the research found"],
@@ -114,7 +122,7 @@ function Pipeline() {
     ["Features", "per player, per game"],
     ["Train", "11 markets"],
     ["Calibrate", "4 layers"],
-    ["Price & tier", "EV vs the book"],
+    ["Price & rank", "gap vs the line"],
     ["Serve", "API to this site"],
   ];
   const gaps = ["stats", "rows", "ladder", "P(win)", "picks"];
@@ -216,7 +224,7 @@ export default function Model() {
 
   const elite = tiers?.find((t) => t.edge_tier === "elite") ?? null;
   const graded = tiers?.reduce((a, t) => a + t.picks, 0) ?? null;
-  const tierOrder = ["elite", "strong", "medium", "small"];
+  const tierOrder = ["elite", "strong", "medium", "small", "none"];
   const tierRows = (tiers ?? [])
     .filter((t) => t.picks > 0)
     .sort((a, b) => tierOrder.indexOf(a.edge_tier) - tierOrder.indexOf(b.edge_tier));
@@ -245,14 +253,12 @@ export default function Model() {
           <span>picks graded against box scores</span>
         </div>
         <div>
-          <b className={elite && (elite.roi ?? 0) >= 0 ? "pos" : undefined}>
-            {signed(elite?.roi)}
-          </b>
-          <span>return on the published tier</span>
+          <b>{elite ? `${pct(elite.hit_rate)} / ${pct(elite.breakeven)}` : "···"}</b>
+          <span>elite picks won, against what their prices needed</span>
         </div>
         <div>
           <b>{head ? `${asPct(head.hit)} / ${asPct(head.claimed)}` : "···"}</b>
-          <span>hit rate against what the model claimed</span>
+          <span>all picks won, against what the model claimed</span>
         </div>
       </div>
 
@@ -277,20 +283,23 @@ export default function Model() {
             receptions&rdquo;. The model estimates the full range of outcomes for
             that player, turns it into a probability of each side winning, and
             subtracts the probability the price requires just to break even.
-            What remains is the expected value. Four tiers are defined by how
-            large it is, every pick is graded against the real result, and only
-            the tier that has made money in every season is offered as a bet.
+            What remains is the expected value, which is shown as a grade for
+            the price. The tier is decided separately: inside each market the
+            night&rsquo;s props are ranked by how far the model sits from the
+            line, and the top fifth is Elite. Every pick is graded against the
+            real result, in every tier, and Elite is the only one put forward.
           </p>
           <div className="ps-model-callout">
             <p className="k">The central finding</p>
             <p>
-              The edge is <strong>structural, not predictive</strong>. The
-              sportsbook&rsquo;s own line predicts player outcomes slightly better
-              than the model does. The profit comes from a known pricing bias:
-              the public bets stars to go over, books shade those lines upward,
-              and yardage is right-skewed so the typical result sits below the
-              average. Disciplined unders on inflated lines exploit that, and the
-              model&rsquo;s real job is finding where the inflation is largest.
+              The model does <strong>not out-predict the sportsbook</strong>.
+              The book&rsquo;s own line lands closer to what players actually do
+              than this model&rsquo;s number does, and that is measured further
+              down this page. What the model is used for is narrower: finding
+              the props where the two numbers are furthest apart, in the markets
+              where that distance has been shown to rank which picks win. The
+              record below is the test of whether that is worth anything, and it
+              is published whether it passes or not.
             </p>
           </div>
         </Section>
@@ -481,12 +490,12 @@ side     = over if the median is above the line, otherwise under`}</pre>
             ]}
           />
           <p>
-            <strong>Why this is where the money is.</strong> Expected value is
+            <strong>Why this matters.</strong> Expected value is
             computed from the probability. If the probability is fourteen points too
             high, so is every expected value, and a rule that looks like it selects
             positive bets is really selecting negative ones. The model already ranked
-            picks correctly; the scale was wrong. Correcting it is what made the
-            tiers line up in order for the first time.
+            picks in roughly the right order; the scale was wrong. Correcting it
+            is what stopped the board claiming more than it had earned.
           </p>
           {head && (
             <p>
@@ -497,29 +506,75 @@ side     = over if the median is above the line, otherwise under`}</pre>
           )}
         </Section>
 
-        <Section id="tiers" title="Edge, EV and tiers">
-          <pre className="ps-model-formula">{`edge = model median − book line    (the sign picks the side)
-EV   = calibrated P(side) − break-even for the price`}</pre>
+        <Section id="tiers" title="Edge, gap and tiers">
+          <pre className="ps-model-formula">{`edge = model median − book line            (the sign picks the side)
+gap  = |model median − book line| / line   (the distance, as a share of the line)`}</pre>
           <p>
-            Tiers are set by expected value, and the thresholds are deliberately
-            lopsided. An over must clear roughly twice the bar of an under, because
-            no profitable over strategy has held up across both testing periods.
+            A tier is a position on the night&rsquo;s board, not a threshold.
+            Inside each market every priced prop is ranked by its gap, and the
+            ranking is cut into shares.
           </p>
           <Grid
-            head={["Tier", "An under needs", "An over needs", "On the site"]}
+            head={["Tier", "Share of a ranked market", "On the site"]}
             rows={[
-              ["Elite", "EV ≥ 6%", "EV ≥ 12%", "offered as a bet"],
-              ["Strong", "EV ≥ 4%", "EV ≥ 9%", "shown, not offered"],
-              ["Medium", "EV ≥ 2%", "EV ≥ 6%", "shown, not offered"],
-              ["Small", "EV above 0%", "EV above 3%", "graded, not shown"],
+              ["Elite", "the top fifth", "put forward as a pick"],
+              ["Strong", "the next fifth", "shown, not put forward"],
+              ["Medium", "the next fifth", "shown, not put forward"],
+              ["Small", "everything else", "graded, not shown"],
             ]}
           />
           <p>
-            What the board displays and what it recommends are controlled
-            separately, so widening one can never quietly widen the other.
-            Anytime touchdown is projected on player pages but never priced: the
-            market&rsquo;s own prices rank likely scorers better than the model
-            does.
+            The gap is divided by the line because two yards of disagreement on
+            a 15-yard line is a different claim from two yards on an 80-yard
+            line. In raw units the same measurement ranks nothing.
+          </p>
+          <h3>Three guards on the ranking</h3>
+          <ul>
+            <li>
+              <strong>A market has to earn it.</strong> A market is ranked only
+              where the gap has separated winners from losers on graded picks,
+              asked twice on two halves of the record. A market that has not
+              shown that publishes every pick as Small, which is the honest
+              label for &ldquo;nothing here tells these apart&rdquo;.
+            </li>
+            <li>
+              <strong>The direction is measured, not assumed.</strong> In most
+              markets the widest gaps are the confident end. On rushing yards it
+              has run the other way, with the narrowest disagreements winning
+              most often, so a market can be ranked from either end and the
+              record decides which.
+            </li>
+            <li>
+              <strong>A thin board is not ranked.</strong> A market needs ten
+              priced props on the board before a rank means anything. Below
+              that, everything in it is Small.
+            </li>
+          </ul>
+          <h3>Why the cut is a share and not a number</h3>
+          <p>
+            The first version used fixed gap thresholds fitted on past seasons.
+            Applied to a live board whose gaps sat lower, they selected almost
+            nothing: one week published no Elite picks at all. Whether the gap
+            ranks accuracy is a claim about football and can be tested. Where to
+            cut is a choice about how many picks to call Elite, and a share of
+            the board answers it without assuming two seasons share a scale.
+          </p>
+          <h3>What happened to expected value</h3>
+          <p>
+            Tiers used to be bands of expected value. That was replaced because
+            expected value did not rank accuracy: its highest bucket won less
+            often than its middle, since the largest values sit at the longest
+            prices rather than on the likeliest outcomes. It is still computed
+            for every pick and shown as the Value grade, so the price is on the
+            board. It no longer decides the tier.
+          </p>
+          <p>
+            A Best Bet is narrower again: an Elite or Strong pick on the under
+            side, one per player per game, at the best price on offer. What the
+            board displays and what it puts forward are controlled separately,
+            so widening one can never quietly widen the other. Anytime touchdown
+            is projected on player pages but never priced: the market&rsquo;s
+            own prices rank likely scorers better than the model does.
           </p>
         </Section>
 
@@ -529,16 +584,22 @@ EV   = calibrated P(side) − break-even for the price`}</pre>
             receiver at under 4.5 receptions for +110. The model&rsquo;s median is
             3.9, below the line, so the side is the under.
           </p>
-          <pre className="ps-model-formula">{`break-even at +110      = 100 / 210   = 47.6%
-calibrated P(under)     =               54.0%
-expected value          = 54.0 − 47.6 = +6.4%
-tier (under, EV ≥ 6%)   = Elite`}</pre>
+          <pre className="ps-model-formula">{`gap                 = |3.9 − 4.5| / 4.5  = 13.3% of the line
+rank that night     = 6th of 40 reception props
+top fifth of 40     = the first 8        = Elite
+needed at +110      = 100 / 210          = 47.6%`}</pre>
+          <p>
+            The price does not move the tier. It sets what the pick has to do:
+            at +110 it must win 47.6% of the time to finish level, and the same
+            pick at &minus;150 would need 60%. That is why the record leads with
+            how often a tier won and puts what it needed directly beside it.
+          </p>
           <p>
             Two details change how much weight a pick like this deserves. If the
             model&rsquo;s median sits below the line but its average sits above it,
-            the model barely has an opinion and the value is mostly coming from the
-            price. And volume stats such as carries depend heavily on game script,
-            which the model sees only through the Vegas spread and total.
+            the model barely has an opinion. And volume stats such as carries
+            depend heavily on game script, which the model sees only through the
+            Vegas spread and total.
           </p>
         </Section>
 
@@ -625,6 +686,8 @@ tier (under, EV ≥ 6%)   = Elite`}</pre>
               ["Predicting the line's error instead of the stat", "No better than a coin flip in any market."],
               ["Taking the best price across books at the same line", "A better price existed on about 1% of picks. Worth +0.03%."],
               ["A mid-range expected value band on overs", "Large gains on seasons of 55 and 88 picks, shrinking to +3.3% on the one large season."],
+              ["Tiering on expected value", "Did not rank accuracy. The highest values sat at the longest prices, and the top bucket won less often than the middle."],
+              ["Fixed gap thresholds fitted on past seasons", "Did not transfer to a live board. One week published no Elite picks."],
               ["Rescuing the strong tier with filters", "Strong misses break-even by 0.08 points against a 1.64-point standard error. Nothing to filter toward."],
               ["Star players within the lower tiers", "Ran backwards: the biggest names did worst."],
               ["Primetime games", "Worse than the rest, not better."],
@@ -636,7 +699,10 @@ tier (under, EV ≥ 6%)   = Elite`}</pre>
           <ul>
             <li>Choosing sides from the median rather than the average.</li>
             <li>Isotonic calibration, which made expected value honest.</li>
-            <li>Stricter thresholds for overs than for unders.</li>
+            <li>
+              Ranking by the gap as a share of the line, inside each market, in
+              the direction that market was measured in.
+            </li>
             <li>
               Expected touchdowns as a feature, which improved touchdown prediction
               by close to 1% in log loss across seeds and held up with an extra
@@ -662,16 +728,22 @@ tier (under, EV ≥ 6%)   = Elite`}</pre>
         </Section>
 
         <Section id="record" title="The record">
-          <p>Read live from the graded record.</p>
+          <p>
+            Read live from the graded record. Won is how often the picks were
+            right. Needed is how often they had to be right at the prices
+            offered. Difference is one minus the other, and a figure in brackets
+            is a shortfall.
+          </p>
           {tierRows.length > 0 ? (
             <Grid
-              head={["Tier", "Picks", "Hit", "Model claimed", "Return", "Status"]}
+              head={["Tier", "Picks", "Won", "Needed", "Difference", "Units", "Status"]}
               rows={tierRows.map((t) => [
                 <strong>{TIER_LABEL[t.edge_tier] ?? t.edge_tier}</strong>,
                 t.picks.toLocaleString(),
-                pct(t.hit_rate),
-                pct(t.model_predicted),
-                <span className={(t.roi ?? 0) >= 0 ? "pos" : "neg"}>{signed(t.roi)}</span>,
+                <strong>{pct(t.hit_rate)}</strong>,
+                pct(t.breakeven),
+                <Acct value={gap(t.hit_rate, t.breakeven)} scale={100} plus />,
+                <Acct value={t.units} plus />,
                 TIER_STATUS[t.edge_tier] ?? "",
               ])}
             />
@@ -680,15 +752,16 @@ tier (under, EV ≥ 6%)   = Elite`}</pre>
           )}
           {seasons && seasons.length > 0 && (
             <>
-              <h3>The published tier, season by season</h3>
+              <h3>The elite tier, season by season</h3>
               <Grid
-                head={["Season", "Source", "Picks", "Hit", "Return"]}
+                head={["Season", "Source", "Picks", "Won", "Needed", "Difference"]}
                 rows={seasons.map((s) => [
                   String(s.season),
                   s.source === "live" ? "published live" : "reconstructed",
                   s.picks.toLocaleString(),
-                  pct(s.hit_rate),
-                  <span className={(s.roi ?? 0) >= 0 ? "pos" : "neg"}>{signed(s.roi)}</span>,
+                  <strong>{pct(s.hit_rate)}</strong>,
+                  pct(s.breakeven),
+                  <Acct value={gap(s.hit_rate, s.breakeven)} scale={100} plus />,
                 ])}
               />
             </>
@@ -697,8 +770,9 @@ tier (under, EV ≥ 6%)   = Elite`}</pre>
             Reconstructed seasons use models refit on earlier data only. For
             context, the naive approach of betting every disagreement lost 4.3%
             across the full 2025 season: unders beat their break-even in most
-            markets while overs lost everywhere. The published tier exists to fix
-            that imbalance, not because the model predicts better than the market.
+            markets while overs lost everywhere. Ranking the board and putting
+            forward only the top of it exists to do better than that, not because
+            the model predicts better than the market.
           </p>
           <p>
             Full detail by season, market and player is on the{" "}

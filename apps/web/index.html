@@ -5,18 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- Windows and a few crawlers still reach for the .ico before the SVG. -->
     <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#06080f" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Barlow+Condensed:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <meta name="theme-color" content="#0f1a17" />
     <meta
       name="description"
-      content="Compare sportsbook player prop lines against machine-learning projections and find the edge."
+      content="NFL player prop projections, graded against the price they were offered at. The whole record is posted, including the losses."
     />
     <title>PriorLine | Our prior. Their line.</title>
 
@@ -25,10 +21,10 @@
          localhost demo someone pasted into a chat. -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="PriorLine" />
-    <meta property="og:title" content="PriorLine" />
+    <meta property="og:title" content="PriorLine | Our prior. Their line." />
     <meta
       property="og:description"
-      content="NFL player prop projections from a machine-learning model, priced against real sportsbook lines."
+      content="NFL player prop projections, graded against the price they were offered at. The whole record is posted, including the losses."
     />
     <!-- Absolute, not root-relative.
          Open Graph is fetched by a crawler that has no page context, so a
@@ -37,14 +33,18 @@
          the exact failure these tags exist to prevent. The origin comes from
          VITE_SITE_URL at build time, and the build refuses to run without it. -->
     <meta property="og:url" content="%VITE_SITE_URL%/" />
-    <meta property="og:image" content="%VITE_SITE_URL%/og-image-priorline.png" />
+    <meta property="og:image" content="%VITE_SITE_URL%/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="PriorLine. Our prior. Their line." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PriorLine" />
+    <meta name="twitter:title" content="PriorLine | Our prior. Their line." />
     <meta
       name="twitter:description"
-      content="NFL player prop projections from a machine-learning model, priced against real sportsbook lines."
+      content="NFL player prop projections, graded against the price they were offered at. The whole record is posted, including the losses."
     />
-    <meta name="twitter:image" content="%VITE_SITE_URL%/og-image-priorline.png" />
+    <meta name="twitter:image" content="%VITE_SITE_URL%/og-image.png" />
+    <meta name="twitter:image:alt" content="PriorLine. Our prior. Their line." />
     <link rel="canonical" href="%VITE_SITE_URL%/" />
 
     <!-- What the site is, in the form a search engine parses rather than
@@ -58,7 +58,7 @@
         "@type": "WebSite",
         "name": "PriorLine",
         "url": "%VITE_SITE_URL%/",
-        "description": "NFL player prop projections from a machine-learning model, priced against real sportsbook lines.",
+        "description": "NFL player prop projections, graded against the price they were offered at. The whole record is posted, including the losses.",
         "potentialAction": {
           "@type": "SearchAction",
           "target": {

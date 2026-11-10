@@ -1,20 +1,19 @@
 /**
- * A page title in the wordmark's own shape: plain text, then the brand gradient.
+ * A page title in two voices: upright ink, then the italic in ledger blue.
  *
- * "PriorLine" sets the pattern. "Prior" is white and "Line" carries the
- * cyan-to-violet ramp, so a heading that gradients every word competes with the
- * logo instead of echoing it. Splitting the title the same way makes the page
- * read as part of the same system, and it keeps the emphasis on the noun that
- * actually names the page.
+ * The second half is the noun that names the page, set in the italic of the
+ * same serif and in the blue a bookkeeper uses for the entry that matters. One
+ * colour, no gradient. A heading that decorates every word competes with the
+ * masthead instead of sitting under it.
  */
 
 export default function PageTitle({
   lead,
   accent,
 }: {
-  /** The plain half. Rendered in normal text colour. */
+  /** The upright half, in ink. */
   lead: string;
-  /** The half that carries the gradient. Usually the page's actual noun. */
+  /** The italic half, in ledger blue. Usually the page's actual noun. */
   accent: string;
 }) {
   return (

@@ -97,6 +97,7 @@ export default function Avatar({
           height={px}
           alt=""
           loading="lazy"
+          referrerPolicy="no-referrer"
           decoding="async"
           onError={() => setFailed(true)}
         />
