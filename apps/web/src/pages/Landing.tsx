@@ -17,7 +17,7 @@
  * offered at before it is judged on anything else.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchEdges,
@@ -32,6 +32,7 @@ import {
   type TierRecord,
 } from "../api";
 import { Acct, Arrow } from "../components/Acct";
+import { PriorCurve } from "../components/PriorCurve";
 import { kickoff, pct, price } from "../lib/format";
 import {
   displayProjection,
@@ -101,6 +102,49 @@ function projNumber(p: Projection): string {
   return p.market_code.endsWith("_yds") ? v.toFixed(0) : v.toFixed(1);
 }
 
+/**
+ * A figure that is added up in front of you.
+ *
+ * It runs once, when the number first arrives from the record, and it lands on
+ * exactly the figure it was given. With motion turned off it is just the figure.
+ */
+function Count({
+  value,
+  format,
+  delay = 0,
+}: {
+  value: number | null | undefined;
+  format: (v: number) => string;
+  delay?: number;
+}) {
+  const still =
+    typeof window === "undefined" ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [k, setK] = useState(still ? 1 : 0);
+  useEffect(() => {
+    if (still || value === null || value === undefined) return;
+    let raf = 0;
+    const t0 = performance.now() + delay;
+    const tick = (now: number) => {
+      const u = Math.min(1, Math.max(0, (now - t0) / 1100));
+      setK(1 - Math.pow(1 - u, 4));
+      if (u < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, delay, still]);
+  if (value === null || value === undefined) return <>-</>;
+  return (
+    <>
+      <span aria-hidden="true">{format(value * k)}</span>
+      <span className="sr-only">{format(value)}</span>
+    </>
+  );
+}
+
+const whole = (v: number) => Math.round(v).toLocaleString();
+const share = (v: number) => pct(v);
+
 /** The stagger index, as a custom property the stylesheet reads. */
 function at(i: number): React.CSSProperties {
   return { "--i": i } as React.CSSProperties;
@@ -163,8 +207,12 @@ function PostedAccount({
               {rows.map((r, i) => (
                 <tr key={r.edge_tier} className="ld-row" style={at(i)}>
                   <th scope="row"><Stamp tier={r.edge_tier} /></th>
-                  <td className="num">{r.picks.toLocaleString()}</td>
-                  <td className="num ld-won">{pct(r.hit_rate)}</td>
+                  <td className="num">
+                    <Count value={r.picks} format={whole} delay={i * 70 + 200} />
+                  </td>
+                  <td className="num ld-won">
+                    <Count value={r.hit_rate} format={share} delay={i * 70 + 200} />
+                  </td>
                   <td className="num">{pct(r.breakeven)}</td>
                   <td className="num">
                     <Acct value={diff(r.hit_rate, r.breakeven)} scale={100} plus />
@@ -179,8 +227,12 @@ function PostedAccount({
               <tfoot>
                 <tr className="ld-row ld-total" style={at(rows.length)}>
                   <th scope="row">All picks</th>
-                  <td className="num">{sum.picks.toLocaleString()}</td>
-                  <td className="num ld-won">{pct(sum.hit)}</td>
+                  <td className="num">
+                    <Count value={sum.picks} format={whole} delay={rows.length * 70 + 200} />
+                  </td>
+                  <td className="num ld-won">
+                    <Count value={sum.hit} format={share} delay={rows.length * 70 + 200} />
+                  </td>
                   <td className="num">{pct(sum.needed)}</td>
                   <td className="num">
                     <Acct value={diff(sum.hit, sum.needed)} scale={100} plus />
@@ -427,13 +479,39 @@ export default function Landing() {
     .filter((s) => s.picks > 0)
     .sort((a, b) => b.season - a.season);
 
+  // Sections below the book arrive as they are scrolled to. The page is
+  // complete without this: nothing is hidden until the observer exists, and
+  // it is never created for anyone who has asked for less motion.
+  const root = useRef<HTMLDivElement>(null);
+  const seasonCount = seasonRows.length;
+  useEffect(() => {
+    const el = root.current;
+    if (!el || !("IntersectionObserver" in window)) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    el.classList.add("is-armed");
+    const io = new IntersectionObserver(
+      (hits) => {
+        for (const h of hits) {
+          if (!h.isIntersecting) continue;
+          h.target.classList.add("is-in");
+          io.unobserve(h.target);
+        }
+      },
+      { rootMargin: "0px 0px -12% 0px", threshold: 0.08 },
+    );
+    el.querySelectorAll("[data-reveal]:not(.is-in)").forEach((n) => io.observe(n));
+    return () => io.disconnect();
+  }, [seasonCount]);
+
   return (
-    <div className="ld">
-      <section className="ld-top">
-        <h1 className="ld-head">
-          Our prior. <span className="ld-head-line">Their line.</span>
-        </h1>
+    <div className="ld" ref={root}>
+      <section className="ld-cover">
+        <div className="ld-cover-in">
         <div className="ld-intro">
+          <h1 className="ld-head">
+            <span className="ld-hl"><span>Our prior.</span></span>{" "}
+            <span className="ld-hl"><span className="ld-head-line">Their line.</span></span>
+          </h1>
           <p className="ld-lede">
             I project every NFL player prop the sportsbooks post, pick a side,
             and grade every pick against the price it was offered at. A
@@ -449,6 +527,8 @@ export default function Landing() {
             </Link>
           </div>
         </div>
+        <PriorCurve />
+        </div>
       </section>
 
       <section className="ld-book" aria-label="The book, open">
@@ -456,10 +536,10 @@ export default function Landing() {
         <OpenEntries edges={edges} pencil={pencil} summary={summary} />
       </section>
 
-      <section className="ld-sec" aria-labelledby="ld-how">
+      <section className="ld-sec" aria-labelledby="ld-how" data-reveal>
         <h2 id="ld-how">How an entry gets written</h2>
         <ol className="ld-steps">
-          <li>
+          <li data-reveal>
             <h3>Project</h3>
             <p>
               Every eligible player gets a predicted range in each of eleven
@@ -469,7 +549,7 @@ export default function Landing() {
               different claim from sixty give or take forty.
             </p>
           </li>
-          <li>
+          <li data-reveal>
             <h3>Compare</h3>
             <p>
               When a book posts a line, the middle of that range is set against
@@ -478,7 +558,7 @@ export default function Landing() {
               sits above what a player typically does.
             </p>
           </li>
-          <li>
+          <li data-reveal>
             <h3>Rank</h3>
             <p>
               Inside each market, the picks on the board are ranked by how far
@@ -495,7 +575,7 @@ export default function Landing() {
               )}
             </p>
           </li>
-          <li>
+          <li data-reveal>
             <h3>Grade</h3>
             <p>
               After the games every pick is marked right or wrong, then scored
@@ -511,7 +591,7 @@ export default function Landing() {
       </section>
 
       {seasonRows.length > 0 && (
-        <section className="ld-sec" aria-labelledby="ld-seasons">
+        <section className="ld-sec" aria-labelledby="ld-seasons" data-reveal>
           <h2 id="ld-seasons">The elite tier, season by season</h2>
           <p className="ld-sec-lede">
             A pooled total can hide a bad year. These are the same picks split
@@ -532,8 +612,8 @@ export default function Landing() {
                 </tr>
               </thead>
               <tbody>
-                {seasonRows.map((s) => (
-                  <tr key={`${s.season}-${s.source}`}>
+                {seasonRows.map((s, i) => (
+                  <tr key={`${s.season}-${s.source}`} className="ld-row" style={at(i)}>
                     <th scope="row">{s.season}</th>
                     <td>
                       {s.source === "live"
@@ -557,7 +637,7 @@ export default function Landing() {
         </section>
       )}
 
-      <section className="ld-sec" aria-labelledby="ld-struck">
+      <section className="ld-sec" aria-labelledby="ld-struck" data-reveal>
         <h2 id="ld-struck">Struck from the book</h2>
         <p className="ld-sec-lede">
           Ideas I tested, wanted to work, and crossed out. They stay on the
@@ -566,8 +646,8 @@ export default function Landing() {
         </p>
         <ul className="ld-struck">
           {STRUCK.map(([idea, why]) => (
-            <li key={idea}>
-              <s>{idea}</s>
+            <li key={idea} data-reveal>
+              <s><span className="ld-idea">{idea}</span></s>
               <span>{why}</span>
             </li>
           ))}
@@ -577,7 +657,7 @@ export default function Landing() {
         </p>
       </section>
 
-      <section className="ld-sec ld-not" aria-labelledby="ld-not">
+      <section className="ld-sec ld-not" aria-labelledby="ld-not" data-reveal>
         <h2 id="ld-not">What this is not</h2>
         <div className="ld-not-grid">
           <p>
