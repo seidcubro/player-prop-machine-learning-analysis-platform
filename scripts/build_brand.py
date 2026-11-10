@@ -46,14 +46,14 @@ PUBLIC = ROOT / "apps" / "web" / "public"
 # The site's own tokens, from apps/web/src/index.css.
 CLOTH = "#0f1a17"
 GOLD = "#cda64e"
+CREAM = "#e9e4d0"
 PAPER = "#e4ecdc"
 INK = "#18213b"
 INK_DIM = "#4a556f"
-BLUE = "#1c3c9c"
-RULE = "#a9c0c6"
+GREEN = "#14483b"
+RULE = "#a9c2b5"
 MARGIN = "#c9585a"
 RED = "#a31b1b"
-OXBLOOD = "#6e1423"
 BLACK = "#000000"
 WHITE = "#ffffff"
 
@@ -272,10 +272,8 @@ def paper(w: int, h: int, margin: float | None = None, pitch: float = 0) -> Shee
 
 
 def cloth(w: int, h: int) -> Sheet:
-    """Dark bookcloth with the oxblood headband across the top."""
-    c = Sheet(w, h, CLOTH)
-    c.rect(0, 0, w, max(4, h * 0.012), rgb(OXBLOOD))
-    return c
+    """Dark bookcloth, plain. The gold is the only thing on it."""
+    return Sheet(w, h, CLOTH)
 
 
 def lockup(c: Sheet, x, y, size, fill):
@@ -285,7 +283,11 @@ def lockup(c: Sheet, x, y, size, fill):
 
 
 def tagline(c: Sheet, x, y, size, first, second, rule, align="l", stacked=True):
-    """The line itself: the prior upright, the line in italic on a double rule."""
+    """The line itself: the prior upright, the line in italic on a double rule.
+
+    On cloth the prior is gold and the line is cream on a gold rule, the way
+    the front page sets it. On paper the prior is ink and the line is green.
+    """
     kw = dict(heavy=max(2, size * 0.035), gap=max(2, size * 0.03), light=max(1, size * 0.014))
     w = c.width(TAG_B, ITALIC, size)
     if stacked:
@@ -482,14 +484,14 @@ def build_social():
     # left empty and the type sits right of centre.
     c = cloth(1500, 500)
     c.frame(28, 34, 1444, 438, hair)
-    tagline(c, 470, 215, 78, PAPER, GOLD, rgb(GOLD), stacked=False)
+    tagline(c, 470, 215, 78, GOLD, CREAM, rgb(GOLD), stacked=False)
     c.wrap(474, 300, "I project every NFL player prop, pick a side, and grade every pick against the price it was offered at. The whole record is posted, including the parts written in red.", SANS, 25, soft, 900, lead=1.45)
     c.text(1440, 440, SITE, CAPS, 20, GOLD, track=0.12, align="r")
     c.save(d / "banners" / "x-header-1500x500.png")
 
     # LinkedIn company cover, 1128x191. The logo covers the lower left.
     c = cloth(1128, 191)
-    tagline(c, 300, 108, 58, PAPER, GOLD, rgb(GOLD), stacked=False)
+    tagline(c, 300, 108, 58, GOLD, CREAM, rgb(GOLD), stacked=False)
     c.text(302, 158, "NFL player props, graded against the price. The record is public.", SANS, 19, soft)
     c.text(1096, 158, SITE, CAPS, 15, GOLD, track=0.12, align="r")
     c.save(d / "banners" / "linkedin-company-1128x191.png")
@@ -497,7 +499,7 @@ def build_social():
     # LinkedIn personal cover, 1584x396.
     c = cloth(1584, 396)
     c.frame(24, 28, 1536, 344, hair)
-    tagline(c, 560, 180, 84, PAPER, GOLD, rgb(GOLD), stacked=False)
+    tagline(c, 560, 180, 84, GOLD, CREAM, rgb(GOLD), stacked=False)
     c.wrap(563, 258, "I build PriorLine: NFL player prop projections, graded in public against the prices the books offered.", SANS, 25, soft, 900, lead=1.45)
     c.text(1524, 344, SITE, CAPS, 19, GOLD, track=0.12, align="r")
     c.save(d / "banners" / "linkedin-personal-1584x396.png")
@@ -505,25 +507,23 @@ def build_social():
     # Facebook cover, 1640x624, centred so the mobile crop keeps the type.
     c = cloth(1640, 624)
     c.frame(30, 36, 1580, 558, hair)
-    end = tagline(c, 820, 270, 112, PAPER, GOLD, rgb(GOLD), align="c")
+    end = tagline(c, 820, 270, 112, GOLD, CREAM, rgb(GOLD), align="c")
     c.text(820, end + 62, "NFL player props, graded against the price.", SANS, 28, soft, align="c")
     c.save(d / "banners" / "facebook-cover-1640x624.png")
 
     # YouTube channel art, 2560x1440, everything inside the 1546x423 safe area.
     c = cloth(2560, 1440)
-    end = tagline(c, 1280, 690, 150, PAPER, GOLD, rgb(GOLD), align="c")
+    end = tagline(c, 1280, 690, 150, GOLD, CREAM, rgb(GOLD), align="c")
     c.text(1280, end + 66, "NFL player props, graded against the price.", SANS, 38, soft, align="c")
     c.save(d / "banners" / "youtube-channel-2560x1440.png")
 
-    # Link preview, 1200x630. The site in one frame: cloth masthead, ruled
-    # paper, the red margin and the line.
-    c = paper(1200, 630, margin=64, pitch=42)
-    c.rect(0, 0, 1200, 96, rgb(CLOTH))
-    c.rect(0, 0, 1200, 6, rgb(OXBLOOD))
-    lockup(c, 98, 22, 58, GOLD)
-    c.text(1136, 62, SITE, CAPS, 18, GOLD, track=0.12, align="r")
-    end = tagline(c, 104, 262, 118, INK, BLUE, rgb(BLUE))
-    c.wrap(106, end + 62, "NFL player prop projections, graded against the price they were offered at. The whole record is posted, including the parts written in red.", SANS, 29, INK, 940, lead=1.42)
+    # Link preview, 1200x630. The front page in one frame: the cover, with the
+    # name stamped in gold and the line under it on its double rule.
+    c = cloth(1200, 630)
+    lockup(c, 80, 56, 58, GOLD)
+    c.text(1120, 96, SITE, CAPS, 18, GOLD, track=0.12, align="r")
+    end = tagline(c, 80, 268, 124, GOLD, CREAM, rgb(GOLD))
+    c.wrap(82, end + 60, "NFL player prop projections, graded against the price they were offered at. The whole record is posted, including the parts written in red.", SANS, 28, mix(CLOTH, PAPER, 0.8), 900, lead=1.42)
     c.save(d / "og-image-1200x630.png")
 
 
@@ -596,7 +596,7 @@ def t_ledger(path: Path, w, h, record, asof):
     y = c.wrap(pad, y, "Won is the share of picks that were correct. Needed is the share that had to be correct, at the prices offered, to finish level. Brackets mean a loss.", SANS, (30 if tall else 25) * u, INK, inner, lead=1.5)
     if h - y > 330 * u:
         c.text(pad, y + 70 * u, "Elite is the tier I put forward.", SERIF, 50 * u, INK)
-        c.text(pad, y + 128 * u, "The rest is shown so you can check me.", ITALIC, 36 * u, BLUE)
+        c.text(pad, y + 128 * u, "The rest is shown so you can check me.", ITALIC, 36 * u, GREEN)
     footer(c, pad, INK, rgb(INK_DIM), size=22 * u)
     c.save(path)
 
@@ -614,7 +614,7 @@ def t_entry(path: Path, w, h, blank=False):
         c.text(pad, y, "Player Name", SERIF, 78 * u, INK)
         c.text(pad, y + 52 * u, "Market, opponent", ITALIC, 32 * u, INK_DIM)
         y += 160 * u
-        rows = (("OUR PRIOR", "00.0", INK), ("THEIR LINE", "00.5", BLUE), ("THE PICK", "Under 00.5", INK))
+        rows = (("OUR PRIOR", "00.0", INK), ("THEIR LINE", "00.5", GREEN), ("THE PICK", "Under 00.5", INK))
         tight = h < 1200 * u
         for i, (label, val, col) in enumerate(rows):
             c.text(pad, y, label, CAPS, 20 * u, INK_DIM, track=0.1)
@@ -688,10 +688,10 @@ def t_explainer(path: Path, w, h, number=None, title="", body="", blank=False):
         for ln in ("How an entry", "gets written"):
             c.text(pad, y, ln, SERIF_BLACK, 104 * u, INK)
             y += 112 * u
-        c.text(pad, y - 20 * u, "Four steps, in the order they happen.", ITALIC, 38 * u, BLUE)
+        c.text(pad, y - 20 * u, "Four steps, in the order they happen.", ITALIC, 38 * u, GREEN)
         c.double_rule(pad, y + 20 * u, inner, rgb(INK), heavy=3 * u, gap=4 * u, light=1.5 * u)
     else:
-        c.text(pad, pad + 150 * u, f"{number}.", ITALIC, 170 * u, BLUE)
+        c.text(pad, pad + 150 * u, f"{number}.", ITALIC, 170 * u, GREEN)
         c.text(pad, pad + 300 * u, title, SERIF_BLACK, 92 * u, INK)
         c.rect(pad, pad + 344 * u, inner, 3 * u, rgb(INK))
         c.wrap(pad, pad + 440 * u, body, SANS, 37 * u, INK, inner, lead=1.5)
@@ -728,7 +728,7 @@ def build_templates(record, asof):
         pad = round(w * 0.07)
         c = cloth(w, h)
         c.frame(pad * 0.45, pad * 0.5, w - pad * 0.9, h - pad * 0.95, mix(CLOTH, GOLD, 0.32), t=1.5)
-        end = tagline(c, pad, h * 0.4, 118 * u, PAPER, GOLD, rgb(GOLD), stacked=False)
+        end = tagline(c, pad, h * 0.4, 118 * u, GOLD, CREAM, rgb(GOLD), stacked=False)
         c.wrap(pad + 4 * u, end + 70 * u, "Every NFL player prop, graded against the price it was offered at. The whole record is posted.", SANS, 40 * u, mix(CLOTH, PAPER, 0.78), w * 0.7, lead=1.45)
         footer(c, pad, GOLD, mix(CLOTH, PAPER, 0.5), size=22 * u)
         c.save(d / "landscape" / f"statement-{name}.png")

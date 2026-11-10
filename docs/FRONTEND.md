@@ -55,7 +55,7 @@ Tokens live in `:root` in `src/index.css`. One rule matters more than the rest:
 
 **The site is a ledger, and everything follows from that.** Pages are ruled
 paper (`--bg`), the masthead and footer are dark bookcloth (`--cloth`) stamped in
-gold, type is ink (`--text`), and the accent is ledger blue (`--accent`). Corners
+gold, type is ink (`--text`), and the accent is the binding's green (`--accent`). Corners
 are square. Headings are Besley, a Clarendon, and everything else is Archivo,
 both self-hosted through `@fontsource-variable`.
 

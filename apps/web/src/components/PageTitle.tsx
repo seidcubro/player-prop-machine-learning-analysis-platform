@@ -1,8 +1,8 @@
 /**
- * A page title in two voices: upright ink, then the italic in ledger blue.
+ * A page title in two voices: upright ink, then the italic in the binding's green.
  *
  * The second half is the noun that names the page, set in the italic of the
- * same serif and in the blue a bookkeeper uses for the entry that matters. One
+ * same serif and in the green of the cloth the book is bound in. One
  * colour, no gradient. A heading that decorates every word competes with the
  * masthead instead of sitting under it.
  */
@@ -13,7 +13,7 @@ export default function PageTitle({
 }: {
   /** The upright half, in ink. */
   lead: string;
-  /** The italic half, in ledger blue. Usually the page's actual noun. */
+  /** The italic half, in binding green. Usually the page's actual noun. */
   accent: string;
 }) {
   return (

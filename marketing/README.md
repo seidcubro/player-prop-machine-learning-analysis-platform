@@ -28,13 +28,13 @@ brackets. The line is "Our prior. Their line."
 | Gold | `#cda64e` | The mark and type on cloth. Never on paper. |
 | Paper | `#e4ecdc` | Light ground. |
 | Ink | `#18213b` | The mark and type on paper. |
-| Ledger blue | `#1c3c9c` | The accent on paper. "Their line." Links. |
+| Binding green | `#14483b` | The accent on paper. "Their line." Links. |
 | Red | `#a31b1b` | Losses, and only losses. |
 | Margin red | `#c9585a` | The double margin rule on paper. Decoration only, never text. |
-| Oxblood | `#6e1423` | The headband strip at the top of cloth. |
-| Rule | `#a9c0c6` | Hairlines on paper. |
+| Rule | `#a9c2b5` | Hairlines on paper. |
 
-Gold on paper and blue on cloth both fail contrast. Do not use them.
+Gold on paper and green on cloth both fail contrast. Do not use them. There is
+no blue and no second red: the only colours on cloth are gold and cream.
 
 ## Type
 

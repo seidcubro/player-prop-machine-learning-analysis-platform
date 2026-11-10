@@ -20,15 +20,14 @@ double rule.
 |---|---|---|
 | paper (--bg) | #e4ecdc | Page ground |
 | leaf | #eef3e8 | Raised panels and table grounds |
-| rule (--border) | #a9c0c6 | Hairlines |
+| rule (--border) | #a9c2b5 | Hairlines |
 | ink (--text) | #18213b | Body and headings on paper |
 | ink-dim | #4a556f | Secondary text on paper |
-| ledger blue (--accent) | #1c3c9c | Links, the italic half of a heading, focus |
+| binding green (--accent) | #14483b | Links, the italic half of a heading, focus. The cloth, lightened enough to read as a colour on paper. |
 | red | #a31b1b | A loss. Nothing else. |
 | margin red | #c9585a | The double margin rule. Never text. |
 | cloth (--cloth) | #0f1a17 | Masthead and footer |
 | gold | #cda64e | The mark and type on cloth. Never on paper. |
-| oxblood | #6e1423 | The headband strip above the masthead |
 
 Green means won or over. Amber marks the value pattern. No colour carries a
 meaning by itself: a loss is red and bracketed, a win is green and signed, a
@@ -72,10 +71,13 @@ from the live record and never typed into static text.
 
 The target is WCAG 2.2 AA. Text is checked against 4.5:1 on paper and on cloth.
 Every interactive target is at least 24 pixels. Focus is a visible 2 pixel
-outline. Motion is small and is removed under prefers-reduced-motion.
+outline. Motion is small everywhere except the front page, which opens the way
+a book is made: the name is stamped, the rule is struck, the account is posted.
+Every element is visible without it, and all of it is removed under
+prefers-reduced-motion.
 
 ## What is not allowed
 
-Gold on paper, blue on cloth, rounded corners, a second accent colour, a
+Gold on paper, green on cloth, blue anywhere, rounded corners, a second accent colour, a
 sportsbook logo, a team or league mark, a countdown, a figure without its
 source.

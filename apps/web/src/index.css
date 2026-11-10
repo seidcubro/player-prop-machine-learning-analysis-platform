@@ -2,7 +2,7 @@
  * PriorLine design system.
  *
  * A sportsbook is called a book because it keeps one. This is mine, left open.
- * The site is a bookkeeper's ledger: eye-ease green stock, blue feint rules, a
+ * The site is a bookkeeper's ledger: eye-ease green stock, green feint rules, a
  * red margin, entries in blue-black ink, and totals struck on a double rule,
  * which is where the phrase "the bottom line" comes from. The masthead and the
  * footer are the binder's cloth the pages sit in.
@@ -21,7 +21,7 @@
   --bg-raised-2: #d7e3ce;
   --bg-hover: #cbdac1;
   --bg-input: #f4f7ef;
-  /* Feint: the pale blue a ledger is ruled in. */
+  /* Feint: the pale green this ledger is ruled in. */
   --border: #a9c2b5;
   --border-strong: #5f8274;
   --rule-ink: #18213b;
@@ -44,14 +44,13 @@
   --violet: #5a2585;
   --cyan: #0c5560;
 
-  /* The binding: cloth, the oxblood spine, and the gold the name is stamped in. */
+  /* The binding: cloth, and the gold the name is stamped in. */
   --cloth: #0f1a17;
   --cloth-raised: #172622;
   --cloth-rule: #2a3d37;
   --cloth-text: #e9e4d0;
   --cloth-dim: #b9bfae;
   --gold: #cda64e;
-  --oxblood: #6e1423;
 
   /* -------------------------------------------------- semantic, and only these */
   --green: #17573a;
@@ -180,8 +179,7 @@ body {
 
 /* ================================================================== masthead */
 /*
- * The cover: bottle-black book cloth, an oxblood headband across the top, and
- * the name stamped in gold. The weave is two hairline gradients, which is all
+ * The cover: bottle-black book cloth with the name stamped in gold. The weave is two hairline gradients, which is all
  * book cloth is at this size.
  */
 .ps-mast {
@@ -3276,7 +3274,7 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ps-glossary-item dd strong { color: var(--text); }
 
 /* ================================================== links */
-/* Links in running text are underlined, in the brand blue. The oldest
+/* Links in running text are underlined, in the binding's green. The oldest
    convention on the web is still the one nobody has to learn. */
 /*
  * No underlines.
