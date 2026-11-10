@@ -157,6 +157,11 @@ def normalize_team(name: str) -> str:
 # Revisit after a season of closing prices has been collected and graded.
 SUPPRESSED_MARKETS = frozenset({"any_td"})
 
+# How far under even a pick may sit and still be published as small. Below
+# this the median and the probability disagree outright. See the gate in
+# main() that reads it.
+EVEN_FLOOR = float(os.getenv("EVEN_FLOOR", "0.45"))
+
 # Which tiers the site offers as a bet, as opposed to shows as context.
 #
 # Mirrors BET_TIERS in services/api/app/routes/edges.py and reads the same
@@ -2203,17 +2208,44 @@ def main():
             skip("expected value could not be computed", o["player_name"], market_code)
             continue
 
-        # A pick the model does not think is more likely than not.
+        # A pick the calibrated probability puts at even or worse.
         #
         # The side comes from the median and the probability comes from the
-        # median's distribution with the isotonic correction on top, so on a
-        # handful of rows the correction lands just the other side of even. Six
-        # of 350. Publishing a recommendation next to a 49% chance of winning it
-        # invites exactly the question the rest of this work was meant to
-        # settle, and six rows are not worth it.
-        if win_prob <= 0.5:
-            skip("model gives the pick under 50%", o["player_name"], market_code)
-            continue
+        # median's distribution with the isotonic correction on top. When this
+        # was written the two disagreed on six rows in 350 and I withheld them.
+        # It is now the largest drop on the board by a distance, over a
+        # thousand rows a build, and in five weeks out of nine it left passing
+        # yards with 2 to 14 quarterbacks out of about 30 priced.
+        #
+        # diagnose_withheld.py scored every prop that was priced, played and
+        # never published in 2026, 2,795 of them. Yardage went over 47.1%
+        # [44.6%, 49.6%] and counts 49.1% [46.3%, 51.8%]. Those are coin flips
+        # that lean slightly under, which is what small means, and the small
+        # tier as published is at 52.8%. Nothing in that says they were worse
+        # than what the board already carries, and a market with a third of its
+        # players missing is not covered.
+        #
+        # So they are published, as small, and marked in `notes` so the record
+        # can grade them on their own. They are kept out of the ranking below:
+        # the tiers were validated on picks the probability backed, and the
+        # elite set should be exactly what it was before this change.
+        #
+        # Two kinds are still withheld. A row where only one side is priced and
+        # the median prefers the other is not a pick, it is the only thing on
+        # offer. And a row well under even is a real disagreement between the
+        # median and the probability, not the season offset tipping a close one.
+        under_even = win_prob <= 0.5
+        if under_even:
+            forced = ((only_over and not prefer_over)
+                      or (only_under and prefer_over))
+            if forced:
+                skip("only one side is priced and the model prefers the other",
+                     o["player_name"], market_code)
+                continue
+            if win_prob < EVEN_FLOOR:
+                skip(f"model gives the pick under {EVEN_FLOOR:.0%}",
+                     o["player_name"], market_code)
+                continue
 
         # Projected, but not offered as a bet. See SUPPRESSED_MARKETS.
         if market_code in SUPPRESSED_MARKETS:
@@ -2420,7 +2452,8 @@ def main():
             "market_id": int(frow["market_id"]),
             "lookback": int(frow["lookback"]),
             "source_last_update": o["source_last_update"],
-            "notes": None,
+            # Read by the ranking below and by the record.
+            "notes": "under_even" if under_even else None,
             # Carried for refuse_contradicted_picks, dropped before the write.
             "_season_n": _num(extra.get("y_season_n")),
             "_season_mean": _num(extra.get("y_season_mean")),
@@ -2463,7 +2496,16 @@ def main():
     if gap_tier.V2_ENABLED and gap_tier.v2_thresholds() and not out.empty:
         before = out["edge_tier"].value_counts().to_dict()
         out["edge_tier"] = "small"
-        for code, idx in out.groupby("market_code").groups.items():
+        # Rows published at even or worse stay small and take no place in the
+        # ranking, so the tiers are cut over the same rows they always were.
+        rankable = out[out["notes"].isna()]
+        kept = out[out["notes"].notna()]
+        if len(kept):
+            print(f"  {len(kept)} pick(s) at even or worse published as small "
+                  f"and not ranked: "
+                  + ", ".join(f"{m} {n}" for m, n in
+                              kept["market_code"].value_counts().items()))
+        for code, idx in rankable.groupby("market_code").groups.items():
             labels = gap_tier.tiers_by_rank(
                 out.loc[idx, "gap_share"].tolist(), code)
             out.loc[idx, "edge_tier"] = labels

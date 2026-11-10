@@ -38,8 +38,10 @@ own build ranked it:
     than assumed from commit dates, because I deploy by hand and a commit time
     is only a floor. The demotion moved elite to strong and nothing else, so
     elite plus strong was 30% of a ranked market under the old shares and 40%
-    under the new ones whether or not the bug ran. The direction is whichever
-    end of the gap the stored elite and strong rows sit at.
+    under the new ones whether or not the bug ran. The share is dated by the
+    one cut between builds that fits those two rates, counted on the rows each
+    build froze (see share_changed_at). The direction is whichever end of the
+    gap the stored elite and strong rows sit at.
 
     A row is promoted only if it is stored as strong, its probability did not
     beat its price (the only rows the bug touched), and it ranks inside the
@@ -92,15 +94,41 @@ def needed(price):
                     np.where(p < 0, (-p) / ((-p) + 100.0), np.nan))
 
 
-def elite_share_at(board, when):
-    """10% or 20%, read off what the build stored."""
-    ranked = board.groupby("market_code")["edge_tier"].transform(
+def share_changed_at(h):
+    """The first build that ranked on a 20% elite share, read off the archive.
+
+    The first version of this asked each build's board, and a board is mostly
+    rows that later builds froze. Every build of the week the share changed
+    read 20%, including Thursday's, which ran on 10%. A row that sat between
+    10% and 20% that night was strong on its merits and would have been
+    promoted.
+
+    The demotion moved elite to strong and nothing else, so elite plus strong
+    among the rows a build froze was 30% before the change and 40% after
+    whether or not the bug ran. One change, on one date: take the cut between
+    builds that fits those two rates best. Returns the time and the two rates
+    it leaves either side, which should read close to 30% and 40%.
+    """
+    if os.getenv("SHARE_CHANGED"):
+        return SHARE_CHANGED, None, None
+    ranked = h.groupby(["board", "market_code"])["edge_tier"].transform(
         lambda s: (s != "small").any())
-    b = board[ranked]
+    b = h[ranked & h["gap_share"].notna()]
     if len(b) < MIN_TO_INFER:
-        return 0.20 if when >= SHARE_CHANGED else 0.10
-    top = b["edge_tier"].isin(["elite", "strong"]).mean()
-    return 0.20 if top >= 0.35 else 0.10
+        return SHARE_CHANGED, None, None
+    per = (b.assign(top=b["edge_tier"].isin(["elite", "strong"]))
+           .groupby("archived_at")["top"].agg(["sum", "count"]).sort_index())
+    k = per["sum"].to_numpy(dtype=float)
+    n = per["count"].to_numpy(dtype=float)
+    old = k * np.log(0.30) + (n - k) * np.log(0.70)
+    cur = k * np.log(0.40) + (n - k) * np.log(0.60)
+    cut = max(range(len(per) + 1),
+              key=lambda c: old[:c].sum() + cur[c:].sum())
+    before = k[:cut].sum() / n[:cut].sum() if n[:cut].sum() else None
+    after = k[cut:].sum() / n[cut:].sum() if n[cut:].sum() else None
+    when = (per.index[cut] if cut < len(per)
+            else pd.Timestamp.max.tz_localize("UTC"))
+    return when, before, after
 
 
 def direction_at(rows, market, when):
@@ -124,9 +152,10 @@ def rank_as_built(h):
     h = h.copy()
     h["was_elite"] = False
     builds = []
+    changed, before, after = share_changed_at(h)
     for (week, when), frozen in h.groupby(["board", "archived_at"]):
         board = h[(h["board"] == week) & (h["archived_at"] >= when)]
-        share = elite_share_at(board, when)
+        share = 0.20 if when >= changed else 0.10
         n_top = 0
         for market, rows in board.groupby("market_code"):
             known = rows[rows["gap_share"].notna()]
@@ -142,7 +171,7 @@ def rank_as_built(h):
             h.loc[mine, "was_elite"] = True
             n_top += len(mine)
         builds.append((week, when, len(frozen), len(board), share, n_top))
-    return h, builds
+    return h, builds, (changed, before, after)
 
 
 def demoted(h):
@@ -174,7 +203,7 @@ def main():
     h["archived_at"] = pd.to_datetime(h["archived_at"], utc=True)
     h["gap_share"] = pd.to_numeric(h["gap_share"], errors="coerce")
 
-    h, builds = rank_as_built(h)
+    h, builds, change = rank_as_built(h)
 
     print("BUILDS THAT FROZE ROWS")
     print(f"  {'week':<10}{'frozen at (UTC)':<19}{'rows':>6}{'board':>7}"
@@ -182,6 +211,18 @@ def main():
     for week, when, n, nb, share, n_top in builds:
         print(f"  {week:<10}{when:%m-%d %H:%M}{'':<8}{n:>6}{nb:>7}"
               f"{share:>13.0%}{n_top:>14}")
+    changed, before, after = change
+    if before is not None and after is not None:
+        print(f"  elite share read as 20% from the build at "
+              f"{changed:%m-%d %H:%M} UTC. Elite plus strong among the rows "
+              f"frozen before it: {before:.0%} (30% expected). From it on: "
+              f"{after:.0%} (40% expected).")
+    elif before is not None:
+        print(f"  no build reads as a 20% elite share. Elite plus strong "
+              f"among frozen rows: {before:.0%} (30% expected).")
+    elif after is not None:
+        print(f"  every build reads as a 20% elite share. Elite plus strong "
+              f"among frozen rows: {after:.0%} (40% expected).")
     print()
 
     top = h[h["was_elite"]]
