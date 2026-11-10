@@ -876,10 +876,20 @@ CONTEXT_MISSES: list[tuple[str, object]] = []
 # published picks looked like the model having no opinion rather than twenty
 # specific, explainable drops. Tallied here and printed at the end.
 SKIPS: dict[str, list[str]] = {}
+# The same drops, counted by market.
+#
+# The reasons alone were not enough. Passing yards boarded 2 to 14 of about 30
+# priced quarterbacks in five weeks out of nine, and the printout for those
+# builds says how many props each gate took in total, with three names beside
+# it. It cannot say that one gate took most of one market, which is the only
+# version of the fact that points at a cause.
+SKIPS_BY_MARKET: dict[str, dict[str, int]] = {}
 
 
 def skip(reason: str, player: str, market: str) -> None:
     SKIPS.setdefault(reason, []).append(f"{player} {market}")
+    by = SKIPS_BY_MARKET.setdefault(market, {})
+    by[reason] = by.get(reason, 0) + 1
 
 
 def apply_current_context(
@@ -2579,6 +2589,20 @@ def main():
             sample = ", ".join(sorted(items)[:3])
             more = f" and {len(items) - 3} more" if len(items) > 3 else ""
             print(f"    {len(items):>4}  {reason}: {sample}{more}")
+        # Rows, not players: a prop is counted once for each book that posted
+        # it, on both sides of the comparison.
+        print()
+        print("  the same drops by market (rows on the board, then rows lost "
+              "to each gate):")
+        on_board = out["market_code"].value_counts().to_dict() if len(out) else {}
+        for market in sorted(set(SKIPS_BY_MARKET) | set(on_board)):
+            lost = SKIPS_BY_MARKET.get(market, {})
+            parts = "; ".join(
+                f"{n} {reason}"
+                for reason, n in sorted(lost.items(), key=lambda kv: -kv[1]))
+            print(f"    {market:<17}{int(on_board.get(market, 0)):>5} on the "
+                  f"board, {sum(lost.values()):>4} lost"
+                  + (f": {parts}" if parts else ""))
 
     if CONTEXT_MISSES:
         teams = sorted({t for t, _ in CONTEXT_MISSES})
