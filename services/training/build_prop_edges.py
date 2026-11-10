@@ -372,7 +372,16 @@ def demote_dead_bets(out: pd.DataFrame) -> pd.DataFrame:
     # because under an expected-value ranking a pick with no expected value is a
     # contradiction rather than a trade-off.
     out["negative_ev"] = (edge.notna() & (edge <= 0)).to_numpy()
-    if gap_tier.ENABLED:
+    # Either gap ranking counts. This only asked about GAP_TIERS, the older
+    # flag, so once the tiers moved to rank within each market under
+    # GAP_TIERS_V2 the demotion quietly came back: the board ranked its top
+    # fifth, then this pushed every one of them whose published probability
+    # sat under the price down to strong. Live, weeks 7 to 9 of 2026 graded no
+    # elite pick at all, and "strong" hit 64% on 198 because it was holding
+    # them.
+    ranked_on_gap = gap_tier.ENABLED or bool(
+        gap_tier.V2_ENABLED and gap_tier.v2_thresholds())
+    if ranked_on_gap:
         print(f"bet tier: {int(bet.sum())} pick(s), of which {int(dead.sum())} "
               f"are labelled negative EV at the price on offer and kept")
     else:

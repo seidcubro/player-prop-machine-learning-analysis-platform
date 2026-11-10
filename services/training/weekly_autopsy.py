@@ -84,8 +84,18 @@ def ci(sub):
     w = sub["hit"].to_numpy()
     if len(w) < MIN_CELL:
         return None
-    return S.clustered_bootstrap(
+    c = S.clustered_bootstrap(
         lambda i: float(np.mean(w[i])), sub["cluster"].to_numpy(), n_boot=1200)
+    if np.isfinite(c[1]):
+        return c
+    # One week is three or four game dates, fewer than the bootstrap will
+    # resample, and it printed nan for every week. A Wilson interval on the
+    # rows is the fallback. It treats props as independent, which they are
+    # not, so it is narrower than the truth: read it as a floor on the width.
+    n, ph, z = len(w), float(np.mean(w)), 1.96
+    mid = (ph + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * np.sqrt(ph * (1 - ph) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return ph, mid - half, mid + half
 
 
 def main():
