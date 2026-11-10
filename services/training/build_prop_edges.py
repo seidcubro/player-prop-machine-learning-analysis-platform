@@ -31,6 +31,7 @@ import gap_tier
 import market_blend
 import joblib
 import median_anchor as anchor
+import season_bias
 import fit_display_probability as display_prob
 import numpy as np
 import pandas as pd
@@ -1679,6 +1680,7 @@ def main():
     spread_cal = spread.load(artifact_dir)
     interval_cal = interval.load(artifact_dir)
     anchor_cal = anchor.load(artifact_dir)
+    season_cal = season_bias.load(artifact_dir)
     ctx = load_current_context(engine)
     # Who inherits the volume of a ruled-out teammate, and how much. Built once;
     # only pools that beat "unchanged" on a held-out season are applied.
@@ -1979,6 +1981,15 @@ def main():
                 qf = vacated_vol.factor(frow.get("player_id"), market_code, mid)
                 if qf != 1.0:
                     qp = {q: v * qf for q, v in qp.items()}
+            # This season's level, where measuring it walk-forward picked more
+            # winners. Last, so it lands on the range every other correction
+            # has already shaped, and before P(over) is read, so the side, the
+            # median and the probability all come off the one shifted ladder.
+            # The count markets are rebuilt from the point projection below and
+            # are not moved here. See season_bias.py.
+            season_shift = season_bias.shift(season_cal, market_code)
+            if season_shift and market_code not in COUNT_MARKETS:
+                qp = {q: max(0.0, v + season_shift) for q, v in qp.items()}
             p_over = float(prob_over_from_quantiles(
                 qp, line_value, quant.get("calibration")))
             p_under = 1.0 - p_over

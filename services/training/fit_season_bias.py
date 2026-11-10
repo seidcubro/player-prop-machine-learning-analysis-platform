@@ -46,7 +46,8 @@ A flipped pick has no stored price for the side it flipped to, so those are
 scored at -110. Picks that do not flip keep the price actually taken. Both the
 flat-price and real-price figures are printed so the assumption is visible.
 
-Writes nothing unless WRITE=1, and then only markets that improved.
+Writes nothing unless WRITE=1, and then only markets where the corrected side
+was right more often. build_prop_edges reads the result through season_bias.py.
 
     docker compose run --rm training python fit_season_bias.py
     docker compose run --rm -e WRITE=1 training python fit_season_bias.py
@@ -62,6 +63,7 @@ import stats_ci as S
 from sqlalchemy import create_engine, text
 
 import build_prop_edges as bp
+import season_bias
 
 ARTIFACTS = Path(os.getenv("ARTIFACT_DIR", "/artifacts"))
 OUT = ARTIFACTS / "season_bias.json"
@@ -116,6 +118,16 @@ def main():
         raise SystemExit(f"no live graded rows for {SEASON}")
 
     d["game_date"] = pd.to_datetime(d["game_date"])
+    # Take back whatever the board was already adding. A corrected median grades
+    # closer to the truth, which is the point, and a fitter that measured the
+    # corrected number would see no bias left and withdraw the correction.
+    doc = season_bias.read(ARTIFACTS)
+    d["applied"] = [season_bias.applied_on(doc, m, g)
+                    for m, g in zip(d["market_code"], d["game_date"])]
+    d["p50"] = d["p50"] - d["applied"]
+    if (d["applied"] != 0).any():
+        print(f"{int((d['applied'] != 0).sum()):,} rows were graded with a "
+              "season bias already applied; it is subtracted before fitting")
     d["resid"] = d["actual"] - d["p50"]
     dates = sorted(d["game_date"].unique())
 
@@ -144,6 +156,13 @@ def main():
     d["flipped"] = d["side_adj"] != d["recommended_side"]
     over_hit = d["actual"] > d["line"]
     d["hit_adj"] = np.where(d["side_adj"] == "over", over_hit, ~over_hit)
+    # The model underneath, with no season correction at all. This is what a
+    # market has to beat to keep its correction, and it is not the stored hit
+    # once a correction has shipped, because the stored pick already used one.
+    side_raw = np.where(d["p50"] > d["line"], "over", "under")
+    d["hit_raw"] = np.where(d["applied"] != 0,
+                            np.where(side_raw == "over", over_hit, ~over_hit),
+                            d["hit"].astype(bool))
 
     pay_real = payout(d["price_american"])
     pay_flat = payout(np.full(len(d), FLAT_PRICE))
@@ -199,18 +218,32 @@ def main():
         print(f"  {m:<18}{len(g):>7}{raw:>+12.2f}{shrunk:>+13.2f}"
               f"{g['p50'].mean():>9.1f}{g['line'].mean():>9.1f}")
 
+    # A market keeps its correction when the corrected side was right more
+    # often than the uncorrected one, walk-forward. Hit rate, not units: the
+    # question is whether the pick is correct.
+    print()
+    print(f"  {'market':<18}{'hit raw':>9}{'hit adj':>9}{'verdict':>10}")
+    keep = {}
+    for m, b in final.items():
+        sub = d[d["market_code"] == m]
+        raw, adj = float(sub["hit_raw"].mean()), float(sub["hit_adj"].mean())
+        ok = adj > raw
+        if ok:
+            keep[m] = round(b, 3)
+        print(f"  {m:<18}{raw:>9.1%}{adj:>9.1%}{'keep' if ok else 'leave':>10}")
+
     if os.getenv("WRITE") == "1":
-        keep = {}
-        for m, b in final.items():
-            sub = d[d["market_code"] == m]
-            if sub["units_adj"].mean() > sub["units_base"].mean():
-                keep[m] = b
+        hist = season_bias.history(doc) if doc.get("season") == SEASON else []
+        today = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
+        hist = [e for e in hist if str(e.get("from", ""))[:10] != today]
+        hist.append({"from": today, "bias": keep})
         OUT.write_text(json.dumps(
-            {"season": SEASON, "prior_n": PRIOR_N, "bias": keep}, indent=2),
+            {"season": SEASON, "prior_n": PRIOR_N, "history": hist}, indent=2),
             encoding="utf-8")
         print(f"\nwrote {OUT.name} with {len(keep)} market(s): {sorted(keep)}")
+        print("the next board build applies it.")
     else:
-        print("\nnothing written. WRITE=1 to ship the markets that improved.")
+        print("\nnothing written. WRITE=1 to ship the markets marked keep.")
 
 
 if __name__ == "__main__":
