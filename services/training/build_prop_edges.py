@@ -2509,6 +2509,20 @@ def main():
             labels = gap_tier.tiers_by_rank(
                 out.loc[idx, "gap_share"].tolist(), code)
             out.loc[idx, "edge_tier"] = labels
+        # Elite is settled. Strong and medium are now drawn from everything
+        # under it, every market together, by the price. See
+        # gap_tier.recut_by_price for the nine weeks that decided it.
+        if gap_tier.PRICE_TIERS:
+            implied = (out["price_american"].map(implied_prob)
+                       .astype(float).tolist())
+            out["edge_tier"] = gap_tier.recut_by_price(
+                out["edge_tier"].tolist(), implied,
+                out["notes"].isna().tolist())
+            shown = out[out["edge_tier"].isin(["strong", "medium"])]
+            if len(shown):
+                print("  strong and medium by price, across the board: "
+                      + ", ".join(f"{m} {n}" for m, n in
+                                  shown["market_code"].value_counts().items()))
         after = out["edge_tier"].value_counts().to_dict()
         print("  tiers by rank within each market's board: "
               + ", ".join(f"{t} {after.get(t, 0)}"

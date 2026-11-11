@@ -286,8 +286,11 @@ export default function Model() {
             What remains is the expected value, which is shown as a grade for
             the price. The tier is decided separately: inside each market the
             night&rsquo;s props are ranked by how far the model sits from the
-            line, and the top fifth is Elite. Every pick is graded against the
-            real result, in every tier, and Elite is the only one put forward.
+            line, and the top fifth is Elite. The rest of the board is ordered
+            by how likely each pick&rsquo;s own price says it is to land, and
+            the top of that is Strong, then Medium. Every pick is graded
+            against the real result, in every tier, and Elite is the only one
+            put forward.
           </p>
           <div className="ps-model-callout">
             <p className="k">The central finding</p>
@@ -512,17 +515,29 @@ gap  = |model median − book line| / line   (the distance, as a share of the li
           <p>
             A tier is a position on the night&rsquo;s board, not a threshold.
             Inside each market every priced prop is ranked by its gap, and the
-            ranking is cut into shares.
+            top fifth is Elite. Everything else, in every market, is then
+            ranked together by the chance its own price implies for the side
+            picked.
           </p>
           <Grid
-            head={["Tier", "Share of a ranked market", "On the site"]}
+            head={["Tier", "How it is chosen", "On the site"]}
             rows={[
-              ["Elite", "the top fifth", "put forward as a pick"],
-              ["Strong", "the next fifth", "shown, not put forward"],
-              ["Medium", "the next fifth", "shown, not put forward"],
+              ["Elite", "top fifth of its market, by gap", "put forward as a pick"],
+              ["Strong", "top of the rest, by price", "shown, not put forward"],
+              ["Medium", "next of the rest, by price", "shown, not put forward"],
               ["Small", "everything else", "graded, not shown"],
             ]}
           />
+          <p>
+            Strong and medium were bands of the gap until week 10 of 2026. The
+            gap separates picks at the top of a market and stops at about two
+            fifths down, so medium was cut from where it had nothing left to
+            say and hit 47.9% over nine weeks against 51.0% for small. Cut on
+            the price instead, the same nine weeks read 65.0%, 62.3%, 52.9% and
+            49.8% from elite to small. Strong and medium are the book&rsquo;s
+            own favourites among our picks. They land more often and they do
+            not beat their price; only elite has.
+          </p>
           <p>
             The gap is divided by the line because two yards of disagreement on
             a 15-yard line is a different claim from two yards on an 80-yard

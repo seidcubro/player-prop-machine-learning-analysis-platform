@@ -113,10 +113,11 @@ const TERMS: Term[] = [
       <>
         A ranking, not a score. Inside each market the board is ordered by how
         far our number sits from the line, as a share of the line. The top
-        fifth is Elite, then Strong, then Medium, and the rest is Small. Only
-        Elite is put forward. A market where that distance has not been shown
-        to separate winners from losers is not ranked, and everything in it is
-        Small.
+        fifth is Elite, and only Elite is put forward. A market where that
+        distance has not been shown to separate winners from losers has no
+        Elite. The rest of the board is ordered by how likely each
+        pick&rsquo;s own price says it is to land: Strong is the top of that,
+        then Medium, and the rest is Small.
       </>
     ),
   },

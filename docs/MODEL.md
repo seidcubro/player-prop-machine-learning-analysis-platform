@@ -36,8 +36,15 @@ full range of outcomes for that player, turns it into a probability for each
 side, and subtracts the probability the price needs just to break even. What's
 left is expected value, and it is published beside every pick. The tiers are not
 cut on it. Within each market the board is ranked by how far the projection sits
-from the line as a share of the line: the top fifth is elite, the next fifth
-strong, the next medium and the rest small. Every pick is graded against the
+from the line as a share of the line, and the top fifth is elite. From week 10
+of 2026 strong and medium are cut from everything else on the board, all
+markets together, by the chance each pick's own price implies: strong is the
+top of that and medium the next. They used to be the second and third fifths
+of the gap, and medium hit 47.9% over nine weeks against 51.0% for small,
+because the gap stops separating picks about two fifths down. Replayed walk
+forward on the same weeks, the price cut reads 65.0%, 62.3%, 52.9% and 49.8%
+from elite to small (`research_medium_tier.py`). Strong and medium are the
+book's favourites among my picks and do not beat their price. Every pick is graded against the
 real box score and against the price it was offered at, and elite is the only
 tier put forward as a pick.
 

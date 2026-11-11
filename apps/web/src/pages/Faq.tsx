@@ -422,10 +422,26 @@ function Technical() {
       <QA q="Tiers">
         <p>
           Ranked, not thresholded. Per market, each priced prop gets a gap of
-          |median &minus; line| / line, the board is sorted on it, and the
-          sorted list is cut 20/20/20/40 into elite, strong, medium and small.
-          A share of the board rather than a fixed gap, because cuts fitted on
-          one season&rsquo;s gap distribution did not transfer to the next.
+          |median &minus; line| / line, the board is sorted on it, and the top
+          fifth is elite. A share of the board rather than a fixed gap, because
+          cuts fitted on one season&rsquo;s gap distribution did not transfer
+          to the next.
+        </p>
+        <p>
+          Strong and medium are cut differently, from week 10 of 2026.
+          Everything that is not elite goes into one pool, all markets
+          together, and is ranked by the chance its own price implies for the
+          side picked. Strong is the top of that pool and medium the next.
+          Until then they were the second and third fifths of the gap, and
+          over nine weeks medium hit 47.9% against 51.0% for small, because
+          the gap stops separating picks after about the top two fifths.
+          Replayed on the same nine weeks, the price cut gives elite 65.0%,
+          strong 62.3%, medium 52.9% and small 49.8%.
+        </p>
+        <p>
+          Strong and medium are right more often because the book already
+          rates them as likely. They do not beat their price: strong hit 62.3%
+          where its prices needed 63.0%. Elite is the only tier that has.
         </p>
         <p>
           A market is ranked only if the gap replicates on split halves of the

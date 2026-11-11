@@ -566,3 +566,71 @@ def tiers_by_rank(gaps, market_code: str) -> list:
         elif pos < n_elite + n_strong + n_medium:
             out[i] = "medium"
     return out
+
+
+# Strong and medium are cut on the price, not on the gap.
+#
+# The gap ranks the top of a market and then runs out. Replayed walk forward
+# over the first nine weeks of 2026, as disjoint bands of the rank: 65.0% in
+# the top fifth, 57.7% and 55.1% in the next two tenths, then 48.9%, 51.9% and
+# 52.3%. Medium was the 40 to 60% band, cut from the part of the ranking with
+# nothing left in it, and it hit 47.9% against 51.0% for small. A tier under
+# the one below it is a ranking fault, and the fix is a ranking that still
+# works down there.
+#
+# research_medium_tier.py tried four. Elite stayed the top fifth of the gap in
+# every one, and each candidate drew the same number of picks a week:
+#
+#     strong and medium by     elite  strong  medium   small
+#     gap bands                65.0%   56.8%   47.9%   51.0%
+#     market-and-side record   65.0%   56.8%   48.2%   51.0%   medium only
+#     price, one pool          65.0%   62.3%   52.9%   49.8%
+#     model, one pool          65.0%   59.9%   57.6%   49.5%
+#
+# Price and the model both come out in order. Price is the one shipped: it has
+# nothing to fit, so it cannot overfit, and it put strong over medium in seven
+# weeks of eight where the model managed five. The model is a logistic
+# regression that is mostly the price anyway.
+#
+# What this is and is not. Everything on the board that is not elite goes into
+# one pool, every market together, and is ranked by the chance the price on
+# our side implies. Strong is the top of that and medium the next, each the
+# size the gap bands would have made it. These are the picks the book itself
+# rates likeliest to land the way we have them. They are right more often for
+# that reason, and they do not beat their price: strong hit 62.3% where it
+# needed 63.0%. Elite is still the only tier that knows something the price
+# does not, and the site says so.
+#
+# Medium over small is the thin part: three points on 257 picks, ahead in five
+# weeks of eight. In order, not yet proven. PRICE_TIERS=0 restores the bands.
+PRICE_TIERS = os.getenv("PRICE_TIERS", "1") != "0"
+
+
+def recut_by_price(tiers, implied, eligible) -> list:
+    """Re-cut strong and medium from one pool under elite, by price.
+
+    `tiers` is the whole board as tiers_by_rank left it, `implied` the
+    break-even chance of each row's own price, `eligible` whether the row may
+    be ranked at all. Elite is untouched. The number of strong and of medium
+    rows is kept, so the board shows as many of each as it did.
+
+    Ties on price are common, since half a market sits at -115. They go to the
+    row the gap ranked higher, and then to board order.
+    """
+    tiers = list(tiers)
+    n_strong = tiers.count("strong")
+    n_medium = tiers.count("medium")
+    if not (n_strong or n_medium):
+        return tiers
+    was = {"strong": 0, "medium": 1}
+    pool = [i for i, t in enumerate(tiers)
+            if t != "elite" and eligible[i]
+            and implied[i] is not None and math.isfinite(implied[i])]
+    order = sorted(pool, key=lambda i: (-implied[i], was.get(tiers[i], 2), i))
+    out = ["elite" if t == "elite" else "small" for t in tiers]
+    for pos, i in enumerate(order):
+        if pos < n_strong:
+            out[i] = "strong"
+        elif pos < n_strong + n_medium:
+            out[i] = "medium"
+    return out

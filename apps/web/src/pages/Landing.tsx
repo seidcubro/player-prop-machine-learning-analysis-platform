@@ -563,10 +563,11 @@ export default function Landing() {
             <p>
               Inside each market, the picks on the board are ranked by how far
               the projection sits from the line, as a share of the line. The
-              top fifth is stamped elite, the next fifth strong, the next
-              medium, and the rest small. A market whose ranking has not held
-              up on games it was not fitted to is published unranked, with
-              every pick marked small.
+              top fifth is stamped elite. A market whose ranking has not held
+              up on games it was not fitted to has no elite. Everything else
+              on the board is then ordered by how likely its own price says it
+              is to land: the top of that is strong, the next medium, and the
+              rest small.
               {published.length > 0 && bet.length > 0 && (
                 <>
                   {" "}The board shows {listWords(published)}, and only{" "}
