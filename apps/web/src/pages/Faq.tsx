@@ -423,7 +423,11 @@ function Technical() {
         <p>
           Ranked, not thresholded. Per market, each priced prop gets a gap of
           |median &minus; line| / line, the board is sorted on it, and the
-          sorted list is cut 20/20/20/40 into elite, strong, medium and small.
+          sorted list is cut 20/20/60 into elite, strong and small. There was
+          a medium tier under strong until week 10 of 2026. Over nine weeks it
+          hit 47.9% against 51.0% for small, so the label was retired and
+          those picks are graded as small. The picks graded as medium before
+          then stay in the record as medium.
           A share of the board rather than a fixed gap, because cuts fitted on
           one season&rsquo;s gap distribution did not transfer to the next.
         </p>

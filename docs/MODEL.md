@@ -37,7 +37,9 @@ side, and subtracts the probability the price needs just to break even. What's
 left is expected value, and it is published beside every pick. The tiers are not
 cut on it. Within each market the board is ranked by how far the projection sits
 from the line as a share of the line: the top fifth is elite, the next fifth
-strong, the next medium and the rest small. Every pick is graded against the
+strong and the rest small. There was a medium tier until week 10 of 2026; over
+nine weeks, tiered walk forward, it hit 47.9% on 257 picks against 51.0% for
+small, so I retired the label. Every pick is graded against the
 real box score and against the price it was offered at, and elite is the only
 tier put forward as a pick.
 
