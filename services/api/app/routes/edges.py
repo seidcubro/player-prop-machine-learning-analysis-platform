@@ -126,10 +126,7 @@ _TIER_ORDER = ["small", "medium", "strong", "elite"]
 # site presents as something to actually stake. Anything outside it is context.
 PUBLISHED_TIERS = [
     t.strip() for t in
-    # Medium left this list when the builder stopped assigning it (see
-    # MEDIUM_SHARE in gap_tier.py). The record still holds the medium picks
-    # graded before then, and the record routes do not read this list.
-    os.getenv("PUBLISHED_TIERS", "elite,strong").split(",") if t.strip()
+    os.getenv("PUBLISHED_TIERS", "elite,strong,medium").split(",") if t.strip()
 ]
 
 # The tiers offered as a bet. Everything else published is shown, not sold.

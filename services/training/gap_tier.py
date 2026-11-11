@@ -498,24 +498,7 @@ def tier_v2(gap: float | None, market_code: str) -> str | None:
 # rows would be fitting noise, so they are left as equal blocks.
 ELITE_SHARE = float(os.getenv("ELITE_SHARE", "0.20"))
 STRONG_SHARE = float(os.getenv("STRONG_SHARE", "0.20"))
-# Medium is switched off, and this is not the rearranging the paragraph above
-# warns against. It is the same statement acted on.
-#
-# After nine weeks, walk forward, each week tiered on what was known before it:
-#
-#     elite    257 picks   65.0%   needed 58.6%   +6.4% [+2.1%, +10.3%]
-#     strong   257         56.8%          56.6%   +0.2% [-5.2%, +5.5%]
-#     medium   257         47.9%          55.8%   -8.0% [-12.3%, -2.2%]
-#     small  2,196         51.0%          53.2%   -2.2% [-5.3%, +0.8%]
-#
-# Medium has now come in under small three times: 47.7% in the bands above,
-# 47.8% in sample and 47.9% walk forward. I am not claiming the 40 to 60% band
-# is worse than a coin flip, 257 picks cannot say that. I am saying a label
-# that sits above small on the board has never once hit more often than small,
-# and the tiers are a promise about order. So those picks are published as
-# small, which is what they have been. MEDIUM_SHARE in the environment brings
-# the label back if a later season earns it.
-MEDIUM_SHARE = float(os.getenv("MEDIUM_SHARE", "0.0"))
+MEDIUM_SHARE = float(os.getenv("MEDIUM_SHARE", "0.20"))
 # A market needs this many rows on the board before a rank means anything.
 #
 # Twenty was too strict and produced the failure it was meant to prevent. A

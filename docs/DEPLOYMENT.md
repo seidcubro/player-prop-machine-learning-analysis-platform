@@ -137,7 +137,7 @@ visible: the live 2026 picks claim 58% and have hit 48%.
 
 What changed is what the site does about it. Elite is the only tier put forward
 as a pick, because it is the only tier that has cleared its price over the graded
-record. Strong is shown beside it and labelled as not put forward, and the
+record. Strong and medium are shown beside it and labelled as not put forward, and the
 claimed figure sits beside the actual one on the track record and on the landing
 page rather than being quietly omitted. A reader is told the model is wrong
 often, by how much, and which tiers lost money.
