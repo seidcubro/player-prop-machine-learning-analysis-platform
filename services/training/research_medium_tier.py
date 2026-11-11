@@ -41,6 +41,28 @@ only thing that differs is which ones.
 
 Each rule sees only the backtest and the live weeks before the week it tiers.
 
+The first run of this, on nine weeks of 2026:
+
+    chosen by    strong   medium    small   weeks medium over small
+    as is         56.8%    47.9%    51.0%   2 of 8
+    cell          56.8%    48.2%    51.0%   3 of 8
+    price         56.8%    58.8%    49.8%   6 of 8
+    model         56.8%    57.6%    49.9%   5 of 8
+
+The record of the market and side does nothing. The price does, and the model
+is mostly the price. But a medium chosen that way comes out level with strong
+or a little above it, which is the order broken one step higher up. So strong
+has the same problem medium had, less of it: the 20 to 40% band of the gap is
+where the gap is fading.
+
+Two more candidates, then, that cut strong and medium together. Elite stays
+the top fifth of the gap. Everything under it is one pool, ranked by the price
+or by the model, with strong the top of that and medium the next, each the
+size it is on the board today:
+
+    price, both
+    model, both
+
 What counts as fixed: medium above small on the season AND in most weeks, and
 below strong. A candidate that only manages the first is one good month.
 
@@ -62,7 +84,7 @@ import build_prop_edges as bp
 import replay_current_rules as rc
 
 PRIOR_WEIGHT = float(os.getenv("PRIOR_WEIGHT", "50"))
-CANDIDATES = ["as is", "cell", "price", "model"]
+CANDIDATES = ["as is", "cell", "price", "model", "price, both", "model, both"]
 
 
 def prepare(d):
@@ -122,9 +144,19 @@ def assign(d):
             "price": pool["need"],
             "model": model_score(past, pool),
         }
+        under = now[base != "elite"]
+        n_strong = int((base == "strong").sum())
+        both = {"price, both": under["need"],
+                "model, both": model_score(past, under)}
         for c in CANDIDATES:
             t = base.copy()
-            if c != "as is":
+            if c in both:
+                t[t != "elite"] = "small"
+                order = (both[c].sort_values(ascending=False, kind="mergesort")
+                         .index)
+                t.loc[order[:n_strong]] = "strong"
+                t.loc[order[n_strong:n_strong + n_medium]] = "medium"
+            elif c != "as is":
                 t[t == "medium"] = "small"
                 pick = (scores[c].sort_values(ascending=False, kind="mergesort")
                         .index[:n_medium])
@@ -140,8 +172,8 @@ def main():
     if not weeks:
         raise SystemExit("no live weeks to replay")
     print(f"{len(live[live['week'] > 0]):,} live graded props, weeks "
-          f"{weeks[0]} to {weeks[-1]}. Elite and strong are the same picks in "
-          f"every row below.")
+          f"{weeks[0]} to {weeks[-1]}. Elite is the same picks in every table "
+          f"below, and so is strong except in the two marked both.")
     print()
 
     summary = []
@@ -150,7 +182,7 @@ def main():
         print(f"MEDIUM CHOSEN BY: {c}")
         print(f"  {'week':<6}{'strong':>16}{'medium':>16}{'small':>16}"
               f"   medium over small?")
-        above = below = scored = under_strong = 0
+        above = below = scored = under_strong = strong_scored = 0
         for w in weeks:
             g = live[live["week"] == w]
             cell = {t: g[g["tier"] == t]["hit"] for t in ("strong", "medium", "small")}
@@ -166,8 +198,9 @@ def main():
                 else:
                     below += 1
                     mark = "no"
-                if len(cell["strong"]) >= 10 and (cell["medium"].mean()
-                                                  <= cell["strong"].mean()):
+            if len(cell["medium"]) >= 10 and len(cell["strong"]) >= 10:
+                strong_scored += 1
+                if cell["strong"].mean() >= cell["medium"].mean():
                     under_strong += 1
             print(row + f"   {mark}")
         print(f"    {'tier':<8}{'picks':>6}{'hit':>9}{'needed':>9}"
@@ -184,20 +217,22 @@ def main():
             print("    medium is mostly: " + ", ".join(
                 f"{k} {v:.0%}" for k, v in mix.items()))
         print()
-        summary.append((c, rates, above, scored, under_strong))
+        summary.append((c, rates, above, scored, under_strong, strong_scored))
 
-    print("THE QUESTION: is medium between strong and small?")
-    print(f"  {'chosen by':<10}{'strong':>9}{'medium':>9}{'small':>9}"
-          f"{'medium - small':>16}   weeks medium over small   ordered?")
-    for c, r, above, scored, under_strong in summary:
-        ordered = (r["strong"] >= r["medium"] > r["small"]
-                   and scored and above > scored / 2)
-        print(f"  {c:<10}{r['strong']:>9.1%}{r['medium']:>9.1%}"
-              f"{r['small']:>9.1%}{r['medium'] - r['small']:>+16.1%}"
-              f"   {above} of {scored:<21}{'yes' if ordered else 'no'}")
+    print("THE QUESTION: are the tiers in order?")
+    print(f"  {'chosen by':<13}{'elite':>8}{'strong':>8}{'medium':>8}{'small':>8}"
+          f"   strong>=medium   medium>small   ordered?")
+    for c, r, above, scored, under_strong, strong_scored in summary:
+        ordered = (r["elite"] > r["strong"] >= r["medium"] > r["small"]
+                   and scored and above > scored / 2
+                   and strong_scored and under_strong > strong_scored / 2)
+        print(f"  {c:<13}{r['elite']:>8.1%}{r['strong']:>8.1%}"
+              f"{r['medium']:>8.1%}{r['small']:>8.1%}"
+              f"   {f'{under_strong} of {strong_scored} wks':<17}"
+              f"{f'{above} of {scored} wks':<15}{'yes' if ordered else 'no'}")
     print()
-    print("ordered means strong at or above medium, medium above small on the "
-          "season, and medium above small in more than half the weeks.")
+    print("ordered means elite over strong, strong at or over medium, medium "
+          "over small, on the season and in more than half the weeks each.")
 
 
 if __name__ == "__main__":
