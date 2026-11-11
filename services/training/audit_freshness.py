@@ -940,7 +940,7 @@ def check_board_internal_consistency(engine):
     df = pd.read_sql(text("""
         SELECT player_name, market_code, line, projection_median, raw_edge,
                recommended_side, win_prob, expected_value, edge_tier,
-               price_american
+               price_american, negative_ev
         FROM prop_edges
         WHERE projection_median IS NOT NULL
           -- Only what the site can actually serve.
@@ -981,10 +981,33 @@ def check_board_internal_consistency(engine):
         # and an over whose corrected edge is zero is exactly what this site
         # says overs are worth. Bet rows that lose their edge are demoted by
         # the builder, so anything left here failing is a real fault.
-        "a bet does not beat its price": (
-            is_bet & (df["win_prob"] <= breakeven)),
-        "a bet has no expected value": is_bet & (df["expected_value"] <= 0),
     }
+    # What a bet under its price means depends on what the tiers rank on.
+    #
+    # Ranked on expected value, a bet with none is a contradiction and the
+    # builder demotes it, so one left on the board is a fault. Ranked on the
+    # gap, the builder keeps it and marks it negative_ev, because the price is
+    # the bettor's question and not the ranking's. These two checks went on
+    # failing those rows after the builder stopped demoting them: the first
+    # board of week 10 was failed over six elite picks that were exactly what
+    # the builder meant to publish. Under the gap ranking the fault is a pick
+    # under its price that does NOT carry the label.
+    import gap_tier
+    ranked_on_gap = gap_tier.ENABLED or bool(
+        gap_tier.V2_ENABLED and gap_tier.v2_thresholds())
+    under_price = is_bet & (df["win_prob"] <= breakeven)
+    if ranked_on_gap:
+        labelled = df["negative_ev"].astype("boolean").fillna(False).astype(bool)
+        problems["a bet under its price is not labelled negative EV"] = (
+            under_price & ~labelled)
+        n_kept = int((under_price & labelled).sum())
+        if n_kept:
+            print(f"  {n_kept} bet-tier pick(s) sit under their price, are "
+                  f"labelled negative EV and are kept. Tiers rank on the gap.")
+    else:
+        problems["a bet does not beat its price"] = under_price
+        problems["a bet has no expected value"] = (
+            is_bet & (df["expected_value"] <= 0))
     clean = True
     for label, mask in problems.items():
         n = int(mask.sum())
