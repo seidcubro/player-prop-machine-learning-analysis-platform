@@ -15,6 +15,7 @@ day. Matching therefore allows a +/- 1 day window and prefers the closest game.
 """
 
 import os
+import sys
 
 from sqlalchemy import create_engine, text
 
@@ -233,8 +234,127 @@ WHERE r.actual IS NULL
 """
 
 
+# Grade a player who took the field and recorded nothing.
+#
+# The main statement needs a stat line, and a receiver who plays 38 snaps and
+# is never thrown to does not have one. Every book settles that prop: the over
+# lost and the under won. The record was leaving it out. Through week 9 of 2026
+# that was 55 posted props, 46 of them overs (research_thin_role.py), so the
+# hole sat almost entirely on one side and flattered it. Seven were elite picks
+# and six of those were losses. Van Jefferson over 1.5 catches on 12 November,
+# posted as an elite pick and caught none, is the one that showed it.
+#
+# A snap on offense is the test. No snap row means he did not play, the bet was
+# void, and leaving it ungraded is right. The week is pinned by the kickoff
+# date, because the snap counts carry a week and no date.
+#
+# It only adds rows. A real stat line that turns up later replaces the zero,
+# because the main statement updates on conflict and this one does nothing.
+ZERO_SQL = """
+INSERT INTO prop_edge_results (
+    edge_id, player_id, player_name, game_date, market_code, line, projection,
+    projection_median,
+    recommended_side, win_prob, win_prob_raw, win_prob_model, edge_tier, actual, hit,
+    home_team, away_team, bookmaker_title, price_american,
+    expected_value, ev_per_unit, best_bet,
+    season
+)
+SELECT DISTINCT ON (g.player_id, g.game_date, e.market_code)
+    e.id,
+    g.player_id,
+    e.player_name,
+    g.game_date,
+    e.market_code,
+    e.line,
+    e.projection,
+    e.projection_median,
+    e.recommended_side,
+    e.win_prob,
+    e.win_prob_raw,
+    e.win_prob_model,
+    e.edge_tier,
+    0::float8,
+    CASE
+        WHEN e.line = 0 THEN NULL
+        WHEN e.recommended_side = 'over'  THEN FALSE
+        WHEN e.recommended_side = 'under' THEN TRUE
+        ELSE NULL
+    END,
+    e.home_team,
+    e.away_team,
+    e.bookmaker_title,
+    e.price_american,
+    e.expected_value,
+    e.ev_per_unit,
+    e.best_bet,
+    EXTRACT(YEAR FROM g.game_date)::int
+        - CASE WHEN EXTRACT(MONTH FROM g.game_date) < 3 THEN 1 ELSE 0 END
+FROM prop_edges_history e
+JOIN LATERAL (
+    SELECT sc.player_id, cal.game_date
+    FROM players p
+    JOIN snap_counts sc ON sc.player_id = p.external_id
+                       AND sc.offense_snaps > 0
+    JOIN (
+        SELECT DISTINCT season, week, game_date FROM player_game_stats_app
+    ) cal ON cal.season = sc.season AND cal.week = sc.week
+    WHERE lower(replace(replace(p.name, '.', ''), '-', ' ')) =
+          lower(replace(replace(e.player_name, '.', ''), '-', ' '))
+      AND cal.game_date BETWEEN (e.commence_time AT TIME ZONE 'America/New_York')::date - 1
+                            AND (e.commence_time AT TIME ZONE 'America/New_York')::date + 1
+    ORDER BY abs(cal.game_date - (e.commence_time AT TIME ZONE 'America/New_York')::date)
+    LIMIT 1
+) g ON TRUE
+WHERE e.commence_time IS NOT NULL
+  AND NOT EXISTS (
+        SELECT 1 FROM prop_edge_results r
+        WHERE r.player_id = g.player_id
+          AND r.market_code = e.market_code
+          AND r.game_date BETWEEN g.game_date - 1 AND g.game_date + 1)
+ORDER BY g.player_id, g.game_date, e.market_code,
+         e.best_bet DESC, e.expected_value DESC NULLS LAST, e.id
+ON CONFLICT (player_id, game_date, market_code) DO NOTHING
+RETURNING player_name, game_date, market_code, recommended_side, line,
+          edge_tier, hit;
+"""
+
+
+def grade_zeros(engine, keep):
+    """Add the played-and-recorded-nothing picks. With keep False it shows
+    what it would add and rolls back."""
+    conn = engine.connect()
+    tx = conn.begin()
+    try:
+        rows = conn.execute(text(ZERO_SQL)).mappings().all()
+        if keep:
+            tx.commit()
+        else:
+            tx.rollback()
+    except Exception as exc:
+        tx.rollback()
+        print(f"grading at zero failed and was skipped: {exc}")
+        return
+    finally:
+        conn.close()
+    if not rows:
+        print("no one played without a stat line")
+        return
+    lost = sum(1 for r in rows if r["hit"] is False)
+    won = sum(1 for r in rows if r["hit"] is True)
+    verb = "graded" if keep else "would grade"
+    print(f"{verb} {len(rows)} prop(s) at zero for players who took a snap and "
+          f"recorded nothing: {lost} lost, {won} won")
+    if not keep:
+        for r in sorted(rows, key=lambda r: (str(r["game_date"]), r["player_name"])):
+            print(f"  {r['game_date']}  {r['player_name']:<24}{r['market_code']:<18}"
+                  f"{r['recommended_side']:<6}{float(r['line']):>6}  {r['edge_tier']}")
+
+
 def main():
     engine = create_engine(DATABASE_URL, future=True)
+    if "--preview-zero" in sys.argv:
+        grade_zeros(engine, keep=False)
+        return
     with engine.begin() as conn:
         n_edges = conn.execute(text("SELECT count(*) FROM prop_edges")).scalar()
         before = conn.execute(text(
@@ -243,6 +363,9 @@ def main():
         pending = conn.execute(text(PENDING_SQL)).rowcount
         if pending:
             print(f"filled in {pending} previously ungraded row(s)")
+    # Its own transaction, so a fault here cannot undo the grades above.
+    grade_zeros(engine, keep=True)
+    with engine.begin() as conn:
         live = conn.execute(text(
             "SELECT count(*) FROM prop_edge_results WHERE source = 'live'")).scalar()
         total = conn.execute(text("SELECT count(*) FROM prop_edge_results")).scalar()
