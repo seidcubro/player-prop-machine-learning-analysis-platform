@@ -181,7 +181,37 @@ export default function TrackRecord() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // The page opens on the season being played.
+  //
+  // It used to open on every season pooled, and nine in ten of those picks
+  // were rebuilt after the fact under rules that have since been replaced.
+  // A visitor asking how the picks have done means the ones that were
+  // published, so that is the first answer. "All seasons" is still the first
+  // entry in the selector and nothing is taken out of the record.
+  //
+  // The newest season is read from the record, not written here, so this does
+  // not need touching next September. Nothing else loads until it is known,
+  // which is one small request and saves drawing the pooled view first and
+  // then replacing it.
+  const [ready, setReady] = useState(false);
   useEffect(() => {
+    let cancelled = false;
+    fetchSeasonRecord("all")
+      .then((s) => {
+        if (cancelled) return;
+        const latest = s.seasons.reduce(
+          (m, r) => (r.picks > 0 ? Math.max(m, r.season) : m), 0);
+        if (latest) setSeason(latest);
+      })
+      .catch(() => undefined)
+      .finally(() => !cancelled && setReady(true));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
     let cancelled = false;
     setLoading(true);
     setErr(null);
@@ -207,7 +237,7 @@ export default function TrackRecord() {
     return () => {
       cancelled = true;
     };
-  }, [season, source]);
+  }, [season, source, ready]);
 
   const seasonOptions = useMemo(() => {
     const years = [...new Set(seasons.map((s) => s.season))].sort((a, b) => b - a);
@@ -255,9 +285,11 @@ export default function TrackRecord() {
       <div className="ps-hero">
         <PageTitle lead="Track" accent="Record" />
         <p>
-          Every pick the model has made, graded against what actually happened.
-          Seasons before this one are reconstructed with models refit on earlier
-          data only, so nothing here has seen the season it is being judged on.
+          Every pick, graded against what actually happened. The page opens on
+          the season being played, where each pick was published before
+          kickoff. Earlier seasons are in the season selector: they are
+          reconstructed with models refit on earlier data only, so nothing
+          there has seen the season it is being judged on.
         </p>
       </div>
 
@@ -291,13 +323,23 @@ export default function TrackRecord() {
         * reconstructed rows outnumber the published ones by more than a hundred
         * to one, so "All picks" reads as a live record while being almost
         * entirely a backtest. Saying so is cheaper than removing the view. */}
-      {source === "all" && !loading && sourceSplit.total > 0 && (
-        <p className="ps-note">
-          All picks is {sourceSplit.backtest.toLocaleString()} backtested and{" "}
-          {sourceSplit.live.toLocaleString()} published live. The two are
-          different claims; use the source selector to see either on its own.
-        </p>
-      )}
+      {/* Only said when there is something to say. A season that was published
+        * in full needs no note, and "0 backtested and 3,070 published live"
+        * read like a fault on the view the page now opens with. */}
+      {source === "all" && !loading && sourceSplit.backtest > 0 &&
+        (sourceSplit.live > 0 ? (
+          <p className="ps-note">
+            All picks is {sourceSplit.backtest.toLocaleString()} backtested and{" "}
+            {sourceSplit.live.toLocaleString()} published live. The two are
+            different claims; use the source selector to see either on its own.
+          </p>
+        ) : (
+          <p className="ps-note">
+            Every pick in this view was reconstructed after the fact, with
+            models that had only seen earlier seasons. None of it was published
+            before kickoff.
+          </p>
+        ))}
 
       {err && <div className="ps-empty">Could not load the record: {err}</div>}
 

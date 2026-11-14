@@ -152,13 +152,25 @@ function at(i: number): React.CSSProperties {
 
 /* ------------------------------------------------------------ left leaf */
 
+/**
+ * The account on the cover is this season's, and only what was published
+ * before kickoff.
+ *
+ * It used to be every season pooled, which was mostly seasons rebuilt after
+ * the fact: picks nobody was shown, made under rules that have since been
+ * replaced. That is a fair test of a method and a poor answer to "how have
+ * your picks done". The pooled figure is still here, one sentence down, and
+ * every season is set out separately further down the page and on the record.
+ */
 function PostedAccount({
   tiers,
-  live,
+  season,
+  all,
   failed,
 }: {
   tiers: TierRecord[] | null;
-  live: Totals | null;
+  season: number | null;
+  all: Totals | null;
   failed: boolean;
 }) {
   const rows = tiers ? sortTiers(tiers) : [];
@@ -167,7 +179,11 @@ function PostedAccount({
     <div className="ld-leaf ld-leaf-left">
       <header className="ld-leaf-head">
         <h2>Posted account</h2>
-        <p>Every graded pick, by confidence tier</p>
+        <p>
+          {season
+            ? `Every pick published in the ${season} season, by confidence tier`
+            : "Every graded pick, by confidence tier"}
+        </p>
       </header>
       {failed ? (
         <p className="ld-leaf-note">
@@ -265,14 +281,17 @@ function PostedAccount({
           </div>
         </dl>
       )}
-      {live && live.picks > 0 && (
+      {season && all && all.picks > sum.picks && (
         <p className="ld-leaf-note">
-          The account above includes seasons rebuilt after the fact, using
-          models that had only seen earlier games. Counting only picks
-          published before kickoff: <b>{live.picks.toLocaleString()}</b> picks,{" "}
-          <b>{pct(live.hit)}</b> won against <b>{pct(live.needed)}</b> needed,
-          a difference of{" "}
-          <Acct value={diff(live.hit, live.needed)} scale={100} plus /> points.
+          This is the {season} season alone, published before kickoff and
+          graded after the games. Earlier seasons were rebuilt after the fact,
+          using models that had only seen earlier games. Counting those as
+          well: <b>{all.picks.toLocaleString()}</b> picks,{" "}
+          <b>{pct(all.hit)}</b> won against <b>{pct(all.needed)}</b> needed, a
+          difference of{" "}
+          <Acct value={diff(all.hit, all.needed)} scale={100} plus /> points.
+          Each season is set out separately{" "}
+          <Link to="/record">on the record</Link>.
         </p>
       )}
     </div>
@@ -419,7 +438,8 @@ const STRUCK: Array<[string, string]> = [
 export default function Landing() {
   const [tiers, setTiers] = useState<TierRecord[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [live, setLive] = useState<Totals | null>(null);
+  const [all, setAll] = useState<Totals | null>(null);
+  const [season, setSeason] = useState<number | null>(null);
   const [seasons, setSeasons] = useState<SeasonRecord[] | null>(null);
   const [summary, setSummary] = useState<EdgesSummary | null>(null);
   const [edges, setEdges] = useState<PropEdge[] | null>(null);
@@ -427,11 +447,21 @@ export default function Landing() {
 
   useEffect(() => {
     let dead = false;
-    fetchTierRecord()
-      .then((r) => !dead && setTiers(r.tiers))
+    // The newest season with published picks is the account on the cover.
+    // If there is none yet, the pooled record stands in and says what it is.
+    fetchSeasonRecord("live")
+      .then((r) => {
+        const latest =
+          r.seasons.reduce((m, s) => (s.picks > 0 ? Math.max(m, s.season) : m), 0) ||
+          null;
+        if (dead) return undefined;
+        setSeason(latest);
+        return latest ? fetchTierRecord(latest, "live") : fetchTierRecord();
+      })
+      .then((r) => r && !dead && setTiers(r.tiers))
       .catch(() => !dead && setFailed(true));
-    fetchTierRecord(undefined, "live")
-      .then((r) => !dead && setLive(total(r.tiers)))
+    fetchTierRecord()
+      .then((r) => !dead && setAll(total(r.tiers)))
       .catch(() => undefined);
     fetchSeasonRecord("all", "elite")
       .then((r) => !dead && setSeasons(r.seasons))
@@ -532,7 +562,7 @@ export default function Landing() {
       </section>
 
       <section className="ld-book" aria-label="The book, open">
-        <PostedAccount tiers={tiers} live={live} failed={failed} />
+        <PostedAccount tiers={tiers} season={season} all={all} failed={failed} />
         <OpenEntries edges={edges} pencil={pencil} summary={summary} />
       </section>
 
