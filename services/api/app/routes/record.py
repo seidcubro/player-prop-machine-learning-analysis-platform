@@ -17,6 +17,7 @@ picks is noise, and a number without its `n` invites exactly that mistake.
 
 from fastapi import APIRouter, Query
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from ..db import engine
 
@@ -183,6 +184,37 @@ def record_by_tier(
     for r in rows:
         r["roi"] = (r["units"] / r["picks"]) if r["picks"] else None
     rows.sort(key=lambda r: order.get(r["edge_tier"], 9))
+    return {"ok": True, "tiers": rows}
+
+
+@router.get("/record/replay")
+def record_replay():
+    """This season's picks, ranked the way the board ranks them today.
+
+    Not the published record, and never served as if it were. The tiering rule
+    has changed four times this season, so the tier a pick was published with
+    says how an old rule did. This is the other question: the same picks at
+    the same prices, tiered by today's rule, each week decided only from what
+    was known before it. `replay_current_rules.py` computes it after every
+    grade and stores it.
+
+    `lo` and `hi` are the interval on won minus needed. The site quotes the
+    figure only while `lo` is above zero, so it drops off the cover by itself
+    in a week when the edge is no longer shown.
+
+    An empty list means the replay has not been stored yet, which is the state
+    of a fresh database and not an error.
+    """
+    try:
+        rows = _rows("""
+            SELECT season, tier, picks, hit, needed, margin, lo, hi,
+                   week_first, week_last, computed_at
+            FROM replay_record
+            WHERE season = (SELECT MAX(season) FROM replay_record)
+            ORDER BY tier
+        """, {})
+    except SQLAlchemyError:
+        rows = []
     return {"ok": True, "tiers": rows}
 
 

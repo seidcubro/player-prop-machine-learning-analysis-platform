@@ -43,7 +43,9 @@ backtest_production's job and takes hours. So this answers "how would today's
 TIERING have ranked the picks we made", not "what would today's model have
 picked". The first question is the one the tier labels are a promise about.
 
-Read-only.
+It reads the record and changes none of it. The one thing it writes is the
+walk-forward summary, four rows in replay_record, which is what the cover of
+the site quotes. REPLAY_SAVE=0 turns that off.
 
     docker compose run --rm training python replay_current_rules.py
 """
@@ -226,6 +228,69 @@ def report(title, d, col):
     print()
 
 
+def save(eng, live):
+    """Store the walk-forward result so the site can quote it.
+
+    The cover used to have two honest choices and neither was good. The pooled
+    record is mostly seasons rebuilt after the fact. This season's record as
+    published mixes four tiering rules, three of them retired. Neither says
+    how the board as it stands today has done, which is what a visitor is
+    asking. The walk-forward replay does: the picks that were really published
+    at the prices really offered, ranked the way the board ranks now, each
+    week using only what was known before it.
+
+    It is a replay and the site says so, with the published record under it.
+    The interval is stored beside the figure so the site can decline to quote
+    it in a week when it no longer clears zero.
+    """
+    rows = []
+    for t in TIERS:
+        s = live[(live["tier_wf"] == t) & live["needed"].notna()]
+        if len(s) < 30:
+            continue
+        diff = (s["hit"] - s["needed"]).to_numpy(dtype=float)
+        r, lo, hi = S.clustered_bootstrap(
+            lambda i: float(np.mean(diff[i])), s["cluster"].to_numpy(),
+            n_boot=2000)
+        rows.append({
+            "season": SEASON, "tier": t, "picks": int(len(s)),
+            "hit": float(s["hit"].astype(float).mean()),
+            "needed": float(s["needed"].mean()),
+            "margin": float(r), "lo": float(lo), "hi": float(hi),
+            "week_first": int(s["week"].min()), "week_last": int(s["week"].max()),
+        })
+    if not rows:
+        print("nothing stored: no tier had 30 priced picks")
+        return
+    with eng.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS replay_record (
+                season      INT NOT NULL,
+                tier        TEXT NOT NULL,
+                picks       INT NOT NULL,
+                hit         FLOAT8 NOT NULL,
+                needed      FLOAT8 NOT NULL,
+                margin      FLOAT8 NOT NULL,
+                lo          FLOAT8 NOT NULL,
+                hi          FLOAT8 NOT NULL,
+                week_first  INT NOT NULL,
+                week_last   INT NOT NULL,
+                computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (season, tier)
+            )
+        """))
+        conn.execute(text("DELETE FROM replay_record WHERE season = :s"),
+                     {"s": SEASON})
+        conn.execute(text("""
+            INSERT INTO replay_record (season, tier, picks, hit, needed, margin,
+                                       lo, hi, week_first, week_last)
+            VALUES (:season, :tier, :picks, :hit, :needed, :margin,
+                    :lo, :hi, :week_first, :week_last)
+        """), rows)
+    print(f"stored the walk-forward result for {len(rows)} tier(s) in "
+          f"replay_record")
+
+
 def main():
     eng = create_engine(bp.DATABASE_URL, future=True)
     d = load(eng)
@@ -362,6 +427,12 @@ def main():
             print("  That interval contains zero, so on these picks we have")
             print("  NOT shown we know better than the book. A high hit rate")
             print("  on heavily priced props is mostly the price, not us.")
+
+    if os.getenv("REPLAY_SAVE", "1") != "0":
+        try:
+            save(eng, live)
+        except Exception as exc:
+            print(f"could not store the result, the site keeps the last one: {exc}")
 
 
 if __name__ == "__main__":

@@ -660,6 +660,30 @@ export type CalibrationBucket = {
   actual: number;
 };
 
+/**
+ * This season's picks re-tiered by the rule the board uses today, walking
+ * forward a week at a time. A replay, not the published record: the two are
+ * always shown together and never merged.
+ */
+export type ReplayRecord = {
+  season: number;
+  tier: string;
+  picks: number;
+  hit: number;
+  needed: number;
+  /** Won minus needed, with the interval around it. */
+  margin: number;
+  lo: number;
+  hi: number;
+  week_first: number;
+  week_last: number;
+  computed_at: string;
+};
+
+export async function fetchReplay() {
+  return http<{ ok: boolean; tiers: ReplayRecord[] }>(`${API_BASE}/record/replay`);
+}
+
 export async function fetchSeasonRecord(
   source: RecordSource = "all",
   /** Restrict to one tier. The landing page quotes elite, so it asks for elite. */

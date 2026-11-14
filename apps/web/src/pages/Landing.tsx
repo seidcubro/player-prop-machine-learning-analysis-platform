@@ -23,11 +23,13 @@ import {
   fetchEdges,
   fetchEdgesSummary,
   fetchProjections,
+  fetchReplay,
   fetchSeasonRecord,
   fetchTierRecord,
   type EdgesSummary,
   type Projection,
   type PropEdge,
+  type ReplayRecord,
   type SeasonRecord,
   type TierRecord,
 } from "../api";
@@ -166,15 +168,22 @@ function PostedAccount({
   tiers,
   season,
   all,
+  replay,
   failed,
 }: {
   tiers: TierRecord[] | null;
   season: number | null;
   all: Totals | null;
+  replay: ReplayRecord | null;
   failed: boolean;
 }) {
   const rows = tiers ? sortTiers(tiers) : [];
   const sum = total(rows);
+  // The lead line is the board as it stands today. It is quoted only while
+  // its interval clears zero, so a week that stops showing an edge takes the
+  // claim off the cover without anyone having to remember to.
+  const lead =
+    replay && replay.lo > 0 && (!season || replay.season === season) ? replay : null;
   return (
     <div className="ld-leaf ld-leaf-left">
       <header className="ld-leaf-head">
@@ -185,6 +194,22 @@ function PostedAccount({
             : "Every graded pick, by confidence tier"}
         </p>
       </header>
+      {lead && (
+        <div className="ld-claim">
+          <p className="ld-claim-line">
+            Elite picks this season were right{" "}
+            <b className="ld-claim-won">{pct(lead.hit)}</b> of the time. The
+            prices needed <b>{pct(lead.needed)}</b>.
+          </p>
+          <p className="ld-claim-note">
+            {lead.picks.toLocaleString()} picks, weeks {lead.week_first} to{" "}
+            {lead.week_last}, tiered by the rule the board uses today, each
+            week decided only from what was known before it. The table below
+            is the same season as it was published, under the rules of the
+            day.
+          </p>
+        </div>
+      )}
       {failed ? (
         <p className="ld-leaf-note">
           The record did not load. Nothing is shown in its place, because a
@@ -440,6 +465,7 @@ export default function Landing() {
   const [failed, setFailed] = useState(false);
   const [all, setAll] = useState<Totals | null>(null);
   const [season, setSeason] = useState<number | null>(null);
+  const [replay, setReplay] = useState<ReplayRecord | null>(null);
   const [seasons, setSeasons] = useState<SeasonRecord[] | null>(null);
   const [summary, setSummary] = useState<EdgesSummary | null>(null);
   const [edges, setEdges] = useState<PropEdge[] | null>(null);
@@ -462,6 +488,9 @@ export default function Landing() {
       .catch(() => !dead && setFailed(true));
     fetchTierRecord()
       .then((r) => !dead && setAll(total(r.tiers)))
+      .catch(() => undefined);
+    fetchReplay()
+      .then((r) => !dead && setReplay(r.tiers.find((t) => t.tier === "elite") ?? null))
       .catch(() => undefined);
     fetchSeasonRecord("all", "elite")
       .then((r) => !dead && setSeasons(r.seasons))
@@ -562,7 +591,13 @@ export default function Landing() {
       </section>
 
       <section className="ld-book" aria-label="The book, open">
-        <PostedAccount tiers={tiers} season={season} all={all} failed={failed} />
+        <PostedAccount
+          tiers={tiers}
+          season={season}
+          all={all}
+          replay={replay}
+          failed={failed}
+        />
         <OpenEntries edges={edges} pencil={pencil} summary={summary} />
       </section>
 

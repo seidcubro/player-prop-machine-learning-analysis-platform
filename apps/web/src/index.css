@@ -1649,6 +1649,34 @@ tr:hover .ps-avatar, .ps-playercard:hover .ps-avatar {
 .ld-leaf-head h2 { margin: 0; font-size: 1.7rem; }
 .ld-leaf-head p { margin: 0; font-family: var(--font-serif); font-style: italic; color: var(--text-dim); }
 
+/* The lead line of the posted account: a sentence in the ledger's own hand,
+   with the two figures set heavier. Not a metric card. */
+.ld-claim {
+  padding: var(--s5) 0 var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+.ld-claim-line {
+  margin: 0;
+  max-width: 24ch;
+  font-family: var(--font-serif);
+  font-size: clamp(1.45rem, 1.1rem + 1.5vw, 2rem);
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  color: var(--text);
+}
+/* Proportional figures: these sit in a sentence, and Besley's tabular zero is
+   drawn lighter than the digits beside it at this weight. */
+.ld-claim-line b { font-weight: 800; font-variant-numeric: normal; }
+.ld-claim-won { color: var(--accent); }
+.ld-claim-note {
+  margin: var(--s3) 0 0;
+  max-width: 62ch;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
 .ld-scroll { overflow-x: auto; }
 .ld-ledger { width: 100%; border-collapse: collapse; }
 .ld-ledger th, .ld-ledger td {

@@ -819,6 +819,13 @@ if [ "$FAST" = "0" ]; then
   log "grade whatever has been played"
   $COMPOSE run --rm training python grade_edges.py
 
+  # The figure the cover of the site leads with, recomputed from what was just
+  # graded. A failure here must not stop the run: the site keeps the last
+  # stored figure, which is a day old and still true of the weeks it covers.
+  log "replay the season under today's rules"
+  $COMPOSE run --rm training python replay_current_rules.py \
+    || log "replay failed, the site keeps the last stored figure"
+
   # Regenerate the figures the site states as fact, from the week just graded.
   #
   # Every run that grades, not the weekly alone.
