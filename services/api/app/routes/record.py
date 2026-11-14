@@ -198,9 +198,9 @@ def record_replay():
     was known before it. `replay_current_rules.py` computes it after every
     grade and stores it.
 
-    `lo` and `hi` are the interval on won minus needed. The site quotes the
-    figure only while `lo` is above zero, so it drops off the cover by itself
-    in a week when the edge is no longer shown.
+    `lo` and `hi` are the interval on won minus needed. The site says in so
+    many words when that interval includes zero, so the figure is never
+    quoted as proof of more than it shows.
 
     An empty list means the replay has not been stored yet, which is the state
     of a fresh database and not an error.
@@ -208,7 +208,7 @@ def record_replay():
     try:
         rows = _rows("""
             SELECT season, tier, picks, hit, needed, margin, lo, hi,
-                   week_first, week_last, computed_at
+                   units, roi, week_first, week_last, computed_at
             FROM replay_record
             WHERE season = (SELECT MAX(season) FROM replay_record)
             ORDER BY tier

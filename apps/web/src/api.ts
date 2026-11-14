@@ -675,6 +675,8 @@ export type ReplayRecord = {
   margin: number;
   lo: number;
   hi: number;
+  units: number;
+  roi: number;
   week_first: number;
   week_last: number;
   computed_at: string;
@@ -682,6 +684,52 @@ export type ReplayRecord = {
 
 export async function fetchReplay() {
   return http<{ ok: boolean; tiers: ReplayRecord[] }>(`${API_BASE}/record/replay`);
+}
+
+const TIER_RANK = ["elite", "strong", "medium", "small"];
+
+/** The tiers as the board assigns them today, for every pick of the season. */
+export type TodayTiers = {
+  season: number;
+  weekFirst: number;
+  weekLast: number;
+  elite: ReplayRecord | null;
+  rows: TierRecord[];
+};
+
+/**
+ * The season's picks tiered by the rule in force now.
+ *
+ * Every tier table on the site reads this. The tier a pick was published
+ * with came from whichever of four rules was live that week, three of them
+ * since replaced, so a table of those labels describes rules nobody is
+ * offered any more. The picks, sides, lines, prices and results are the
+ * published ones; only the label is today's.
+ *
+ * Resolves to null when the replay has not been stored, and callers then fall
+ * back to the labels as published.
+ */
+export async function fetchTodayTiers(): Promise<TodayTiers | null> {
+  const r = await fetchReplay();
+  if (!r.tiers.length) return null;
+  return {
+    season: r.tiers[0].season,
+    weekFirst: Math.min(...r.tiers.map((t) => t.week_first)),
+    weekLast: Math.max(...r.tiers.map((t) => t.week_last)),
+    elite: r.tiers.find((t) => t.tier === "elite") ?? null,
+    // Most confident first, which is not the order the names sort in.
+    rows: [...r.tiers]
+      .sort((a, b) => TIER_RANK.indexOf(a.tier) - TIER_RANK.indexOf(b.tier))
+      .map((t) => ({
+      edge_tier: t.tier,
+      picks: t.picks,
+      hit_rate: t.hit,
+      breakeven: t.needed,
+      model_predicted: null,
+      units: t.units,
+      roi: t.roi,
+    })),
+  };
 }
 
 export async function fetchSeasonRecord(

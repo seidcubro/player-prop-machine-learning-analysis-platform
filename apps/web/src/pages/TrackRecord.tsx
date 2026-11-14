@@ -45,6 +45,8 @@ import {
   type RecordSource,
   type SeasonRecord,
   type TierRecord,
+  type TodayTiers,
+  fetchTodayTiers,
 } from "../api";
 
 /**
@@ -172,6 +174,7 @@ export default function TrackRecord() {
   const [seasons, setSeasons] = useState<SeasonRecord[]>([]);
   const [markets, setMarkets] = useState<MarketRecord[]>([]);
   const [tiers, setTiers] = useState<TierRecord[]>([]);
+  const [today, setToday] = useState<TodayTiers | null>(null);
   const [best, setBest] = useState<LeaderRow[]>([]);
   const [worst, setWorst] = useState<LeaderRow[]>([]);
   const [buckets, setBuckets] = useState<CalibrationBucket[]>([]);
@@ -196,6 +199,9 @@ export default function TrackRecord() {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    fetchTodayTiers()
+      .then((t) => !cancelled && setToday(t))
+      .catch(() => undefined);
     fetchSeasonRecord("all")
       .then((s) => {
         if (cancelled) return;
@@ -238,6 +244,13 @@ export default function TrackRecord() {
       cancelled = true;
     };
   }, [season, source, ready]);
+
+  // The tier table follows the rule in force now wherever that is the
+  // question being asked: this season, published picks. Older seasons and
+  // the pooled view keep the labels they were rebuilt with.
+  const todayView =
+    today !== null && season === today.season && source !== "backtest";
+  const tierRows = todayView ? today!.rows : tiers;
 
   const seasonOptions = useMemo(() => {
     const years = [...new Set(seasons.map((s) => s.season))].sort((a, b) => b - a);
@@ -496,14 +509,25 @@ export default function TrackRecord() {
             * record for picks the board never actually recommended, which is
             * the one thing a track record must not do. So the labels stay as
             * published and the caveat goes on the page. */}
-          <p className="ps-note">
-            Each pick carries the tier it was published with. The tiering rule
-            has changed during the life of this record, most recently on{" "}
-            {TIER_RULE_CHANGED}, so these rows pool picks labelled by more than
-            one rule and do not describe the badge you see on today&rsquo;s
-            board. Old labels are never rewritten: doing that would claim a
-            record for picks we did not actually make.
-          </p>
+          {todayView ? (
+            <p className="ps-note">
+              These are this season&rsquo;s picks under the tiers
+              today&rsquo;s rule gives them, weeks {today!.weekFirst} to{" "}
+              {today!.weekLast}, each week ranked only on what was known
+              before it. The picks, lines, prices and results are the ones
+              published. Only the label is today&rsquo;s, because the rule that
+              assigns it changed during the season, most recently on{" "}
+              {TIER_RULE_CHANGED}.
+            </p>
+          ) : (
+            <p className="ps-note">
+              Each pick carries the tier it was published with. The tiering rule
+              has changed during the life of this record, most recently on{" "}
+              {TIER_RULE_CHANGED}, so these rows pool picks labelled by more than
+              one rule and do not describe the badge you see on today&rsquo;s
+              board.
+            </p>
+          )}
           <div className="ps-tablewrap">
             <table className="ps-table is-stats">
               <thead>
@@ -517,7 +541,7 @@ export default function TrackRecord() {
                 </tr>
               </thead>
               <tbody>
-                {tiers.map((t) => (
+                {tierRows.map((t) => (
                   <tr key={t.edge_tier}>
                     <td data-label="Tier">
                       <span className={`tier tier-${t.edge_tier}`}>{t.edge_tier === "none" ? "no tier" : t.edge_tier}</span>

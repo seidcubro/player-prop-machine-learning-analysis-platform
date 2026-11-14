@@ -81,6 +81,12 @@ def load(eng):
         ) g ON TRUE
         WHERE r.hit IS NOT NULL AND r.line IS NOT NULL
           AND r.projection_median IS NOT NULL
+        -- A fixed order. Without one the rows came back however Postgres
+        -- found them, ties at a tier boundary went to whichever row arrived
+        -- first, and two runs a day apart on the same 3,070 picks put elite
+        -- at 62.8% and then 62.4%. A published figure cannot move when
+        -- nothing was played.
+        ORDER BY r.game_date, r.player_name, r.market_code, r.line, r.edge_id
     """), eng, params={"season": SEASON})
     d = d.drop_duplicates(subset=["game_date", "player_name", "market_code",
                                   "line"]).reset_index(drop=True)
@@ -252,11 +258,16 @@ def save(eng, live):
         r, lo, hi = S.clustered_bootstrap(
             lambda i: float(np.mean(diff[i])), s["cluster"].to_numpy(),
             n_boot=2000)
+        price = pd.to_numeric(s["price_american"], errors="coerce")
+        won = s["hit"].astype(float) > 0
+        units = float(np.where(
+            won, np.where(price > 0, price / 100.0, 100.0 / (-price)), -1.0).sum())
         rows.append({
             "season": SEASON, "tier": t, "picks": int(len(s)),
             "hit": float(s["hit"].astype(float).mean()),
             "needed": float(s["needed"].mean()),
             "margin": float(r), "lo": float(lo), "hi": float(hi),
+            "units": units, "roi": units / len(s),
             "week_first": int(s["week"].min()), "week_last": int(s["week"].max()),
         })
     if not rows:
@@ -273,6 +284,8 @@ def save(eng, live):
                 margin      FLOAT8 NOT NULL,
                 lo          FLOAT8 NOT NULL,
                 hi          FLOAT8 NOT NULL,
+                units       FLOAT8 NOT NULL,
+                roi         FLOAT8 NOT NULL,
                 week_first  INT NOT NULL,
                 week_last   INT NOT NULL,
                 computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -283,9 +296,9 @@ def save(eng, live):
                      {"s": SEASON})
         conn.execute(text("""
             INSERT INTO replay_record (season, tier, picks, hit, needed, margin,
-                                       lo, hi, week_first, week_last)
+                                       lo, hi, units, roi, week_first, week_last)
             VALUES (:season, :tier, :picks, :hit, :needed, :margin,
-                    :lo, :hi, :week_first, :week_last)
+                    :lo, :hi, :units, :roi, :week_first, :week_last)
         """), rows)
     print(f"stored the walk-forward result for {len(rows)} tier(s) in "
           f"replay_record")
@@ -326,7 +339,20 @@ def main():
         prior = live[live["week"] < w]
         cfg = decide(prior, back)
         idx = live.index[live["week"] == w]
-        live.loc[idx, "tier_wf"] = tier_week(live.loc[idx], cfg).values
+        labels = tier_week(live.loc[idx], cfg).tolist()
+        # Strong and medium the way the board cuts them now: from everything
+        # under elite, every market together, by the price. Without this the
+        # replay was tiering strong and medium by gap bands, a rule the board
+        # dropped on 10 November, and calling it today's.
+        #
+        # One difference from the board is left in and is small: the board
+        # keeps picks at even money or worse out of the ranking, and the
+        # record does not store that mark, so here every pick is eligible.
+        if gap_tier.PRICE_TIERS:
+            implied = [None if pd.isna(v) else float(v)
+                       for v in live.loc[idx, "needed"]]
+            labels = gap_tier.recut_by_price(labels, implied, [True] * len(idx))
+        live.loc[idx, "tier_wf"] = labels
         print(f"  week {w}: fitted on {len(prior):,} live rows -> "
               + (", ".join(f"{k} ({v['direction']})" for k, v in sorted(cfg.items()))
                  or "nothing ranked, all flat"))

@@ -23,14 +23,14 @@ import {
   fetchEdges,
   fetchEdgesSummary,
   fetchProjections,
-  fetchReplay,
   fetchSeasonRecord,
+  fetchTodayTiers,
   fetchTierRecord,
   type EdgesSummary,
   type Projection,
   type PropEdge,
-  type ReplayRecord,
   type SeasonRecord,
+  type TodayTiers,
   type TierRecord,
 } from "../api";
 import { Acct, Arrow } from "../components/Acct";
@@ -155,42 +155,45 @@ function at(i: number): React.CSSProperties {
 /* ------------------------------------------------------------ left leaf */
 
 /**
- * The account on the cover is this season's, and only what was published
- * before kickoff.
+ * The account on the cover is this season's picks, tiered by the rule the
+ * board uses today.
  *
- * It used to be every season pooled, which was mostly seasons rebuilt after
- * the fact: picks nobody was shown, made under rules that have since been
- * replaced. That is a fair test of a method and a poor answer to "how have
- * your picks done". The pooled figure is still here, one sentence down, and
- * every season is set out separately further down the page and on the record.
+ * It has been two other things. First every season pooled, which was mostly
+ * seasons rebuilt after the fact. Then this season with each pick under the
+ * tier it was published with, which pooled four tiering rules, three of them
+ * retired, and so described a board nobody is offered. What a visitor wants
+ * to know is how the board in front of them has done, and this is that:
+ * every published pick, at the line and price it was published at, with
+ * today's label, each week ranked only on what was known before it.
+ *
+ * Until that has been stored once, the labels as published stand in.
  */
 function PostedAccount({
   tiers,
   season,
-  all,
-  replay,
+  today,
   failed,
 }: {
   tiers: TierRecord[] | null;
   season: number | null;
-  all: Totals | null;
-  replay: ReplayRecord | null;
+  today: TodayTiers | null;
   failed: boolean;
 }) {
-  const rows = tiers ? sortTiers(tiers) : [];
+  const rows = today ? sortTiers(today.rows) : tiers ? sortTiers(tiers) : [];
   const sum = total(rows);
-  // The lead line is the board as it stands today. It is quoted only while
-  // its interval clears zero, so a week that stops showing an edge takes the
-  // claim off the cover without anyone having to remember to.
-  const lead =
-    replay && replay.lo > 0 && (!season || replay.season === season) ? replay : null;
+  const year = today?.season ?? season;
+  // The lead line is quoted while elite is ahead of its price. Whether that
+  // lead is more than luck is a separate question, answered underneath it in
+  // words, from the interval, so the sentence cannot claim more than the
+  // picks show.
+  const lead = today?.elite && today.elite.hit > today.elite.needed ? today.elite : null;
   return (
     <div className="ld-leaf ld-leaf-left">
       <header className="ld-leaf-head">
         <h2>Posted account</h2>
         <p>
-          {season
-            ? `Every pick published in the ${season} season, by confidence tier`
+          {year
+            ? `Every pick of the ${year} season, by confidence tier`
             : "Every graded pick, by confidence tier"}
         </p>
       </header>
@@ -204,9 +207,14 @@ function PostedAccount({
           <p className="ld-claim-note">
             {lead.picks.toLocaleString()} picks, weeks {lead.week_first} to{" "}
             {lead.week_last}, tiered by the rule the board uses today, each
-            week decided only from what was known before it. The table below
-            is the same season as it was published, under the rules of the
-            day.
+            week ranked only on what was known before it.
+            {lead.lo <= 0 && (
+              <>
+                {" "}That is {((lead.hit - lead.needed) * 100).toFixed(1)}{" "}
+                points clear of the price, and on this many picks a lead that
+                size could still be luck.
+              </>
+            )}
           </p>
         </div>
       )}
@@ -219,7 +227,7 @@ function PostedAccount({
         </p>
       ) : (
         <div className="ld-scroll">
-          <table className="ld-ledger" aria-busy={tiers === null}>
+          <table className="ld-ledger" aria-busy={tiers === null && today === null}>
             <caption className="sr-only">
               Graded picks by tier: how many, the share that won, the share
               that had to win at the prices offered, the difference in
@@ -236,7 +244,7 @@ function PostedAccount({
               </tr>
             </thead>
             <tbody>
-              {tiers === null &&
+              {tiers === null && today === null &&
                 TIER_ORDER.map((t) => (
                   <tr key={t} className="is-pending">
                     <th scope="row"><Stamp tier={t} /></th>
@@ -306,16 +314,15 @@ function PostedAccount({
           </div>
         </dl>
       )}
-      {season && all && all.picks > sum.picks && (
+      {!failed && rows.length > 0 && (
         <p className="ld-leaf-note">
-          This is the {season} season alone, published before kickoff and
-          graded after the games. Earlier seasons were rebuilt after the fact,
-          using models that had only seen earlier games. Counting those as
-          well: <b>{all.picks.toLocaleString()}</b> picks,{" "}
-          <b>{pct(all.hit)}</b> won against <b>{pct(all.needed)}</b> needed, a
-          difference of{" "}
-          <Acct value={diff(all.hit, all.needed)} scale={100} plus /> points.
-          Each season is set out separately{" "}
+          {today
+            ? "Every pick here was published before kickoff, at the line and "
+              + "price shown at the time. The tier is the one today's rule "
+              + "gives it. "
+            : "Every pick here was published before kickoff and graded after "
+              + "the games. "}
+          Earlier seasons, rebuilt after the fact, are{" "}
           <Link to="/record">on the record</Link>.
         </p>
       )}
@@ -463,9 +470,8 @@ const STRUCK: Array<[string, string]> = [
 export default function Landing() {
   const [tiers, setTiers] = useState<TierRecord[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [all, setAll] = useState<Totals | null>(null);
   const [season, setSeason] = useState<number | null>(null);
-  const [replay, setReplay] = useState<ReplayRecord | null>(null);
+  const [today, setToday] = useState<TodayTiers | null>(null);
   const [seasons, setSeasons] = useState<SeasonRecord[] | null>(null);
   const [summary, setSummary] = useState<EdgesSummary | null>(null);
   const [edges, setEdges] = useState<PropEdge[] | null>(null);
@@ -486,11 +492,8 @@ export default function Landing() {
       })
       .then((r) => r && !dead && setTiers(r.tiers))
       .catch(() => !dead && setFailed(true));
-    fetchTierRecord()
-      .then((r) => !dead && setAll(total(r.tiers)))
-      .catch(() => undefined);
-    fetchReplay()
-      .then((r) => !dead && setReplay(r.tiers.find((t) => t.tier === "elite") ?? null))
+    fetchTodayTiers()
+      .then((r) => !dead && setToday(r))
       .catch(() => undefined);
     fetchSeasonRecord("all", "elite")
       .then((r) => !dead && setSeasons(r.seasons))
@@ -594,8 +597,7 @@ export default function Landing() {
         <PostedAccount
           tiers={tiers}
           season={season}
-          all={all}
-          replay={replay}
+          today={today}
           failed={failed}
         />
         <OpenEntries edges={edges} pencil={pencil} summary={summary} />

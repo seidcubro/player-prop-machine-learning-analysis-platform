@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { fetchTierRecord, type TierRecord } from "../api";
+import { fetchTierRecord, fetchTodayTiers, type TierRecord } from "../api";
 import { Acct } from "./Acct";
 
 const LABEL: Record<string, string> = {
@@ -58,7 +58,12 @@ export default function TierLedger({
 
   useEffect(() => {
     let dead = false;
-    fetchTierRecord()
+    // Each tier's account under the rule that is assigning the badges on
+    // this board. The labels as published are the fallback, for a database
+    // where that has not been stored yet.
+    fetchTodayTiers()
+      .catch(() => null)
+      .then((t) => (t ? { tiers: t.rows } : fetchTierRecord()))
       .then((r) => !dead && setTiers(r.tiers))
       .catch(() => !dead && setTiers([]));
     return () => {
